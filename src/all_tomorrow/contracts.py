@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 
@@ -235,3 +236,69 @@ class Tool:
     permissions: frozenset[str] = frozenset()
     status: str = "unknown"
     latency_ms: int | None = None
+
+
+class WorkerStatus(StrEnum):
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+    TIMEOUT = "TIMEOUT"
+    INVALID_OUTPUT = "INVALID_OUTPUT"
+    EXECUTABLE_NOT_FOUND = "EXECUTABLE_NOT_FOUND"
+    TRAVERSAL_BLOCKED = "TRAVERSAL_BLOCKED"
+    EMPTY_OUTPUT = "EMPTY_OUTPUT"
+    OUTPUT_TOO_LARGE = "OUTPUT_TOO_LARGE"
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerRequest:
+    request_id: str
+    trace_id: str
+    project_id: str | None
+    capabilities: frozenset[str]
+    payload: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        require_text(self.request_id, "worker_request.request_id")
+        require_text(self.trace_id, "worker_request.trace_id")
+        if not isinstance(self.capabilities, frozenset):
+            raise ContractError("worker_request.capabilities must be a frozenset")
+        if not isinstance(self.payload, dict):
+            raise ContractError("worker_request.payload must be a dict")
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerResult:
+    request_id: str
+    trace_id: str
+    status: WorkerStatus
+    payload: dict[str, Any] | None = None
+    duration_ms: int = 0
+    error: str | None = None
+
+    def __post_init__(self) -> None:
+        require_text(self.request_id, "worker_result.request_id")
+        require_text(self.trace_id, "worker_result.trace_id")
+        if self.status is WorkerStatus.FAILED and not self.error:
+            raise ContractError("FAILED result requires error")
+        if self.status in (WorkerStatus.TIMEOUT, WorkerStatus.EXECUTABLE_NOT_FOUND, WorkerStatus.TRAVERSAL_BLOCKED, WorkerStatus.EMPTY_OUTPUT, WorkerStatus.OUTPUT_TOO_LARGE) and not self.error:
+            raise ContractError(f"{self.status.value} result requires error")
+        if self.duration_ms < 0:
+            raise ContractError("duration_ms must be >= 0")
+
+
+class WorkerAdapter(Protocol):
+    """Async protocol for worker adapters that execute external processes."""
+
+    @property
+    def worker_id(self) -> str:
+        ...
+
+    @property
+    def capabilities(self) -> frozenset[str]:
+        ...
+
+    async def execute(self, request: WorkerRequest) -> WorkerResult:
+        ...
+
+    async def is_available(self) -> bool:
+        ...
