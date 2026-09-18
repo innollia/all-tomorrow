@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from enum import StrEnum
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from all_tomorrow.contracts import (
@@ -17,6 +16,15 @@ from all_tomorrow.contracts import (
     UserQuestion,
     new_id,
 )
+from all_tomorrow.storage.run_store import (
+    InMemoryRunStateStore,
+    QuestionRecord,
+    RunConflictError,
+    RunRecord,
+    RunStateStore,
+    RunStatus,
+    hash_resume_token,
+)
 
 
 class PipelineNode(Protocol):
@@ -28,15 +36,6 @@ class PipelineNode(Protocol):
     ) -> NodeResult: ...
 
 
-class RunStatus(StrEnum):
-    RUNNING = "RUNNING"
-    WAITING = "WAITING"
-    NEED_USER = "NEED_USER"
-    SUCCEEDED = "SUCCEEDED"
-    FAILED = "FAILED"
-    CANCELLED = "CANCELLED"
-
-
 @dataclass(frozen=True, slots=True)
 class RunResult:
     run_id: str
@@ -45,19 +44,6 @@ class RunResult:
     pipeline_version: int
     status: RunStatus
     outputs: dict[str, Any]
-    question: UserQuestion | None = None
-    error: str | None = None
-
-
-@dataclass(slots=True)
-class _RunState:
-    run_id: str
-    spec: PipelineSpec
-    context: ExecutionContext
-    current_step_id: str
-    outputs: dict[str, Any] = field(default_factory=dict)
-    attempts: dict[str, int] = field(default_factory=dict)
-    status: RunStatus = RunStatus.RUNNING
     question: UserQuestion | None = None
     error: str | None = None
 
@@ -75,10 +61,16 @@ _INLINE_REFERENCE = re.compile(r"\$\{([^}]+)}")
 
 
 class PipelineRuntime:
-    def __init__(self, *, event_sink: InMemoryEventSink | None = None) -> None:
+    """Stateless pipeline execution runtime backed by a RunStateStore."""
+
+    def __init__(
+        self,
+        *,
+        store: RunStateStore | None = None,
+        event_sink: InMemoryEventSink | None = None,
+    ) -> None:
         self._nodes: dict[str, PipelineNode] = {}
-        self._runs: dict[str, _RunState] = {}
-        self._resume_tokens: dict[str, str] = {}
+        self.store: RunStateStore = store or InMemoryRunStateStore()
         self.event_sink = event_sink or InMemoryEventSink()
 
     def register(self, node_type: str, node: PipelineNode) -> None:
@@ -91,45 +83,45 @@ class PipelineRuntime:
     async def start(self, spec: PipelineSpec, context: ExecutionContext) -> RunResult:
         if spec.status != "active":
             raise ContractError(f"pipeline must be active to run: {spec.identity}")
-        run = _RunState(
+        run = RunRecord(
             run_id=new_id("run"),
             spec=spec,
             context=context,
             current_step_id=spec.steps[0].id,
+            revision=0,
+            status=RunStatus.RUNNING,
         )
-        self._runs[run.run_id] = run
+        await self.store.create_run(run)
         await self._event(run, "run.started", Actor.ORCHESTRATOR, {"pipeline": spec.identity})
         return await self._drive(run)
 
     async def resume(self, resume_token: str, answer: dict[str, Any]) -> RunResult:
-        run_id = self._resume_tokens.pop(resume_token, None)
-        if run_id is None:
+        if not isinstance(resume_token, str) or not resume_token.strip():
             raise ContractError("invalid or already-used resume token")
-        run = self._runs[run_id]
-        if run.status is not RunStatus.NEED_USER or run.question is None:
-            raise ContractError("run is not waiting for user input")
-        missing = [field for field in run.question.required_fields if field not in answer]
-        if missing:
-            self._resume_tokens[resume_token] = run_id
-            raise ContractError(f"missing required answer fields: {', '.join(missing)}")
-        answers = run.context.variables.setdefault("user_answers", {})
-        answers[run.current_step_id] = dict(answer)
-        await self._event(run, "run.user_answered", Actor.USER, {"step_id": run.current_step_id})
-        run.status = RunStatus.RUNNING
-        run.question = None
-        return await self._drive(run)
+        token_hash = hash_resume_token(resume_token)
+
+        resumed_run = await self.store.resume_run(token_hash, answer)
+        await self._event(
+            resumed_run,
+            "run.user_answered",
+            Actor.USER,
+            {"step_id": resumed_run.current_step_id},
+        )
+        return await self._drive(resumed_run)
 
     async def cancel(self, run_id: str) -> RunResult:
-        run = self._runs.get(run_id)
+        run = await self.store.get_run(run_id)
         if run is None:
             raise ContractError(f"unknown run: {run_id}")
         if run.status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}:
             raise ContractError(f"run is already terminal: {run.status}")
         run.status = RunStatus.CANCELLED
+        await self.store.cancel_pending_questions(run_id)
+        run.revision = await self.store.update_run(run, expected_revision=run.revision)
         await self._event(run, "run.cancelled", Actor.USER, {"step_id": run.current_step_id})
         return self._result(run)
 
-    async def _drive(self, run: _RunState) -> RunResult:
+    async def _drive(self, run: RunRecord) -> RunResult:
         step_by_id = {step.id: step for step in run.spec.steps}
         ordered_ids = [step.id for step in run.spec.steps]
         visited = 0
@@ -150,6 +142,7 @@ class PipelineRuntime:
                 if next_id is None:
                     return await self._succeed(run)
                 run.current_step_id = next_id
+                run.revision = await self.store.update_run(run, expected_revision=run.revision)
                 continue
 
             node = self._nodes.get(step.type)
@@ -180,23 +173,56 @@ class PipelineRuntime:
                 attempts = run.attempts.get(step.id, 0) + 1
                 run.attempts[step.id] = attempts
                 if attempts <= step.max_retries:
-                    await self._event(run, "step.retrying", Actor.ORCHESTRATOR, {"step_id": step.id, "attempt": attempts})
+                    run.revision = await self.store.update_run(run, expected_revision=run.revision)
+                    await self._event(
+                        run, "step.retrying", Actor.ORCHESTRATOR, {"step_id": step.id, "attempt": attempts}
+                    )
                     continue
                 return await self._fail(run, result.error or f"step {step.id} exhausted retries")
 
             if result.status is NodeStatus.NEED_USER:
                 token = new_id("resume")
+                token_hash = hash_resume_token(token)
                 run.status = RunStatus.NEED_USER
-                run.question = result.user_question.with_resume_token(token)  # type: ignore[union-attr]
-                self._resume_tokens[token] = run.run_id
-                await self._event(run, "run.needs_user", Actor.ORCHESTRATOR, {"step_id": step.id, "reason": run.question.reason})
-                return self._result(run)
+                # Persist question stripped of plaintext token
+                run.question = result.user_question.with_resume_token(None)  # type: ignore[union-attr]
+                q_record = QuestionRecord(
+                    question_id=new_id("question"),
+                    run_id=run.run_id,
+                    blocked_step=step.id,
+                    question=result.user_question.question,  # type: ignore[union-attr]
+                    reason=result.user_question.reason,  # type: ignore[union-attr]
+                    required_fields=result.user_question.required_fields,  # type: ignore[union-attr]
+                    resume_token_hash=token_hash,
+                    status="pending",
+                )
+                await self.store.create_question(q_record)
+                run.revision = await self.store.update_run(run, expected_revision=run.revision)
+                await self._event(
+                    run,
+                    "run.needs_user",
+                    Actor.ORCHESTRATOR,
+                    {"step_id": step.id, "reason": run.question.reason},
+                )
+                # Plaintext token returned ONLY to the caller via RunResult
+                return RunResult(
+                    run_id=run.run_id,
+                    trace_id=run.context.trace_id,
+                    pipeline_id=run.spec.pipeline_id,
+                    pipeline_version=run.spec.version,
+                    status=run.status,
+                    outputs=dict(run.outputs),
+                    question=result.user_question.with_resume_token(token),  # type: ignore[union-attr]
+                    error=run.error,
+                )
 
             if result.status is NodeStatus.WAITING:
                 run.status = RunStatus.WAITING
+                run.revision = await self.store.update_run(run, expected_revision=run.revision)
                 return self._result(run)
             if result.status is NodeStatus.CANCELLED:
                 run.status = RunStatus.CANCELLED
+                run.revision = await self.store.update_run(run, expected_revision=run.revision)
                 return self._result(run)
             if result.status is NodeStatus.FAILED:
                 return await self._fail(run, result.error or f"step {step.id} failed")
@@ -213,10 +239,11 @@ class PipelineRuntime:
             if target not in step_by_id:
                 return await self._fail(run, f"step {step.id} selected unknown target {target!r}")
             run.current_step_id = target
+            run.revision = await self.store.update_run(run, expected_revision=run.revision)
 
         return self._result(run)
 
-    def _resolve(self, value: Any, run: _RunState) -> Any:
+    def _resolve(self, value: Any, run: RunRecord) -> Any:
         if isinstance(value, dict):
             return {key: self._resolve(item, run) for key, item in value.items()}
         if isinstance(value, list):
@@ -228,7 +255,7 @@ class PipelineRuntime:
             return self._lookup(full.group(1), run)
         return _INLINE_REFERENCE.sub(lambda match: str(self._lookup(match.group(1), run)), value)
 
-    def _lookup(self, path: str, run: _RunState) -> Any:
+    def _lookup(self, path: str, run: RunRecord) -> Any:
         root: dict[str, Any] = {
             "request": run.context.request,
             "context": run.context,
@@ -246,7 +273,7 @@ class PipelineRuntime:
                 raise ContractError(f"unresolved pipeline reference: ${{{path}}}")
         return current
 
-    def _condition_matches(self, condition: dict[str, Any] | None, run: _RunState) -> bool:
+    def _condition_matches(self, condition: dict[str, Any] | None, run: RunRecord) -> bool:
         if condition is None:
             return True
         if not isinstance(condition, dict) or set(condition) != {"ref", "equals"}:
@@ -259,18 +286,20 @@ class PipelineRuntime:
         index = ordered_ids.index(step.id)
         return ordered_ids[index + 1] if index + 1 < len(ordered_ids) else None
 
-    async def _succeed(self, run: _RunState) -> RunResult:
+    async def _succeed(self, run: RunRecord) -> RunResult:
         run.status = RunStatus.SUCCEEDED
+        run.revision = await self.store.update_run(run, expected_revision=run.revision)
         await self._event(run, "run.succeeded", Actor.ORCHESTRATOR, {})
         return self._result(run)
 
-    async def _fail(self, run: _RunState, error: str) -> RunResult:
+    async def _fail(self, run: RunRecord, error: str) -> RunResult:
         run.status = RunStatus.FAILED
         run.error = error
+        run.revision = await self.store.update_run(run, expected_revision=run.revision)
         await self._event(run, "run.failed", Actor.ORCHESTRATOR, {"error": error})
         return self._result(run)
 
-    def _result(self, run: _RunState) -> RunResult:
+    def _result(self, run: RunRecord) -> RunResult:
         return RunResult(
             run_id=run.run_id,
             trace_id=run.context.trace_id,
@@ -284,7 +313,7 @@ class PipelineRuntime:
 
     async def _event(
         self,
-        run: _RunState,
+        run: RunRecord,
         event_type: str,
         actor: Actor,
         metadata: dict[str, Any],

@@ -79,7 +79,7 @@ class UserQuestion:
         for index, item in enumerate(self.required_fields):
             require_text(item, f"user_question.required_fields[{index}]")
 
-    def with_resume_token(self, token: str) -> UserQuestion:
+    def with_resume_token(self, token: str | None = None) -> UserQuestion:
         return UserQuestion(
             question=self.question,
             reason=self.reason,

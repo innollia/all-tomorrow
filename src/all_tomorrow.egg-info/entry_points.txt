@@ -1,2 +1,0 @@
-[console_scripts]
-all-tomorrow-api = all_tomorrow.web:run
