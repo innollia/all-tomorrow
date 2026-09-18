@@ -1,18 +1,22 @@
 # Worker Adapters
 
-This document describes the worker adapter subsystem for executing external AI coding agents as part of the All Tomorrow control plane.
+This document describes the worker adapter subsystem for executing external AI coding agent CLIs as part of the All Tomorrow control plane.
+
+> [!NOTE]
+> These worker adapters (`AntigravityWorker` and `OpenCodeWorker`) are CLI process adapters executing local binaries. They are **not** the existing Antigravity Manager bridge adapter listed in the roadmap.
 
 ## Overview
 
-Worker adapters provide a standardized `WorkerAdapter` protocol for executing external processes (CLI tools) safely. The design principles are:
+Worker adapters implement the `WorkerAdapter` protocol to invoke external processes safely:
 
-- **Fail closed**: Any error condition results in a structured `WorkerResult` with `WorkerStatus` indicating the failure mode
-- **No shell execution**: Uses `asyncio.create_subprocess_exec` with explicit `argv` only, never `shell=True`
-- **Explicit working directory**: `cwd` must be provided in request payload and validated against configured allowed roots
-- **No credential leakage**: Environment variables, full command lines, and raw stderr are never exposed in public errors
-- **Output limits**: Configurable output size caps prevent memory exhaustion
-- **Timeout enforcement**: Configurable per-worker timeouts with process termination on expiry
-- **Availability gating**: Workers are only registered/advertised when their executable is actually available
+- **Fail closed**: Any error condition results in a structured `WorkerResult` with `WorkerStatus` indicating the failure mode.
+- **No shell execution**: Uses `asyncio.create_subprocess_exec` with explicit `argv` only, never `shell=True`.
+- **Explicit working directory**: `cwd` must be provided in request payload and validated against configured allowed roots (`_resolve_cwd`).
+- **Secret & path sanitization**: Environment secrets (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`) and filesystem home paths (`HOME`, `USERPROFILE`) are redacted from error messages. Empty home variables never corrupt error strings.
+- **Stderr secrecy**: Subprocess stderr output is sanitized to prevent credential leakage.
+- **Combined output limits**: Configurable byte limit accounts for `len(stdout) + len(stderr)` to prevent memory exhaustion.
+- **Timeout enforcement & reaping**: Processes that exceed timeout are killed (`proc.kill()`) and reaped (`await proc.wait()`).
+- **Availability gating**: Workers check executable availability via `shutil.which` and `PATHEXT` before registration, and map missing executables to `WorkerStatus.EXECUTABLE_NOT_FOUND`.
 
 ## Contract Types
 
@@ -21,11 +25,11 @@ Worker adapters provide a standardized `WorkerAdapter` protocol for executing ex
 ```python
 @dataclass(frozen=True, slots=True)
 class WorkerRequest:
-    request_id: str          # Unique request identifier
-    trace_id: str            # Distributed trace identifier
-    project_id: str | None   # Optional project context
+    request_id: str               # Unique request identifier
+    trace_id: str                 # Distributed trace identifier
+    project_id: str | None        # Optional project context
     capabilities: frozenset[str]  # Required capabilities for this request
-    payload: dict[str, Any]  # Arbitrary input data; must include "cwd"
+    payload: dict[str, Any]       # Input data; must include "cwd"
 ```
 
 ### WorkerResult
@@ -55,56 +59,84 @@ class WorkerStatus(StrEnum):
     OUTPUT_TOO_LARGE = "OUTPUT_TOO_LARGE"
 ```
 
+---
+
 ## AntigravityWorker
 
-Executes the Antigravity CLI via subprocess.
+Executes the Google Antigravity CLI (`agy.exe` on Windows, `agy` on Unix) via subprocess.
 
 ### Configuration
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `argv` | `list[str]` | Required | Base command (e.g., `["antigravity"]`) |
+| `argv` | `list[str] \| None` | `["agy.exe"]` (Windows) / `["agy"]` (Unix) | Base executable command |
 | `allowed_roots` | `tuple[str, ...]` | Required | Filesystem roots that `cwd` may resolve within |
-| `model` | `str` | `"opus"` | Model identifier passed via `--model` |
-| `effort` | `str` | `"high"` | Effort mode passed via `--effort` |
-| `timeout_seconds` | `float` | `120.0` | Process timeout |
-| `output_limit_bytes` | `int` | `1_048_576` | Max stdout bytes (1 MiB) |
-| `env` | `dict[str, str] | None` | `None` | Additional environment variables |
+| `mode` | `str` | `"accept-edits"` | Agent execution mode (`accept-edits`, `plan`) |
+| `dangerously_skip_permissions` | `bool` | `False` | Auto-approve tool permission requests (`--dangerously-skip-permissions`) |
+| `effort` | `str` | `"high"` | Reasoning effort (`low`, `medium`, `high`) |
+| `model` | `str \| None` | `None` | Optional model override passed via `--model` |
+| `output_format` | `str` | `"json"` | Output format passed via `--output-format` (`json`, `text`) |
+| `timeout_seconds` | `float` | `120.0` | Process timeout in seconds |
+| `output_limit_bytes` | `int` | `1_048_576` | Max combined stdout + stderr bytes (1 MiB) |
+| `env` | `dict[str, str] \| None` | `None` | Additional environment variables |
 
-### Invocation
+### Invocation and Prompt Protocol
 
-The worker constructs argv as:
+Antigravity operates in non-interactive print mode with a detailed plain-text prompt:
 
 ```python
 argv = [
     *base_argv,
-    "--model", model,
-    "--effort", effort,
-    "--json",
+    "--mode", mode,                              # default: "accept-edits"
+    # "--dangerously-skip-permissions",          # if dangerously_skip_permissions=True
+    "--effort", effort,                          # default: "high"
+    # "--model", model,                          # only if explicitly set
+    "--output-format", output_format,            # default: "json"
+    "--print", prompt,                           # plain-text task prompt
 ]
 ```
 
-Input is passed via stdin as JSON. Expected stdout is a JSON object.
+The prompt preserves `request_id`, `trace_id`, `project_id`, `capabilities`, `task`/`instructions`, `constraints`, `acceptance_criteria`, and `expected_result_format`. Stdin is set to `DEVNULL`.
+
+### Output Handling
+
+When `--output-format json` is used, the CLI returns a JSON envelope:
+
+```json
+{
+  "conversation_id": "...",
+  "status": "SUCCESS",
+  "response": "...",
+  "duration_seconds": 2.5,
+  "usage": { ... }
+}
+```
+
+The worker parses this envelope directly into `result.payload`. If textual output mode is used or the output is text, it returns `payload={"output": stdout_str, "text": stdout_str}`.
 
 ### Capabilities
 
 `frozenset({"coding", "repo_edit", "analysis"})`
 
+---
+
 ## OpenCodeWorker
 
-Executes the OpenCode CLI (`npx opencode-ai run`) via subprocess.
+Executes OpenCode CLI (`npx.cmd -y opencode-ai run` on Windows, `npx -y opencode-ai run` on Unix) via subprocess.
 
 ### Configuration
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `argv_prefix` | `list[str] | None` | Platform default | Base command prefix. Windows: `["npx.cmd", "-y", "opencode-ai", "run"]`, Unix: `["npx", "-y", "opencode-ai", "run"]` |
+| `argv_prefix` | `list[str] \| None` | Platform default (`npx.cmd`/`npx -y opencode-ai run`) | Base command prefix |
 | `allowed_roots` | `tuple[str, ...]` | Required | Filesystem roots that `cwd` may resolve within |
-| `model` | `str` | `"default"` | Model identifier passed via `--model` |
-| `agent` | `str` | `"default"` | Agent identifier passed via `--agent` |
+| `model` | `str \| None` | `None` | Model override (`provider/model`). Defaults to OpenCode configured default |
+| `agent` | `str \| None` | `None` | Agent override. Defaults to OpenCode configured default |
+| `format` | `str` | `"json"` | Event format (`json`, `default`) |
+| `auto` | `bool` | `False` | Auto-approve permissions (`--auto`) |
 | `timeout_seconds` | `float` | `180.0` | Process timeout |
-| `output_limit_bytes` | `int` | `1_048_576` | Max stdout bytes (1 MiB) |
-| `env` | `dict[str, str] | None` | `None` | Additional environment variables |
+| `output_limit_bytes` | `int` | `1_048_576` | Max combined stdout + stderr bytes |
+| `env` | `dict[str, str] \| None` | `None` | Additional environment variables |
 
 ### Invocation
 
@@ -113,23 +145,26 @@ The worker constructs argv as:
 ```python
 argv = [
     *argv_prefix,
-    "--model", model,
-    "--agent", agent,
+    "--format", format,
+    # "--model", model,    # only if explicitly specified
+    # "--agent", agent,    # only if explicitly specified
+    # "--auto",             # only if auto=True
+    prompt,                 # positional message argument
 ]
 ```
 
-**Important**: `--auto` is NOT enabled by default. Credentials are NOT read from environment or config files.
-
-Input is passed via stdin as JSON. Expected stdout is a JSON object.
+Stdin is set to `DEVNULL`.
 
 ### Capabilities
 
 `frozenset({"coding", "repo_edit", "analysis", "terminal"})`
 
+---
+
 ## Registry Helper
 
 ```python
-def register_available_workers(
+async def register_available_workers(
     registry: CapabilityRegistry,
     *,
     antigravity_argv: list[str] | None = None,
@@ -139,7 +174,7 @@ def register_available_workers(
 ) -> list[str]:
 ```
 
-Checks executable availability via `shutil.which` (or absolute path check) and only registers workers whose executables are found. Returns list of registered worker IDs.
+Checks executable availability via `shutil.which` and only registers workers whose executables are present on PATH. Returns list of registered worker IDs.
 
 ### Example
 
@@ -148,46 +183,23 @@ from all_tomorrow.adapters import register_available_workers
 from all_tomorrow.registry import CapabilityRegistry
 
 registry = CapabilityRegistry()
-registered = register_available_workers(
+registered = await register_available_workers(
     registry,
-    antigravity_argv=["antigravity"],
-    opencode_argv_prefix=["npx", "-y", "opencode-ai", "run"],
+    antigravity_argv=["agy.exe"],
+    opencode_argv_prefix=["npx.cmd", "-y", "opencode-ai", "run"],
     allowed_roots=("/workspace", "/projects"),
     timeout_seconds=60.0,
 )
-# registered contains only workers with available executables
+# registered contains worker IDs that are actually available
 ```
+
+---
 
 ## Security Considerations
 
-1. **No shell=True**: Both workers use `asyncio.create_subprocess_exec` with explicit argv arrays
-2. **Path traversal prevention**: `cwd` is resolved and checked against `allowed_roots` using `Path.relative_to()`
-3. **Error sanitization**: All error messages passed through `_sanitize_error()` which redacts:
-   - Home directory paths (`HOME`, `USERPROFILE`)
-   - Environment variables containing KEY, TOKEN, SECRET, PASSWORD
-4. **No credential exposure**: Workers do not read `.env` files, credential helpers, or config files
-5. **Output limits**: Prevents memory exhaustion from runaway processes
-6. **Process isolation**: stdin/stdout/stderr pipes only; no terminal allocation
-
-## Testing
-
-Tests use `FakeProcess` to simulate subprocess behavior without calling real executables or network. See `tests/test_workers.py` for comprehensive coverage including:
-
-- Successful execution with JSON output
-- Timeout handling with process kill
-- Non-zero exit codes
-- Empty output detection
-- Output size limit enforcement
-- Invalid JSON output handling
-- Path traversal blocking
-- Missing `cwd` validation
-- Executable availability checks
-- Default argv prefix on Windows vs Unix
-- Registry helper availability gating
-- Error message sanitization
-
-Run tests with:
-
-```bash
-pytest tests/test_workers.py -v
-```
+1. **No `shell=True`**: Both workers invoke `asyncio.create_subprocess_exec` directly.
+2. **Path traversal prevention**: Working directory is strictly validated against `allowed_roots` using resolved paths.
+3. **Error & stderr sanitization**: Errors and stderr output pass through `_sanitize_error()`, which redacts `HOME`, `USERPROFILE`, and sensitive environment variables (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`). Unset home variables never corrupt error messages.
+4. **Combined output limit**: Limits account for `len(stdout) + len(stderr)` preventing memory leaks.
+5. **Process termination & reaping**: On timeout, processes are killed (`kill()`) and waited on (`wait()`) to avoid orphaned processes.
+6. **Executable not found**: Missing binaries return `WorkerStatus.EXECUTABLE_NOT_FOUND` with sanitized descriptions.

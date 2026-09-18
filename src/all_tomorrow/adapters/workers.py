@@ -4,7 +4,6 @@ import asyncio
 import json
 import os
 import shutil
-import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -40,46 +39,137 @@ def _resolve_cwd(cwd: str | None, allowed_roots: tuple[str, ...]) -> Path:
     raise WorkerError(f"Working directory {resolved} is outside allowed roots")
 
 
-def _sanitize_error(error: Exception, *, include_traceback: bool = False) -> str:
-    """Sanitize error messages to avoid leaking sensitive data."""
+def _sanitize_error(error: Exception | str, *, include_traceback: bool = False) -> str:
+    """Sanitize error messages to avoid leaking sensitive data or empty strings."""
     msg = str(error)
-    redacted = msg.replace(os.environ.get("HOME", ""), "<HOME>")
-    redacted = redacted.replace(os.environ.get("USERPROFILE", ""), "<USERPROFILE>")
+    home = os.environ.get("HOME")
+    if home:
+        msg = msg.replace(home, "<HOME>")
+    userprofile = os.environ.get("USERPROFILE")
+    if userprofile:
+        msg = msg.replace(userprofile, "<USERPROFILE>")
     for key, value in os.environ.items():
-        if "KEY" in key.upper() or "TOKEN" in key.upper() or "SECRET" in key.upper() or "PASSWORD" in key.upper():
-            if value and value in redacted:
-                redacted = redacted.replace(value, "<REDACTED>")
-    return redacted
+        if any(s in key.upper() for s in ("KEY", "TOKEN", "SECRET", "PASSWORD")):
+            if value and value in msg:
+                msg = msg.replace(value, "<REDACTED>")
+    return msg
 
 
 def _check_executable_available(argv: list[str]) -> bool:
     """Check if the executable in argv[0] is available on PATH or as absolute path."""
+    if not argv:
+        return False
     exe = argv[0]
     if os.path.isabs(exe):
-        return os.path.isfile(exe) and os.access(exe, os.X_OK)
-    return shutil.which(exe) is not None
+        return os.path.isfile(exe) and (os.access(exe, os.X_OK) or os.name == "nt")
+    if shutil.which(exe) is not None:
+        return True
+    if os.name == "nt" and "." not in Path(exe).name:
+        pathext = os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(";")
+        for ext in pathext:
+            candidate = f"{exe}{ext}"
+            if shutil.which(candidate) is not None:
+                return True
+    return False
 
 
-async def _run_subprocess(
-    argv: list[str],
-    cwd: Path,
+def _build_worker_prompt(request: WorkerRequest) -> str:
+    """Build a structured plain-text prompt from WorkerRequest preserving all context."""
+    sections = [
+        f"# Task Request [{request.request_id}]",
+        f"- Trace ID: {request.trace_id}",
+    ]
+    if request.project_id:
+        sections.append(f"- Project ID: {request.project_id}")
+    if request.capabilities:
+        sections.append(f"- Capabilities: {', '.join(sorted(request.capabilities))}")
+
+    payload = request.payload
+
+    task = (
+        payload.get("task")
+        or payload.get("instructions")
+        or payload.get("prompt")
+        or payload.get("message")
+    )
+    if task:
+        sections.append(f"\n## Instructions\n{task}")
+    else:
+        extra = {
+            k: v
+            for k, v in payload.items()
+            if k not in ("cwd", "constraints", "acceptance_criteria", "expected_result_format", "result_format")
+        }
+        if extra:
+            sections.append(f"\n## Instructions\n{json.dumps(extra, indent=2)}")
+        else:
+            sections.append("\n## Instructions\nExecute the requested task.")
+
+    constraints = payload.get("constraints")
+    if constraints is not None:
+        if isinstance(constraints, (list, tuple)):
+            c_text = "\n".join(f"- {c}" for c in constraints)
+        elif isinstance(constraints, dict):
+            c_text = json.dumps(constraints, indent=2)
+        else:
+            c_text = str(constraints)
+        sections.append(f"\n## Constraints\n{c_text}")
+
+    acceptance_criteria = payload.get("acceptance_criteria")
+    if acceptance_criteria is not None:
+        if isinstance(acceptance_criteria, (list, tuple)):
+            ac_text = "\n".join(f"- {ac}" for ac in acceptance_criteria)
+        elif isinstance(acceptance_criteria, dict):
+            ac_text = json.dumps(acceptance_criteria, indent=2)
+        else:
+            ac_text = str(acceptance_criteria)
+        sections.append(f"\n## Acceptance Criteria\n{ac_text}")
+
+    expected_format = payload.get("expected_result_format") or payload.get("result_format")
+    if expected_format is not None:
+        if isinstance(expected_format, dict):
+            fmt_text = json.dumps(expected_format, indent=2)
+        else:
+            fmt_text = str(expected_format)
+        sections.append(f"\n## Expected Result Format\n{fmt_text}")
+
+    return "\n".join(sections)
+
+
+async def _run_process_safe(
     *,
+    cmd: list[str],
+    cwd: Path,
+    env: dict[str, str],
     timeout_seconds: float,
     output_limit_bytes: int,
-    env: dict[str, str] | None = None,
-) -> tuple[int, str, str]:
-    """Run subprocess with timeout and output limits. Returns (exit_code, stdout, stderr)."""
-    if not _check_executable_available(argv):
-        raise WorkerError(f"Executable not found: {argv[0]}")
-
-    proc = await asyncio.create_subprocess_exec(
-        *argv,
-        cwd=cwd,
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-    )
+    request: WorkerRequest,
+    worker_name: str,
+    start_time: float,
+) -> tuple[str, int] | WorkerResult:
+    """
+    Execute a subprocess with timeout, combined output limit, process reap, and error redaction.
+    Returns (stdout_str, duration_ms) on process success (exit code 0 and non-empty output),
+    or WorkerResult on any failure.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=cwd,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, **env},
+        )
+    except FileNotFoundError:
+        duration_ms = int((time.perf_counter() - start_time) * 1000)
+        return WorkerResult(
+            request_id=request.request_id,
+            trace_id=request.trace_id,
+            status=WorkerStatus.EXECUTABLE_NOT_FOUND,
+            duration_ms=duration_ms,
+            error=_sanitize_error(f"Executable not found: {cmd[0]}"),
+        )
 
     try:
         stdout, stderr = await asyncio.wait_for(
@@ -90,25 +180,56 @@ async def _run_subprocess(
         try:
             proc.kill()
             await proc.wait()
-        except ProcessLookupError:
+        except (ProcessLookupError, OSError):
             pass
-        raise WorkerError(f"Process timed out after {timeout_seconds}s") from None
+        duration_ms = int((time.perf_counter() - start_time) * 1000)
+        return WorkerResult(
+            request_id=request.request_id,
+            trace_id=request.trace_id,
+            status=WorkerStatus.TIMEOUT,
+            duration_ms=duration_ms,
+            error=f"{worker_name} process timed out after {timeout_seconds}s",
+        )
 
     stdout_str = stdout.decode("utf-8", errors="replace")
     stderr_str = stderr.decode("utf-8", errors="replace")
+    duration_ms = int((time.perf_counter() - start_time) * 1000)
 
-    if len(stdout_str.encode("utf-8")) > output_limit_bytes:
-        raise WorkerError(f"Output exceeds limit of {output_limit_bytes} bytes")
+    # Combined output limit accounts for stdout plus stderr
+    combined_bytes = len(stdout) + len(stderr)
+    if combined_bytes > output_limit_bytes:
+        return WorkerResult(
+            request_id=request.request_id,
+            trace_id=request.trace_id,
+            status=WorkerStatus.OUTPUT_TOO_LARGE,
+            duration_ms=duration_ms,
+            error=f"Output exceeds {output_limit_bytes} bytes",
+        )
 
+    # Non-zero exit code: redact stderr secrets
     if proc.returncode != 0:
-        raise WorkerError(
-            f"Process exited with code {proc.returncode}",
+        err_msg = f"Exit code {proc.returncode}"
+        if stderr_str.strip():
+            sanitized_stderr = _sanitize_error(stderr_str.strip())
+            err_msg = f"{err_msg}: {sanitized_stderr}"
+        return WorkerResult(
+            request_id=request.request_id,
+            trace_id=request.trace_id,
+            status=WorkerStatus.FAILED,
+            duration_ms=duration_ms,
+            error=_sanitize_error(err_msg),
         )
 
     if not stdout_str.strip():
-        raise WorkerError("Process produced empty output")
+        return WorkerResult(
+            request_id=request.request_id,
+            trace_id=request.trace_id,
+            status=WorkerStatus.EMPTY_OUTPUT,
+            duration_ms=duration_ms,
+            error=f"{worker_name} produced empty output",
+        )
 
-    return proc.returncode, stdout_str, stderr_str
+    return stdout_str, duration_ms
 
 
 class AntigravityWorker:
@@ -117,20 +238,28 @@ class AntigravityWorker:
     def __init__(
         self,
         *,
-        argv: list[str],
+        argv: list[str] | None = None,
         allowed_roots: tuple[str, ...],
-        model: str = "opus",
+        mode: str = "accept-edits",
+        dangerously_skip_permissions: bool = False,
         effort: str = "high",
+        model: str | None = None,
+        output_format: str = "json",
         timeout_seconds: float = 120.0,
         output_limit_bytes: int = 1024 * 1024,
         env: dict[str, str] | None = None,
     ) -> None:
+        if argv is None:
+            argv = ["agy.exe"] if os.name == "nt" else ["agy"]
         if not argv:
             raise ValueError("argv must not be empty")
         self._argv = list(argv)
         self._allowed_roots = allowed_roots
-        self._model = model
+        self._mode = mode
+        self._dangerously_skip_permissions = dangerously_skip_permissions
         self._effort = effort
+        self._model = model
+        self._output_format = output_format
         self._timeout_seconds = timeout_seconds
         self._output_limit_bytes = output_limit_bytes
         self._env = env or {}
@@ -146,6 +275,22 @@ class AntigravityWorker:
     async def is_available(self) -> bool:
         return _check_executable_available(self._argv)
 
+    def build_argv(self, prompt: str) -> list[str]:
+        """Construct the actual argv command line for Antigravity CLI."""
+        cmd = list(self._argv)
+        if self._mode:
+            cmd.extend(["--mode", self._mode])
+        if self._dangerously_skip_permissions:
+            cmd.append("--dangerously-skip-permissions")
+        if self._effort:
+            cmd.extend(["--effort", self._effort])
+        if self._model:
+            cmd.extend(["--model", self._model])
+        if self._output_format:
+            cmd.extend(["--output-format", self._output_format])
+        cmd.extend(["--print", prompt])
+        return cmd
+
     async def execute(self, request: WorkerRequest) -> WorkerResult:
         start = time.perf_counter()
         try:
@@ -160,90 +305,34 @@ class AntigravityWorker:
                 error=_sanitize_error(e),
             )
 
-        full_argv = [
-            *self._argv,
-            "--model",
-            self._model,
-            "--effort",
-            self._effort,
-            "--json",
-        ]
+        prompt = _build_worker_prompt(request)
+        cmd = self.build_argv(prompt)
 
-        input_data = json.dumps(
-            {
-                "request_id": request.request_id,
-                "trace_id": request.trace_id,
-                "project_id": request.project_id,
-                "capabilities": list(request.capabilities),
-                "payload": request.payload,
-            }
+        res = await _run_process_safe(
+            cmd=cmd,
+            cwd=cwd,
+            env=self._env,
+            timeout_seconds=self._timeout_seconds,
+            output_limit_bytes=self._output_limit_bytes,
+            request=request,
+            worker_name="Antigravity",
+            start_time=start,
         )
 
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *full_argv,
-                cwd=cwd,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, **self._env},
-            )
+        if isinstance(res, WorkerResult):
+            return res
 
+        stdout_str, duration_ms = res
+
+        if self._output_format == "json":
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(input=input_data.encode("utf-8")),
-                    timeout=self._timeout_seconds,
-                )
-            except asyncio.TimeoutError:
-                try:
-                    proc.kill()
-                    await proc.wait()
-                except ProcessLookupError:
-                    pass
-                duration_ms = int((time.perf_counter() - start) * 1000)
-                return WorkerResult(
-                    request_id=request.request_id,
-                    trace_id=request.trace_id,
-                    status=WorkerStatus.TIMEOUT,
-                    duration_ms=duration_ms,
-                    error=f"Antigravity process timed out after {self._timeout_seconds}s",
-                )
-
-            stdout_str = stdout.decode("utf-8", errors="replace")
-            stderr_str = stderr.decode("utf-8", errors="replace")
-            duration_ms = int((time.perf_counter() - start) * 1000)
-
-            if proc.returncode != 0:
-                return WorkerResult(
-                    request_id=request.request_id,
-                    trace_id=request.trace_id,
-                    status=WorkerStatus.FAILED,
-                    duration_ms=duration_ms,
-                    error=_sanitize_error(WorkerError(f"Exit code {proc.returncode}")),
-                )
-
-            if len(stdout_str.encode("utf-8")) > self._output_limit_bytes:
-                return WorkerResult(
-                    request_id=request.request_id,
-                    trace_id=request.trace_id,
-                    status=WorkerStatus.OUTPUT_TOO_LARGE,
-                    duration_ms=duration_ms,
-                    error=f"Output exceeds {self._output_limit_bytes} bytes",
-                )
-
-            if not stdout_str.strip():
-                return WorkerResult(
-                    request_id=request.request_id,
-                    trace_id=request.trace_id,
-                    status=WorkerStatus.EMPTY_OUTPUT,
-                    duration_ms=duration_ms,
-                    error="Antigravity produced empty output",
-                )
-
-            try:
-                payload = json.loads(stdout_str)
-                if not isinstance(payload, dict):
-                    raise ValueError("Output is not a JSON object")
+                parsed = json.loads(stdout_str)
+                if isinstance(parsed, dict):
+                    payload = parsed
+                elif isinstance(parsed, list):
+                    payload = {"items": parsed}
+                else:
+                    payload = {"output": str(parsed), "text": stdout_str}
             except (json.JSONDecodeError, ValueError) as e:
                 return WorkerResult(
                     request_id=request.request_id,
@@ -252,26 +341,16 @@ class AntigravityWorker:
                     duration_ms=duration_ms,
                     error=_sanitize_error(e),
                 )
+        else:
+            payload = {"output": stdout_str, "text": stdout_str, "response": stdout_str}
 
-            return WorkerResult(
-                request_id=request.request_id,
-                trace_id=request.trace_id,
-                status=WorkerStatus.SUCCESS,
-                payload=payload,
-                duration_ms=duration_ms,
-            )
-
-        except WorkerError:
-            raise
-        except Exception as e:
-            duration_ms = int((time.perf_counter() - start) * 1000)
-            return WorkerResult(
-                request_id=request.request_id,
-                trace_id=request.trace_id,
-                status=WorkerStatus.FAILED,
-                duration_ms=duration_ms,
-                error=_sanitize_error(e),
-            )
+        return WorkerResult(
+            request_id=request.request_id,
+            trace_id=request.trace_id,
+            status=WorkerStatus.SUCCESS,
+            payload=payload,
+            duration_ms=duration_ms,
+        )
 
 
 class OpenCodeWorker:
@@ -282,8 +361,10 @@ class OpenCodeWorker:
         *,
         argv_prefix: list[str] | None = None,
         allowed_roots: tuple[str, ...],
-        model: str = "default",
-        agent: str = "default",
+        model: str | None = None,
+        agent: str | None = None,
+        format: str = "json",
+        auto: bool = False,
         timeout_seconds: float = 180.0,
         output_limit_bytes: int = 1024 * 1024,
         env: dict[str, str] | None = None,
@@ -299,6 +380,8 @@ class OpenCodeWorker:
         self._allowed_roots = allowed_roots
         self._model = model
         self._agent = agent
+        self._format = format
+        self._auto = auto
         self._timeout_seconds = timeout_seconds
         self._output_limit_bytes = output_limit_bytes
         self._env = env or {}
@@ -314,6 +397,20 @@ class OpenCodeWorker:
     async def is_available(self) -> bool:
         return _check_executable_available(self._argv_prefix)
 
+    def build_argv(self, prompt: str) -> list[str]:
+        """Construct the actual argv command line for OpenCode CLI."""
+        cmd = list(self._argv_prefix)
+        if self._format:
+            cmd.extend(["--format", self._format])
+        if self._model:
+            cmd.extend(["--model", self._model])
+        if self._agent:
+            cmd.extend(["--agent", self._agent])
+        if self._auto:
+            cmd.append("--auto")
+        cmd.append(prompt)
+        return cmd
+
     async def execute(self, request: WorkerRequest) -> WorkerResult:
         start = time.perf_counter()
         try:
@@ -328,117 +425,65 @@ class OpenCodeWorker:
                 error=_sanitize_error(e),
             )
 
-        full_argv = [
-            *self._argv_prefix,
-            "--model",
-            self._model,
-            "--agent",
-            self._agent,
-        ]
+        prompt = _build_worker_prompt(request)
+        cmd = self.build_argv(prompt)
 
-        input_data = json.dumps(
-            {
-                "request_id": request.request_id,
-                "trace_id": request.trace_id,
-                "project_id": request.project_id,
-                "capabilities": list(request.capabilities),
-                "payload": request.payload,
-            }
+        res = await _run_process_safe(
+            cmd=cmd,
+            cwd=cwd,
+            env=self._env,
+            timeout_seconds=self._timeout_seconds,
+            output_limit_bytes=self._output_limit_bytes,
+            request=request,
+            worker_name="OpenCode",
+            start_time=start,
         )
 
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *full_argv,
-                cwd=cwd,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, **self._env},
-            )
+        if isinstance(res, WorkerResult):
+            return res
 
+        stdout_str, duration_ms = res
+
+        if self._format == "json":
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(input=input_data.encode("utf-8")),
-                    timeout=self._timeout_seconds,
-                )
-            except asyncio.TimeoutError:
-                try:
-                    proc.kill()
-                    await proc.wait()
-                except ProcessLookupError:
-                    pass
-                duration_ms = int((time.perf_counter() - start) * 1000)
-                return WorkerResult(
-                    request_id=request.request_id,
-                    trace_id=request.trace_id,
-                    status=WorkerStatus.TIMEOUT,
-                    duration_ms=duration_ms,
-                    error=f"OpenCode process timed out after {self._timeout_seconds}s",
-                )
+                parsed = json.loads(stdout_str)
+                if isinstance(parsed, dict):
+                    payload = parsed
+                elif isinstance(parsed, list):
+                    payload = {"items": parsed}
+                else:
+                    payload = {"output": str(parsed), "text": stdout_str}
+            except (json.JSONDecodeError, ValueError):
+                # Try parsing as newline-delimited JSON events
+                events = []
+                lines = [line.strip() for line in stdout_str.splitlines() if line.strip()]
+                parsed_any = False
+                for line in lines:
+                    try:
+                        events.append(json.loads(line))
+                        parsed_any = True
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                if parsed_any and events:
+                    payload = {"events": events, "output": stdout_str}
+                else:
+                    return WorkerResult(
+                        request_id=request.request_id,
+                        trace_id=request.trace_id,
+                        status=WorkerStatus.INVALID_OUTPUT,
+                        duration_ms=duration_ms,
+                        error=_sanitize_error(ValueError("Output is not valid JSON")),
+                    )
+        else:
+            payload = {"output": stdout_str, "text": stdout_str}
 
-            stdout_str = stdout.decode("utf-8", errors="replace")
-            stderr_str = stderr.decode("utf-8", errors="replace")
-            duration_ms = int((time.perf_counter() - start) * 1000)
-
-            if proc.returncode != 0:
-                return WorkerResult(
-                    request_id=request.request_id,
-                    trace_id=request.trace_id,
-                    status=WorkerStatus.FAILED,
-                    duration_ms=duration_ms,
-                    error=_sanitize_error(WorkerError(f"Exit code {proc.returncode}")),
-                )
-
-            if len(stdout_str.encode("utf-8")) > self._output_limit_bytes:
-                return WorkerResult(
-                    request_id=request.request_id,
-                    trace_id=request.trace_id,
-                    status=WorkerStatus.OUTPUT_TOO_LARGE,
-                    duration_ms=duration_ms,
-                    error=f"Output exceeds {self._output_limit_bytes} bytes",
-                )
-
-            if not stdout_str.strip():
-                return WorkerResult(
-                    request_id=request.request_id,
-                    trace_id=request.trace_id,
-                    status=WorkerStatus.EMPTY_OUTPUT,
-                    duration_ms=duration_ms,
-                    error="OpenCode produced empty output",
-                )
-
-            try:
-                payload = json.loads(stdout_str)
-                if not isinstance(payload, dict):
-                    raise ValueError("Output is not a JSON object")
-            except (json.JSONDecodeError, ValueError) as e:
-                return WorkerResult(
-                    request_id=request.request_id,
-                    trace_id=request.trace_id,
-                    status=WorkerStatus.INVALID_OUTPUT,
-                    duration_ms=duration_ms,
-                    error=_sanitize_error(e),
-                )
-
-            return WorkerResult(
-                request_id=request.request_id,
-                trace_id=request.trace_id,
-                status=WorkerStatus.SUCCESS,
-                payload=payload,
-                duration_ms=duration_ms,
-            )
-
-        except WorkerError:
-            raise
-        except Exception as e:
-            duration_ms = int((time.perf_counter() - start) * 1000)
-            return WorkerResult(
-                request_id=request.request_id,
-                trace_id=request.trace_id,
-                status=WorkerStatus.FAILED,
-                duration_ms=duration_ms,
-                error=_sanitize_error(e),
-            )
+        return WorkerResult(
+            request_id=request.request_id,
+            trace_id=request.trace_id,
+            status=WorkerStatus.SUCCESS,
+            payload=payload,
+            duration_ms=duration_ms,
+        )
 
 
 async def register_available_workers(

@@ -2,13 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import shutil
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from all_tomorrow.adapters.workers import AntigravityWorker, OpenCodeWorker, register_available_workers
+from all_tomorrow.adapters.workers import (
+    AntigravityWorker,
+    OpenCodeWorker,
+    _build_worker_prompt,
+    _check_executable_available,
+    _sanitize_error,
+    register_available_workers,
+)
 from all_tomorrow.contracts import WorkerRequest, WorkerResult, WorkerStatus
 
 
@@ -82,7 +91,8 @@ class TestAntigravityWorker:
             stdout=json.dumps({"result": "success", "files_changed": 3}),
         )
 
-        with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=fake_proc)):
+        mock_exec = AsyncMock(return_value=fake_proc)
+        with patch("asyncio.create_subprocess_exec", new=mock_exec):
             worker = AntigravityWorker(
                 argv=["antigravity"],
                 allowed_roots=(str(tmp_path),),
@@ -95,11 +105,78 @@ class TestAntigravityWorker:
         assert result.payload == {"result": "success", "files_changed": 3}
         assert result.duration_ms > 0
         assert result.error is None
-        fake_proc.communicate_called = True
-        assert fake_proc.stdin_data is not None
-        input_json = json.loads(fake_proc.stdin_data.decode("utf-8"))
-        assert input_json["request_id"] == request.request_id
-        assert input_json["trace_id"] == request.trace_id
+        assert fake_proc.communicate_called is True
+
+        # Verify command construction
+        mock_exec.assert_called_once()
+        called_args = mock_exec.call_args[0]
+        assert called_args[0] == "antigravity"
+        assert "--mode" in called_args
+        assert called_args[called_args.index("--mode") + 1] == "accept-edits"
+        assert "--effort" in called_args
+        assert called_args[called_args.index("--effort") + 1] == "high"
+        assert "--output-format" in called_args
+        assert called_args[called_args.index("--output-format") + 1] == "json"
+        assert "--print" in called_args
+        prompt = called_args[called_args.index("--print") + 1]
+        assert request.request_id in prompt
+        assert request.trace_id in prompt
+        assert "--json" not in called_args
+
+    @pytest.mark.asyncio
+    async def test_real_antigravity_envelope_parsed(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        envelope = {
+            "conversation_id": "conv-42",
+            "status": "SUCCESS",
+            "response": "Refactored module successfully.",
+            "duration_seconds": 2.1,
+            "usage": {"total_tokens": 500},
+        }
+        fake_proc = FakeProcess(returncode=0, stdout=json.dumps(envelope))
+
+        with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=fake_proc)):
+            worker = AntigravityWorker(
+                argv=["antigravity"],
+                allowed_roots=(str(tmp_path),),
+            )
+            request = make_worker_request(payload={"cwd": str(project_dir)})
+            result = await worker.execute(request)
+
+        assert result.status is WorkerStatus.SUCCESS
+        assert result.payload is not None
+        assert result.payload["conversation_id"] == "conv-42"
+        assert result.payload["response"] == "Refactored module successfully."
+        assert result.payload["status"] == "SUCCESS"
+
+    @pytest.mark.asyncio
+    async def test_command_construction_options(self, tmp_path: Path) -> None:
+        worker = AntigravityWorker(
+            argv=["agy.exe"],
+            allowed_roots=(str(tmp_path),),
+            mode="plan",
+            dangerously_skip_permissions=True,
+            effort="low",
+            model="gemini-3.8-flash-high",
+            output_format="json",
+        )
+        cmd = worker.build_argv("do task")
+        assert cmd == [
+            "agy.exe",
+            "--mode",
+            "plan",
+            "--dangerously-skip-permissions",
+            "--effort",
+            "low",
+            "--model",
+            "gemini-3.8-flash-high",
+            "--output-format",
+            "json",
+            "--print",
+            "do task",
+        ]
 
     @pytest.mark.asyncio
     async def test_timeout_returns_timeout_status(self, tmp_path: Path) -> None:
@@ -204,6 +281,29 @@ class TestAntigravityWorker:
         assert result.error is not None
 
     @pytest.mark.asyncio
+    async def test_text_output_format_mode(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        fake_proc = FakeProcess(returncode=0, stdout="Plain text result.")
+
+        with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=fake_proc)):
+            worker = AntigravityWorker(
+                argv=["antigravity"],
+                allowed_roots=(str(tmp_path),),
+                output_format="text",
+            )
+            request = make_worker_request(payload={"cwd": str(project_dir)})
+            result = await worker.execute(request)
+
+        assert result.status is WorkerStatus.SUCCESS
+        assert result.payload == {
+            "output": "Plain text result.",
+            "text": "Plain text result.",
+            "response": "Plain text result.",
+        }
+
+    @pytest.mark.asyncio
     async def test_traversal_blocked_outside_allowed_roots(self, tmp_path: Path) -> None:
         project_dir = tmp_path / "project"
         project_dir.mkdir()
@@ -249,7 +349,7 @@ class TestAntigravityWorker:
 
         with patch("shutil.which", return_value=None):
             worker = AntigravityWorker(
-                argv=["nonexistent"],
+                argv=["nonexistent_executable_12345"],
                 allowed_roots=(str(tmp_path),),
             )
             assert await worker.is_available() is False
@@ -266,7 +366,8 @@ class TestOpenCodeWorker:
             stdout=json.dumps({"result": "opencode success", "changes": 5}),
         )
 
-        with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=fake_proc)):
+        mock_exec = AsyncMock(return_value=fake_proc)
+        with patch("asyncio.create_subprocess_exec", new=mock_exec):
             worker = OpenCodeWorker(
                 argv_prefix=["opencode"],
                 allowed_roots=(str(tmp_path),),
@@ -279,9 +380,69 @@ class TestOpenCodeWorker:
         assert result.payload == {"result": "opencode success", "changes": 5}
         assert result.duration_ms > 0
         assert result.error is None
-        assert fake_proc.stdin_data is not None
-        input_json = json.loads(fake_proc.stdin_data.decode("utf-8"))
-        assert input_json["request_id"] == request.request_id
+        assert fake_proc.communicate_called is True
+
+        # Verify command construction: format json present, no fake model/agent defaults
+        mock_exec.assert_called_once()
+        called_args = mock_exec.call_args[0]
+        assert called_args[0] == "opencode"
+        assert "--format" in called_args
+        assert called_args[called_args.index("--format") + 1] == "json"
+        assert "--model" not in called_args
+        assert "--agent" not in called_args
+        # Prompt is positional argument at the end
+        prompt = called_args[-1]
+        assert request.request_id in prompt
+
+    @pytest.mark.asyncio
+    async def test_ndjson_events_parsed(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        event1 = json.dumps({"event": "step_start", "step": 1})
+        event2 = json.dumps({"event": "step_finish", "step": 1, "output": "ok"})
+        ndjson_stdout = f"{event1}\n{event2}\n"
+        fake_proc = FakeProcess(returncode=0, stdout=ndjson_stdout)
+
+        with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=fake_proc)):
+            worker = OpenCodeWorker(
+                argv_prefix=["opencode"],
+                allowed_roots=(str(tmp_path),),
+            )
+            request = make_worker_request(payload={"cwd": str(project_dir)})
+            result = await worker.execute(request)
+
+        assert result.status is WorkerStatus.SUCCESS
+        assert result.payload is not None
+        assert len(result.payload["events"]) == 2
+        assert result.payload["events"][0]["event"] == "step_start"
+        assert result.payload["events"][1]["event"] == "step_finish"
+
+    @pytest.mark.asyncio
+    async def test_command_construction_options(self, tmp_path: Path) -> None:
+        worker = OpenCodeWorker(
+            argv_prefix=["npx", "-y", "opencode-ai", "run"],
+            allowed_roots=(str(tmp_path),),
+            model="anthropic/claude-3-5-sonnet",
+            agent="programmer",
+            auto=True,
+            format="json",
+        )
+        cmd = worker.build_argv("write tests")
+        assert cmd == [
+            "npx",
+            "-y",
+            "opencode-ai",
+            "run",
+            "--format",
+            "json",
+            "--model",
+            "anthropic/claude-3-5-sonnet",
+            "--agent",
+            "programmer",
+            "--auto",
+            "write tests",
+        ]
 
     @pytest.mark.asyncio
     async def test_timeout_returns_timeout_status(self, tmp_path: Path) -> None:
@@ -438,6 +599,148 @@ class TestOpenCodeWorker:
             assert worker._argv_prefix == ["npx", "-y", "opencode-ai", "run"]
 
 
+class TestProcessRunnerRobustness:
+    @pytest.mark.asyncio
+    async def test_executable_not_found_maps_to_status(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        with patch("asyncio.create_subprocess_exec", side_effect=FileNotFoundError("binary not found")):
+            worker = AntigravityWorker(
+                argv=["nonexistent_tool"],
+                allowed_roots=(str(tmp_path),),
+            )
+            request = make_worker_request(payload={"cwd": str(project_dir)})
+            result = await worker.execute(request)
+
+        assert result.status is WorkerStatus.EXECUTABLE_NOT_FOUND
+        assert result.error is not None
+        assert "Executable not found" in result.error
+        assert "nonexistent_tool" in result.error
+
+    @pytest.mark.asyncio
+    async def test_combined_output_limit_includes_stderr(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        # stdout is small (100B), but stderr is large (2MiB)
+        fake_proc = FakeProcess(
+            returncode=0,
+            stdout="small output",
+            stderr="e" * (2 * 1024 * 1024),
+        )
+
+        with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=fake_proc)):
+            worker = AntigravityWorker(
+                argv=["antigravity"],
+                allowed_roots=(str(tmp_path),),
+                output_limit_bytes=1024 * 1024,
+            )
+            request = make_worker_request(payload={"cwd": str(project_dir)})
+            result = await worker.execute(request)
+
+        assert result.status is WorkerStatus.OUTPUT_TOO_LARGE
+        assert result.error is not None
+        assert "exceeds" in result.error
+
+    @pytest.mark.asyncio
+    async def test_stderr_secret_redacted_on_failure(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        fake_proc = FakeProcess(
+            returncode=1,
+            stderr="Auth failed with TOKEN=super_secret_token_12345 in response",
+        )
+
+        with patch.dict(os.environ, {"TOKEN": "super_secret_token_12345"}):
+            with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=fake_proc)):
+                worker = OpenCodeWorker(
+                    argv_prefix=["opencode"],
+                    allowed_roots=(str(tmp_path),),
+                )
+                request = make_worker_request(payload={"cwd": str(project_dir)})
+                result = await worker.execute(request)
+
+        assert result.status is WorkerStatus.FAILED
+        assert result.error is not None
+        assert "super_secret_token_12345" not in result.error
+        assert "<REDACTED>" in result.error
+
+    def test_prompt_preserves_all_contract_fields(self) -> None:
+        request = WorkerRequest(
+            request_id="req-999",
+            trace_id="trace-888",
+            project_id="proj-777",
+            capabilities=frozenset({"coding", "analysis"}),
+            payload={
+                "cwd": "/workspace",
+                "task": "Implement feature X",
+                "constraints": ["no external dependencies", "must pass type check"],
+                "acceptance_criteria": ["100% unit test coverage"],
+                "expected_result_format": "JSON summary with diff",
+            },
+        )
+        prompt = _build_worker_prompt(request)
+        assert "req-999" in prompt
+        assert "trace-888" in prompt
+        assert "proj-777" in prompt
+        assert "coding" in prompt
+        assert "analysis" in prompt
+        assert "Implement feature X" in prompt
+        assert "no external dependencies" in prompt
+        assert "must pass type check" in prompt
+        assert "100% unit test coverage" in prompt
+        assert "JSON summary with diff" in prompt
+
+
+class TestErrorSanitization:
+    def test_sanitize_error_redacts_home_path(self) -> None:
+        with patch.dict(os.environ, {"HOME": "/custom/test/home"}):
+            error = Exception("Error in /custom/test/home/project/file.py")
+            sanitized = _sanitize_error(error)
+            assert "<HOME>" in sanitized
+            assert "/custom/test/home" not in sanitized
+
+    def test_sanitize_error_redacts_userprofile(self) -> None:
+        with patch.dict(os.environ, {"USERPROFILE": "C:\\Users\\TestProfile"}):
+            error = Exception("Error in C:\\Users\\TestProfile\\file.py")
+            sanitized = _sanitize_error(error)
+            assert "<USERPROFILE>" in sanitized
+            assert "C:\\Users\\TestProfile" not in sanitized
+
+    def test_sanitize_error_when_home_and_profile_unset_does_not_corrupt(self) -> None:
+        env = dict(os.environ)
+        env.pop("HOME", None)
+        env.pop("USERPROFILE", None)
+        with patch.dict(os.environ, env, clear=True):
+            error = Exception("Normal error message without empty string replacement")
+            sanitized = _sanitize_error(error)
+            assert sanitized == "Normal error message without empty string replacement"
+            assert "<HOME>" not in sanitized
+            assert "<USERPROFILE>" not in sanitized
+
+    def test_sanitize_error_redacts_env_secrets(self) -> None:
+        with patch.dict(os.environ, {"API_KEY": "secret123", "TOKEN": "token456"}):
+            error = Exception("Failed with API_KEY=secret123 and TOKEN=token456")
+            sanitized = _sanitize_error(error)
+            assert "secret123" not in sanitized
+            assert "token456" not in sanitized
+            assert "<REDACTED>" in sanitized
+
+
+class TestWindowsCommandNames:
+    def test_check_executable_available_finds_pathext(self) -> None:
+        with patch("os.name", "nt"), patch.dict(os.environ, {"PATHEXT": ".COM;.EXE;.BAT;.CMD"}):
+            with patch("shutil.which", side_effect=lambda name: "C:\\bin\\agy.exe" if name in ("agy.exe", "agy.EXE") else None):
+                assert _check_executable_available(["agy"]) is True
+                assert _check_executable_available(["agy.exe"]) is True
+
+    def test_check_executable_available_returns_false_when_missing(self) -> None:
+        with patch("shutil.which", return_value=None):
+            assert _check_executable_available(["completely_missing_bin"]) is False
+
+
 class TestRegisterAvailableWorkers:
     @pytest.mark.asyncio
     async def test_registers_only_available_workers(self, tmp_path: Path) -> None:
@@ -445,7 +748,7 @@ class TestRegisterAvailableWorkers:
 
         registry = CapabilityRegistry()
 
-        with patch("shutil.which", side_effect=lambda exe: "/usr/bin/antigravity" if exe == "antigravity" else None):
+        with patch("shutil.which", side_effect=lambda exe: "/usr/bin/antigravity" if "antigravity" in exe else None):
             registered = await register_available_workers(
                 registry,
                 antigravity_argv=["antigravity"],
@@ -495,23 +798,33 @@ class TestRegisterAvailableWorkers:
         assert not registry._workers
 
 
-class TestErrorSanitization:
-    def test_sanitize_error_redacts_home_path(self) -> None:
-        from all_tomorrow.adapters.workers import _sanitize_error
+class TestRealCliSmoke:
+    """Minimal harmless smoke tests querying CLI help text if installed on the host."""
 
-        error = Exception(f"Error in {os.environ.get('HOME', '/home/user')}/project/file.py")
-        sanitized = _sanitize_error(error)
-        assert "<HOME>" in sanitized or "<USERPROFILE>" in sanitized
+    def test_antigravity_cli_help_smoke(self) -> None:
+        exe = shutil.which("agy.exe") or shutil.which("agy")
+        if not exe:
+            pytest.skip("Antigravity CLI (agy/agy.exe) not found on PATH")
 
-    def test_sanitize_error_redacts_env_secrets(self) -> None:
-        from all_tomorrow.adapters.workers import _sanitize_error
+        import subprocess
+        result = subprocess.run([exe, "--help"], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0
+        assert "--print" in result.stdout or "--print" in result.stderr
+        assert "--output-format" in result.stdout or "--output-format" in result.stderr
 
-        with patch.dict(os.environ, {"API_KEY": "secret123", "TOKEN": "token456"}):
-            error = Exception("Failed with API_KEY=secret123 and TOKEN=token456")
-            sanitized = _sanitize_error(error)
-            assert "secret123" not in sanitized
-            assert "token456" not in sanitized
-            assert "<REDACTED>" in sanitized
+    def test_opencode_cli_help_smoke(self) -> None:
+        npx = shutil.which("npx.cmd") or shutil.which("npx")
+        if not npx:
+            pytest.skip("npx/npx.cmd not found on PATH")
 
-
-import os
+        import subprocess
+        result = subprocess.run(
+            [npx, "-y", "opencode-ai", "run", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        assert result.returncode == 0
+        combined = result.stdout + result.stderr
+        assert "opencode run" in combined
+        assert "--format" in combined
