@@ -1,0 +1,26 @@
+id: demo_request
+version: 1
+status: active
+change_reason: Initial runtime acceptance pipeline
+
+trigger:
+  intent:
+    - demo
+
+steps:
+  - id: resolve_project
+    type: demo.resolve_project
+    inputs:
+      candidate: ${request.candidate_project_id}
+
+  - id: confirm_project
+    type: demo.confirm_project
+    inputs:
+      project: ${resolve_project.output}
+
+  - id: finish
+    type: demo.finish
+    inputs:
+      project: ${resolve_project.output}
+      confirmation: ${variables.user_answers.confirm_project.confirmed}
+

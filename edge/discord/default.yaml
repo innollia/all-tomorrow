@@ -1,0 +1,47 @@
+id: discord_default
+version: 1
+default_action: USER_CLARIFICATION
+
+rules:
+  - when:
+      intent: casual_chat
+      any_escalation_signal: false
+    action: LOCAL_REPLY
+    reason: Casual conversation needs no shared authority or remote execution.
+
+  - when:
+      needs_canonical_mutation: true
+    action: PROJECT_ACTION
+    reason: Canonical mutation must be resolved and traced centrally.
+
+  - when:
+      needs_long_running_task: true
+    action: CENTRAL_TASK
+    reason: Long-running work needs a durable central task and run.
+
+  - when:
+      needs_project_state: true
+    action: CENTRAL_QUERY
+    reason: Project state is owned behind the central project resolver.
+
+  - when:
+      needs_shared_memory: true
+    action: CENTRAL_QUERY
+    reason: Shared memory must be retrieved through its owner-aware gateway.
+
+  - when:
+      needs_cross_project_knowledge: true
+    action: CENTRAL_QUERY
+    reason: Cross-project knowledge requires central provenance and selection.
+
+  - when:
+      needs_remote_tool: true
+      tool_risk: high
+    action: CENTRAL_TASK
+    reason: High-risk remote tools require central permission and tracing.
+
+  - when:
+      needs_remote_tool: true
+    action: CENTRAL_QUERY
+    reason: Remote tool selection requires the central registry.
+

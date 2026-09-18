@@ -1,0 +1,9 @@
+PyYAML<7,>=6.0
+httpx<1,>=0.28
+psycopg[binary,pool]<4,>=3.2
+fastapi<1,>=0.116
+uvicorn<1,>=0.35
+
+[dev]
+pytest<9,>=8.3
+pytest-asyncio<1,>=0.24

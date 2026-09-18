@@ -1,0 +1,43 @@
+projects:
+  - id: project:eve
+    name: Eve
+    owner: all-tomorrow
+    aliases:
+      - eve
+      - 이브
+      - eve-scene-runtime
+    source_refs:
+      - repo:C:/projects/eve-scene-runtime
+      - domain:eve-canonical-state
+    maintainer_capabilities:
+      - repo_analysis
+      - repo_edit
+      - runtime_diagnostics
+
+  - id: project:manager-runtime
+    name: Manager Runtime
+    owner: all-tomorrow
+    aliases:
+      - manager
+      - 매니저
+    source_refs:
+      - integration:eve-scene-runtime/discord/manager-bridge
+      - domain:manager-notion-state
+    maintainer_capabilities:
+      - repo_analysis
+      - repo_edit
+      - runtime_diagnostics
+
+  - id: project:all-tomorrow
+    name: All Tomorrow
+    owner: all-tomorrow
+    aliases:
+      - control-plane
+      - 중앙
+    source_refs:
+      - repo:C:/projects/all-tomorrow
+    maintainer_capabilities:
+      - repo_analysis
+      - repo_edit
+      - control_plane
+
