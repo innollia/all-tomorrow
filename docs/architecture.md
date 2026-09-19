@@ -106,7 +106,9 @@ Discord / Web / CLI / ChatGPT / schedules / watchers / external events
 
 실행 전 context assembler는 이 projection과 source-owned adapter 조회를 결합해 bounded context pack을 만든다.
 
-context pack 자체는 근거 없는 새 정본이 아니며 provenance/source refs를 보존한다. raw chat history를 거대한 handover 파일 하나로 대체하는 구조를 만들지 않는다.
+Worker 실행 입력은 raw RequestEnvelope 자체가 아니라 WorkItem의 task/acceptance criteria/constraints와 선택된 context/artifact/source refs를 조립한 구조다. RequestEnvelope의 원문은 provenance와 사용자 의도를 보존하는 입력이지, 모든 downstream worker prompt의 전체 문맥을 대신하지 않는다.
+
+context pack 자체는 근거 없는 새 정본이 아니며 provenance/source refs를 보존한다. size/cost budget을 적용하고 raw chat history를 거대한 handover 파일 하나로 대체하는 구조를 만들지 않는다.
 
 ### 2.5 Pipeline
 
