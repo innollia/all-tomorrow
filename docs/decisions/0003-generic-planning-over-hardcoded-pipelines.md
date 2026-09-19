@@ -121,6 +121,8 @@ descriptor / metadata
 
 quota/rate-limit/health/cost 변화가 생기면 먼저 Execution Resolution이 같은 capability/quality/policy를 만족하는 equivalent resource로 transparent failover할 수 있는지 본다.
 
+transparent failover는 read-only/idempotent work 또는 side effect 전 실패가 확실한 경우에만 허용한다. mutation 결과가 ambiguous하면 idempotency ledger/read-back/reconciliation을 먼저 수행하고, 상태를 확인할 수 없으면 NEED_USER 또는 안전한 중단으로 간다.
+
 이 failover가 불가능하거나 범위·품질·시간·작업구조·사용자 action을 바꿔야 하면 Replanner가 policy가 허용하는 선택지를 평가한다.
 
 예:
