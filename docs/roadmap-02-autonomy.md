@@ -216,7 +216,7 @@ discovered
 → promotion policy가 허용하면 actual registry/resource-pool binding
 ```
 
-예를 들어 무료 API가 새로 발견되어 API key 발급이 필요하면 시스템은 "provider X 전용 key 요청 코드"를 추가하는 대신 candidate의 `prerequisites`에 사용자 action을 기록하고 generic NEED_USER를 생성한다. 사용자가 key를 외부 secret owner에 등록한 뒤 opaque credential ref만 중앙에 연결한다.
+예를 들어 무료 API가 새로 발견되어 API key 발급이 필요하면 시스템은 "provider X 전용 key 요청 코드"를 추가하는 대신 candidate의 `prerequisites`에 사용자 action을 기록하고 generic NEED_USER를 생성한다. 질문은 key 값을 채팅에 붙여넣으라고 요구하지 않는다. 사용자가 key를 지정된 external secret owner/registration surface에 등록한 뒤 중앙에는 opaque `credential_ref` 또는 완료 확인만 돌아오게 한다.
 
 ### User-interruption gate
 
@@ -245,6 +245,7 @@ discovered
 - capability / quota model / reset semantics / pricing class / auth prerequisite metadata
 - 가입, key 발급, 결제, 약관 동의, 사용자 인증처럼 사용자가 직접 처리해야 하는 필수 단계가 생기면 우회하지 않고 해당 WorkItem을 NEED_USER로 전환
 - user-facing question에는 왜 이 resource가 현재 Goal/Plan에 유용한지와 필요한 action만 전달하고 secret 값 자체를 chat/event에 복사하지 않음
+- NEED_USER required field는 가능하면 `credential_ref`/registration confirmation이지 raw API key가 아님
 
 ## 8. Resource Pool Foundation
 
