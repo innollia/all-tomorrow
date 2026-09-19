@@ -78,6 +78,8 @@ background work가 사용자의 interactive work를 굶기면 실패다.
 
 같은 capability, quality floor, privacy/risk, budget policy를 만족하는 다른 resource가 있으면 Execution Resolution이 concrete resource만 바꿀 수 있다. 이 경우 Work의 의미가 달라지지 않으므로 매번 새 PlanRevision을 만들 필요가 없다.
 
+다만 transparent failover는 retry-safe 작업에만 적용한다. mutation side effect가 발생했는지 불명확하면 먼저 reconcile/idempotency 확인을 수행한다.
+
 동등 failover로 해결되지 않고 계획 의미를 바꿔야 할 때 Replanner로 올린다.
 
 ### Generic replanning options
@@ -330,6 +332,10 @@ Research watcher가 현재 부족한 capability를 제공하는 새 free-tier AP
 ### L. Generic resource adapter swap
 
 동일 capability의 테스트 provider A/B를 서로 다른 raw quota error와 auth 방식으로 연결 → 각 adapter가 공통 observation/prerequisite contract로 정규화 → 같은 Planner/Policy/Service Experiment lifecycle이 두 provider 모두에서 작동.
+
+### M. Safe failover after ambiguous mutation
+
+resource A에서 mutation 요청 중 timeout → side effect 상태 unknown → resource B로 즉시 중복 실행하지 않음 → external read-back/idempotency reconciliation → 결과에 따라 완료 처리 또는 안전한 retry/NEED_USER. resource-aware autonomy가 correctness보다 우선하지 않음.
 
 ## 11. Explicitly Not Required for 2차
 
