@@ -1,5 +1,8 @@
 # 3차 완성 — Measured Self-Evolving System
 
+> Status: **Planned.** 2차의 durable autonomy와 evaluation evidence가 쌓이기 전 production self-improvement를 활성화하지 않는다.
+
+
 ## Definition of Done
 
 3차가 끝나면 README 원문의 가장 장기적인 목표가 하나의 닫힌 루프로 연결되어야 한다.
