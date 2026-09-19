@@ -183,7 +183,9 @@ Plan revision은 이미 성공한 Work/Artifact를 불필요하게 무효화하�
 
 Planner가 provider-specific 예외 문자열을 직접 해석하지 않게 한다.
 
-adapter/resource layer는 외부 상태를 **generic observation**으로 정규화한다. 예:
+adapter/resource layer는 외부 상태를 **generic observation**으로 정규화한다. `NodeStatus`나 `WorkerStatus`에 provider별 quota/auth/error 상태를 계속 추가하는 방식으로 해결하지 않는다.
+
+예:
 
 - resource unavailable
 - capacity/quota exhausted
@@ -525,7 +527,7 @@ Web에서 만든 Work/질문/결과를 Discord 또는 실제 연결 가능한 �
 
 ### O. Invalid planner output is rejected
 
-Planner fixture가 존재하지 않는 resource를 pin하거나 hard budget을 넘기거나 acceptance criteria를 조용히 낮추는 PlanRevision 생성 → validator가 durable Work 생성 전에 거부/NEED_USER/재계획로 돌림 → Planner 모델의 출력이 직접 실행 권한이 아님.
+Planner fixture가 존재하지 않는 resource를 pin하거나 hard budget을 넘기거나 acceptance criteria를 조용히 낮추는 PlanRevision 생성 → validator가 durable Work 생성 전에 거부/NEED_USER/재계획으로 돌림 → Planner 모델의 출력이 직접 실행 권한이 아님.
 
 ### P. Unknown quota state
 
