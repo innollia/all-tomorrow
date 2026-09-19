@@ -37,6 +37,10 @@ Goal, Work, Run, Event, Artifact, project context 같은 중앙 상태를 Work�
 
 Work가 남긴 결과가 metacognition의 입력이 되고, metacognition이 만든 판단은 다시 Work로 materialize될 수 있다.
 
+Metacognition이 만든 과거 판단, prompt/policy 변경, 비용, evaluation, system-change 결과도 같은 중앙 기록에 남아 다시 metacognition의 입력이 된다. 이를 위해 별도 meta-meta 계층을 계속 추가하지 않는다.
+
+Metacognition은 기존 Goal의 하위 Work뿐 아니라 새로운 Goal 자체를 자율 생성할 수 있다.
+
 ### 4. Pipeline은 execution recipe로 제한한다
 
 Pipeline은 하나의 Work를 수행하는 방법이다.
@@ -55,6 +59,8 @@ provider/project/problem별 대응 지식을 Pipeline에 축적하지 않는다.
 
 Metacognition이 만든 Work나 system change도 permission, budget, provenance, evaluation, rollback 경계를 그대로 따른다.
 
+일반 self-change는 평가를 통과하면 자동 promotion 후 보고할 수 있다. 권한·비용·통제 경계를 넓히는 protected change는 ADR 0004의 노트북 Approval Authority 없이는 production에 적용할 수 없다.
+
 외부 문서와 repository는 evidence이지 실행 권한이 아니다.
 
 ## Consequences
@@ -69,4 +75,6 @@ Metacognition이 만든 Work나 system change도 permission, budget, provenance,
 - "메타인지"를 이유로 새 class/table/service를 무조건 만들지 않는다.
 - 단순 deterministic 실행까지 매번 LLM observer에게 묻지 않는다.
 - 관찰 하나를 곧바로 production change로 승격하지 않는다.
+- 자기 자신의 observer/prompt/policy도 관찰·개선 대상에서 제외하지 않는다.
+- 권한 경계를 application 내부 규칙만으로 보호하지 않고 ADR 0004의 외부 승인 경계로 강제한다.
 - Work layer와 Metacognition layer 사이의 provenance를 남긴다.
