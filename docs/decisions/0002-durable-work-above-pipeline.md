@@ -59,6 +59,8 @@ Date: 2026-09-19
 
 현재 Antigravity/OpenCode CLI adapter는 초기 구현으로 유지한다. 즉시 전면 재작성하지 않고 future separation을 막지 않는 seam을 만든다.
 
+Project의 logical source identity와 executor별 checkout/workspace path도 분리한다. 한 Windows PC의 `C:/projects/...`를 cross-system project source 정본으로 사용하지 않는다.
+
 ### 5. Existing pipeline/event/adapter work는 유지한다
 
 이 결정은 기존 runtime을 버리는 재작성 결정이 아니다.
