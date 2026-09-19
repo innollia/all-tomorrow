@@ -113,13 +113,14 @@ descriptor / metadata
 
 하지만 그 결과는 generic capability/resource/observation contract로 위쪽에 전달한다.
 
-### 6. Resource shortage는 generic replanning problem으로 처리한다
+### 6. Resource shortage는 generic routing/replanning problem으로 처리한다
 
-quota/rate-limit/health/cost 변화가 생기면 policy가 허용하는 선택지를 Planner가 평가한다.
+quota/rate-limit/health/cost 변화가 생기면 먼저 Execution Resolution이 같은 capability/quality/policy를 만족하는 equivalent resource로 transparent failover할 수 있는지 본다.
+
+이 failover가 불가능하거나 범위·품질·시간·작업구조·사용자 action을 바꿔야 하면 Replanner가 policy가 허용하는 선택지를 평가한다.
 
 예:
 
-- equivalent resource fallback
 - cheaper/lighter model or tier
 - concurrency/batch reduction
 - defer low-priority work
