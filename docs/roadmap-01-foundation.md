@@ -119,6 +119,22 @@ Work identity와 execution trace를 같은 것으로 쓰지 않는다.
 
 실행 시에는 Request 하나만 worker에 던지지 않고 **bounded context pack**을 조립한다. context pack은 중앙 projection + source-owner adapter 조회 + 관련 lesson/artifact refs에서 만들며, 어떤 근거를 사용했는지 추적 가능해야 한다.
 
+Worker 실행 입력은 최소한 다음을 구분할 수 있어야 한다.
+
+- original request/message ref
+- WorkItem task
+- acceptance criteria
+- active constraints
+- project/source/workspace refs
+- selected context pack / evidence refs
+- artifact inputs
+- permission/budget
+- expected result form
+
+현재 `pipelines/coding.yaml`의 `task: ${request.message}`는 초기 slice로 유지할 수 있지만 최종 execution input contract로 보지 않는다. 이미 Worker adapter가 지원하는 constraints/acceptance criteria를 Work/Context 층에서 실제로 공급하도록 연결한다.
+
+context pack에는 크기/비용 budget을 두고, 모든 history를 통째로 prompt에 넣는 방식으로 handover 문제를 덮지 않는다.
+
 Project context는 Git 코드, Eve state, Manager personal facts의 복제 정본이 아니다. 그 값들이 필요하면 source reference를 통해 읽는다.
 
 ### 1.7 Artifact
