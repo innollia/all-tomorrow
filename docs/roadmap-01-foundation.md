@@ -17,7 +17,7 @@
 
 Gate A의 첫 작업 순서:
 
-1. 현재 `Project`, `tasks`, `runs`, `events`, `WorkerRequest`, `projects/catalog.yaml`의 참조 지점을 전수 검사한다.
+1. 현재 `Project`, `tasks`, `runs`, `events`, `WorkerRequest`, `CapabilityRegistry.select_worker/select_tools`, `ScheduledWork`, `projects/catalog.yaml`의 참조 지점을 전수 검사한다.
 2. Goal/Plan/PlanRevision/WorkItem/Observation/PolicyRef/ProjectSource/Executor/Artifact의 **최소 contract**와 ownership만 먼저 설계한다. 미래 provider 세부를 미리 다 모델링하지 않는다.
 3. planner input/output와 replanning boundary를 설계한다. Planner 구현은 교체 가능하게 두고 pipeline runtime에 흡수하지 않는다.
 4. Work/Run/Trace correlation과 event retention migration을 설계한다.
@@ -338,6 +338,10 @@ Registry는 이름 목록이 아니라 실제 실행 가능성을 반영한다.
 
 Registry는 routing decision을 전부 소유하지 않는다. Registry는 현재 후보와 상태를 제공하고, Planner/Policy가 Goal과 Plan 맥락에서 어떤 후보를 사용할지 결정할 수 있어야 한다.
 
+현재 `CapabilityRegistry.select_worker()`의 `evaluation_score → cost_score → latency` 고정 정렬과 `select_tools()`의 latency 정렬은 **초기 selection policy**로만 취급한다. 1차에서는 최소한 selection/ranking policy를 Registry 내부 불변 로직과 분리할 seam을 만든다. 모든 ranking 알고리즘을 구현할 필요는 없지만, 정책을 바꾸기 위해 Registry core를 매번 수정하는 구조로 굳히지 않는다.
+
+현재 `BackgroundTaskClass` 같은 scheduler enum은 maintenance/research/evaluation처럼 안정적인 scheduling class로 제한한다. provider별·프로젝트별·서비스별 작업 종류를 enum에 계속 추가하는 domain taxonomy로 사용하지 않는다.
+
 cost optimizer는 3차 대상이지만 1차 contract가 cost/budget/quota/quality metadata를 막지 않아야 한다.
 
 ## 6. Edge → Central Execution
@@ -511,6 +515,10 @@ Web에서 만든 Work/질문/결과를 Discord 또는 실제 연결 가능한 �
 ### M. No hard-coded pipeline branching
 
 테스트 fixture에서 서로 다른 두 provider가 같은 `capacity_exhausted` 의미를 각자 다른 raw error로 반환 → adapter가 generic observation으로 정규화 → 동일 replanning policy가 작동. Pipeline YAML에는 두 provider 이름이나 error string 조건문이 없음.
+
+### N. Pluggable selection policy
+
+같은 worker/resource 후보 집합에 대해 "quality 우선"과 "free/cost 우선" policy fixture를 바꿈 → Registry 후보 데이터와 adapter는 그대로 → 선택 순서가 policy에 따라 달라짐. `CapabilityRegistry` core에 새 provider 이름이나 별도 정렬 branch를 추가하지 않음.
 
 ## 12. Explicitly Not Required for 1차
 
