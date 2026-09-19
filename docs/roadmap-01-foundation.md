@@ -97,7 +97,28 @@ Work identity와 execution trace를 같은 것으로 쓰지 않는다.
 
 현재 `runs.trace_id UNIQUE` 제약은 "trace 하나 = run 하나"에 가깝다. 이것을 Work identity 대신 사용하지 않는다. multi-run Work를 구현할 때 correlation 규칙과 schema를 먼저 확정한다.
 
-### 1.6 Artifact
+### 1.6 Project Coordination Context
+
+원문의 "전체 과정을 본 사용자와 handover 문서만 가진 worker 사이의 격차"를 직접 해결하는 층이다.
+
+중앙은 raw chat 전체를 새 정본으로 복제하는 대신, cross-system project coordination에 필요한 현재 projection과 provenance reference를 유지한다.
+
+최소 포함 후보:
+
+- current project objective
+- active constraints/invariants
+- current architecture/decision refs
+- open Goals/WorkItems
+- important source refs
+- recent relevant outcomes
+- accepted/relevant lesson refs
+- unresolved questions/risks
+
+실행 시에는 Request 하나만 worker에 던지지 않고 **bounded context pack**을 조립한다. context pack은 중앙 projection + source-owner adapter 조회 + 관련 lesson/artifact refs에서 만들며, 어떤 근거를 사용했는지 추적 가능해야 한다.
+
+Project context는 Git 코드, Eve state, Manager personal facts의 복제 정본이 아니다. 그 값들이 필요하면 source reference를 통해 읽는다.
+
+### 1.7 Artifact
 
 Artifact는 문자열 URL 목록을 넘어 장기 작업 산출물의 metadata identity가 필요하다.
 
@@ -141,6 +162,8 @@ Artifact는 문자열 URL 목록을 넘어 장기 작업 산출물의 metadata i
 - run state transition과 event append의 transaction boundary 명확화
 - append-only provenance가 runtime row 삭제에 따라 사라지지 않도록 retention/foreign-key 정책 검토. 현재 `events.run_id ... ON DELETE CASCADE`를 그대로 장기 audit 모델로 간주하지 않음
 - Work/Run/Trace correlation migration 검증
+- project coordination projection과 event history의 역할 분리
+- context pack 생성 시 provenance/reference 유지
 - context/event/artifact metadata의 민감정보 retention 정책
 - idempotent external mutation의 key ownership 명확화
 - concurrent answer/resume 방지
@@ -278,7 +301,7 @@ Discord가 첫 edge일 뿐, 계약은 Web/CLI/ChatGPT에도 재사용 가능해�
 1차 항목을 동시에 벌리지 않는다.
 
 1. **Gate A — contracts and schema correction**  
-   Goal/Work/Trigger/Artifact identity, Work/Run/Trace correlation, source ownership, Worker/Executor/Resource seam을 확정하고 migration 계획을 만든다.
+   Goal/Work/Trigger/Artifact identity, Work/Run/Trace correlation, project coordination context, source ownership, Worker/Executor/Resource seam을 확정하고 migration 계획을 만든다.
 
 2. **Gate B — durable execution**  
    live PostgreSQL, transactional event/run state, durable scheduling, crash recovery, NEED_USER restart-resume를 통과한다.
@@ -329,6 +352,10 @@ Eve/Manager의 canonical fact를 중앙 편의를 위해 복제하지 않고 own
 ### H. Cross-system actionability
 
 Manager/Web에서 "Eve 프로젝트의 이 문제를 고쳐" 같은 요청 → project:eve resolution → Eve canonical state를 복제하지 않은 채 repository/runtime 쪽 WorkItem 생성 → 적절한 worker/adapter 실행 → 검증 결과가 같은 중앙 trace로 돌아옴.
+
+### I. Handover-gap test
+
+새 worker/session이 과거 채팅 원문을 직접 보지 못하는 상태에서 project context pack을 받아 현재 목표, 핵심 결정, 금지된 변경, 열린 work, 관련 source/lesson을 복원 → 이미 결정된 사항을 다시 처음부터 묻거나 과거 결정과 정면 충돌하는 작업을 시작하지 않음.
 
 ## 12. Explicitly Not Required for 1차
 
