@@ -94,17 +94,19 @@ Discord / Web / CLI / ChatGPT / schedules / watchers / external events
 
 중앙집권의 핵심 문제는 모든 채팅 로그를 한곳에 복제하는 것이 아니라, 새 client/worker가 프로젝트의 현재 상태를 다시 잃지 않게 하는 것이다.
 
-중앙은 cross-system coordination projection을 유지할 수 있다.
+중앙은 **cross-system coordination state**를 소유한다.
 
-예:
+중앙-owned 예:
 
-- current objective
-- active constraints
+- current cross-system objective
+- active orchestration constraints/invariants
 - decision/source refs
 - open Goal/Work
 - relevant outcome/artifact/lesson refs
 
-실행 전 context assembler는 이 projection과 source-owned adapter 조회를 결합해 bounded context pack을 만든다.
+반대로 Git/Eve/Manager/Discord가 소유하는 domain fact는 중앙 coordination state의 새 canonical copy로 만들지 않는다. 필요하면 owner ref/version/freshness를 가진 projection/cache 또는 live adapter 조회로 가져온다.
+
+실행 전 context assembler는 중앙-owned coordination state와 source-owned adapter 조회를 결합해 bounded context pack을 만든다.
 
 Worker 실행 입력은 raw RequestEnvelope 자체가 아니라 WorkItem의 task/acceptance criteria/constraints와 선택된 context/artifact/source refs를 조립한 구조다. RequestEnvelope의 원문은 provenance와 사용자 의도를 보존하는 입력이지, 모든 downstream worker prompt의 전체 문맥을 대신하지 않는다.
 
@@ -173,7 +175,7 @@ promotion or rejection
 
 - project registration identity와 중앙 source references
 - Goal/WorkItem/Run의 orchestration state
-- cross-system project coordination projection과 source/decision refs
+- cross-system project coordination state와 source/decision refs
 - versioned pipeline specifications/records
 - execution event와 trace linkage
 - pending user questions와 resume state
