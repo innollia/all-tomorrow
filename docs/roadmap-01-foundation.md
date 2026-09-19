@@ -86,7 +86,18 @@ Run은 하나의 WorkItem을 특정 pipeline version으로 실행한 시도다.
 
 1차에서는 모든 trigger type을 실제 구현할 필요가 없다. 다만 2차에서 schema를 갈아엎지 않도록 contract와 ownership을 먼저 잡는다.
 
-### 1.5 Artifact
+### 1.5 Correlation Identity
+
+Work identity와 execution trace를 같은 것으로 쓰지 않는다.
+
+- `work_id`: 여러 실행 시도와 시간을 가로질러 유지되는 작업 identity
+- `run_id`: 특정 pipeline execution attempt
+- `trace_id`: 한 실행 흐름의 distributed trace
+- 필요 시 parent/causation reference로 여러 run과 child work를 연결
+
+현재 `runs.trace_id UNIQUE` 제약은 "trace 하나 = run 하나"에 가깝다. 이것을 Work identity 대신 사용하지 않는다. multi-run Work를 구현할 때 correlation 규칙과 schema를 먼저 확정한다.
+
+### 1.6 Artifact
 
 Artifact는 문자열 URL 목록을 넘어 장기 작업 산출물의 metadata identity가 필요하다.
 
@@ -128,6 +139,9 @@ Artifact는 문자열 URL 목록을 넘어 장기 작업 산출물의 metadata i
 - process restart 후 run/work 조회
 - NEED_USER 질문 후 restart → answer → same work/run resume
 - run state transition과 event append의 transaction boundary 명확화
+- append-only provenance가 runtime row 삭제에 따라 사라지지 않도록 retention/foreign-key 정책 검토. 현재 `events.run_id ... ON DELETE CASCADE`를 그대로 장기 audit 모델로 간주하지 않음
+- Work/Run/Trace correlation migration 검증
+- context/event/artifact metadata의 민감정보 retention 정책
 - idempotent external mutation의 key ownership 명확화
 - concurrent answer/resume 방지
 - cancelled/expired question 처리
@@ -258,6 +272,27 @@ Discord가 첫 edge일 뿐, 계약은 Web/CLI/ChatGPT에도 재사용 가능해�
 - 실제 재사용 여부 기록 가능
 
 "lesson이 저장됨"과 "전역적으로 옳은 지식"을 구분한다.
+
+## Recommended Implementation Gates
+
+1차 항목을 동시에 벌리지 않는다.
+
+1. **Gate A — contracts and schema correction**  
+   Goal/Work/Trigger/Artifact identity, Work/Run/Trace correlation, source ownership, Worker/Executor/Resource seam을 확정하고 migration 계획을 만든다.
+
+2. **Gate B — durable execution**  
+   live PostgreSQL, transactional event/run state, durable scheduling, crash recovery, NEED_USER restart-resume를 통과한다.
+
+3. **Gate C — routing and ingress**  
+   registry/tool routing, Discord central escalation, idempotent ingress를 연결한다.
+
+4. **Gate D — real control surface**  
+   store-backed Web execution과 질문 재개를 붙이고 원격 HTTPS deployment/backup을 검증한다.
+
+5. **Gate E — application integration**  
+   Eve/Manager를 source-owner-aware adapter로 등록하고 manual lesson bootstrap까지 연결한다.
+
+각 Gate는 앞 Gate의 invariant를 깨면 다음으로 넘어가지 않는다.
 
 ## 11. 1차 Acceptance Scenarios
 
