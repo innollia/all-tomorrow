@@ -148,7 +148,7 @@
 
 - [ADR 0001 — Separate Control Plane Repository](decisions/0001-control-plane-boundary.md)
 - [ADR 0002 — Durable Work Above Pipeline](decisions/0002-durable-work-above-pipeline.md)
-- [ADR 0003 — Generic Planning Over Hard-coded Pipelines](decisions/0003-generic-planning-over-hardcoded-pipelines.md)
+- [ADR 0003 — Parallel Metacognition Over Case-Based Orchestration](decisions/0003-generic-planning-over-hardcoded-pipelines.md)
 
 ## Work Discipline
 
