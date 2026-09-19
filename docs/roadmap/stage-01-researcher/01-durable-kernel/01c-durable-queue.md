@@ -28,7 +28,8 @@ DurableExecutionPort 최소 contract:
 
 초기 매핑:
 
-- All Tomorrow work_id/derived id → workflow id 또는 deduplication id
+- All Tomorrow run_id → DBOS workflow id
+- Work 1:N Run 구조로 새 logical attempt는 새 run_id를 가짐
 - P0~P6 → DBOS priority mapping
 - not-before 요구 → enqueue delay
 - duplicate ingress → deduplication/return-existing
@@ -37,6 +38,18 @@ DurableExecutionPort 최소 contract:
 - concurrency/rate → DBOS queue configuration
 
 DBOS system DB는 application DB 정본과 논리적으로 분리한다.
+
+## Cross-store start protocol
+
+DBOS system DB와 application DB 사이의 distributed transaction은 만들지 않는다.
+
+1. Work에 새 Run/ExecutionAttempt를 STARTING 상태로 application DB transaction에 기록
+2. commit 후 run_id를 deterministic workflow ID로 사용해 start/enqueue
+3. DBOS가 반환한 handle을 ExecutionRef로 attach
+4. crash로 2/3 사이가 끊기면 STARTING + no-ref Run을 scan해 같은 run_id로 다시 start
+5. DBOS의 workflow-ID idempotency로 기존 execution handle을 회수
+
+reconciliation scan은 external start delivery 복구만 담당한다. queue ordering/lease/retry를 구현하지 않는다.
 
 ## scheduler.py
 
@@ -55,7 +68,8 @@ worker/tool mutation에는 별도 idempotency/reconciliation contract를 유지�
 ## 완료조건
 
 1. custom lease code 없음
-2. 같은 Work 중복 start가 duplicate side effect를 만들지 않음
-3. priority/delay가 adapter를 통해 동작
-4. backend restart 뒤 execution recovery
-5. domain package가 DBOS 내부 type을 import하지 않음
+2. cross-store crash 두 지점 모두 same run_id reconciliation으로 복구
+3. 동일 run_id 중복 start가 duplicate execution을 만들지 않음
+4. priority/delay가 adapter를 통해 동작
+5. backend restart 뒤 execution recovery
+6. domain package가 DBOS 내부 type을 import하지 않음

@@ -53,9 +53,23 @@ GitHub:
 - AgentExecutionPort: run with typed input/output
 - ModelGateway configuration: logical model alias → gateway model name
 - ExecutionRef: backend, execution_id, version
+- ExecutionAttempt identity: existing run_id를 재사용할 수 있으며 Work 1:N attempt를 유지
 - TraceLink: All Tomorrow trace/work/run ↔ external execution/span ids
 
 DBOS queue row나 PydanticAI message object를 domain record에 직렬화하지 않는다.
+
+## Cross-store consistency
+
+application DB와 durable backend system DB를 하나의 distributed transaction으로 묶지 않는다.
+
+대신:
+1. application DB에 Work + Run/ExecutionAttempt를 먼저 commit
+2. run_id를 external workflow idempotency key로 사용
+3. durable backend start/enqueue
+4. ExecutionRef attach
+5. 2와 4 사이 crash가 나면 STARTING/no-ref attempt를 같은 run_id로 다시 start하여 기존 execution handle을 회수
+
+reconciliation은 queue implementation이 아니라 cross-store delivery 복구 seam이다.
 
 ## 완료조건
 

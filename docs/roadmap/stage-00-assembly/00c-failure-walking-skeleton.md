@@ -28,7 +28,9 @@ user request
 - model 호출 직전 process kill
 - tool side effect 직후 process kill
 - user wait 중 process restart
-- 동일 start 요청 두 번
+- application Run commit 직후, durable enqueue 직전 process kill
+- durable enqueue 직후, ExecutionRef attach 직전 process kill
+- 동일 run_id start 요청 두 번
 - worker timeout
 - app version이 바뀐 상태에서 old workflow recovery
 
@@ -37,6 +39,7 @@ user request
 - side effect가 허용된 semantics 이상으로 중복되지 않음
 - 사용자가 같은 질문을 불필요하게 두 번 받지 않음
 - provenance가 끊기지 않음
+- reconciliation이 같은 run_id로 기존 durable execution을 회수하고 새 side effect를 만들지 않음
 
 ## DB 배치
 

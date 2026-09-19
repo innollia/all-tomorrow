@@ -13,11 +13,12 @@
 ## 역할 구분
 
 - Work: All Tomorrow semantic unit
+- Run: Work의 logical execution attempt이자 cross-store idempotency identity
 - ExecutionRef: durable backend execution
 - Agent run: PydanticAI의 한 agent interaction
-- Legacy Run/PipelineRuntime: 기존 deterministic/versioned recipe 실행 기록
+- PipelineRuntime: 기존 deterministic/versioned recipe 실행 기록
 
-이 네 개를 하나의 id로 합치지 않는다.
+Work와 Run은 분리한다. 첫 DBOS adapter에서는 run_id를 external workflow ID로 재사용해 idempotent start를 얻되, backend 자체 status/schema를 Run domain으로 복제하지 않는다.
 
 ## 기존 PipelineRuntime
 

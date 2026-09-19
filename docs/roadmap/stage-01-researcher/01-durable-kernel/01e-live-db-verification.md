@@ -24,16 +24,17 @@ backend 내부 migration을 All Tomorrow migration test가 소유하지 않는�
 
 1. semantic migration chain
 2. Goal/Work 저장 후 application restart
-3. Work enqueue 후 process kill/restart
-4. 같은 Work start 두 번 → 하나의 logical execution
-5. queue priority/delay
-6. model/tool step 사이 process kill
-7. NEED_USER wait 중 restart → answer signal → 계속 실행
-8. external mutation 직후 crash에서 idempotency/reconciliation
-9. Work → 여러 execution/run lineage
-10. event/audit retention
-11. OTel trace correlation
-12. application version 변경 중 old in-flight execution recovery/drain
+3. Run commit 후 enqueue 직전 crash → reconciliation
+4. enqueue 후 ExecutionRef attach 직전 crash → reconciliation
+5. 같은 run_id start 두 번 → 하나의 durable execution
+6. queue priority/delay
+7. model/tool step 사이 process kill
+8. NEED_USER wait 중 restart → answer signal → 계속 실행
+9. external mutation 직후 crash에서 idempotency/reconciliation
+10. Work → 여러 Run → 여러 external execution lineage
+11. event/audit retention
+12. OTel trace correlation
+13. application version 변경 중 old in-flight execution recovery/drain
 
 ## Versioning
 
