@@ -6,15 +6,27 @@
 
 모든 작업은 아래 순서로 판단한다.
 
-1. README의 `Original Vision`과 `Additional Hard Requirements`에 실제로 기여하는가.
-2. README의 `Derived Final Goals` 중 어떤 목표를 전진시키는가.
-3. 현재 completion stage의 exit criteria에 필요한가.
-4. 기존 owner/adapter/pipeline/event 경계를 깨지 않고 구현할 수 있는가.
-5. 지금 필요하지 않은 기능을 미래 가능성만으로 과설계하고 있지 않은가.
-6. 특정 provider/project/failure 이름을 pipeline이나 core orchestration에 하드코딩하지 않고 capability/state/policy/adapter로 일반화할 수 있는가.
-7. 실행 중 조건이 바뀌었을 때 Goal을 버리지 않고 Plan/Work revision으로 대응할 수 있는가.
+1. README의 Original Vision과 Additional Hard Requirements에 실제로 기여하는가.
+2. 현재 completion stage의 첫 사용자 체감 목표를 전진시키는가.
+3. 기존 owner/adapter/pipeline/event 경계를 깨지 않고 구현할 수 있는가.
+4. 특정 provider/project/failure 이름을 core orchestration에 하드코딩하지 않고 capability/state/policy/adapter로 일반화할 수 있는가.
+5. 지금 필요하지 않은 미래 복잡도를 미리 구현하고 있지 않은가.
+6. 실행 중 조건이 바뀌어도 Goal/provenance/user control을 유지할 수 있는가.
+7. 자기개선이 권한·비용·통제 경계를 넓히는 경우 ADR 0004의 외부 승인 경계를 우회하지 않는가.
 
-구현 편의를 위해 최종 목적을 작게 다시 정의하지 않는다. 반대로 최종 목적에 있다는 이유만으로 모든 미래 기능을 1차 완성에 밀어 넣지도 않는다.
+구현 편의를 위해 최종 목적을 작게 다시 정의하지 않는다. 반대로 최종 목적에 있다는 이유만으로 모든 미래 기능을 1차에 밀어 넣지도 않는다.
+
+## Product Order
+
+사용자가 체감할 완성 순서는 다음과 같다.
+
+1. **Researcher** — 스스로 공부하고, 문제를 발견하고, 자기 자신까지 개선하는 두뇌
+2. **Reliable assistant** — 사용자가 시킨 일을 어디서든 안정적으로 맡고 이어서 끝내는 비서
+3. **Personal manager** — 학교·일정·일상·프로젝트를 함께 운영하는 관리자
+
+이 순서는 구현 의존성과 동일하지 않다.
+
+Researcher가 첫 완성품이 되려면 그 아래에 먼저 최소 durable kernel, evaluation, rollback, budget, provenance가 필요하다.
 
 ## Generality Gate
 
@@ -22,137 +34,172 @@
 
 검산 기준:
 
-1. 작업 계층은 문제를 미리 이해하지 못해도 결과와 사건을 중앙에 남길 수 있는가.
-2. 메타인지 계층은 그 기록을 보고 **새 문제를 스스로 발견**할 수 있는가.
-3. 해결 방법이 사전에 목록에 없어도 조사나 새 Work 생성으로 이어질 수 있는가.
+1. Work layer는 문제를 미리 이해하지 못해도 결과와 사건을 중앙에 남길 수 있는가.
+2. Metacognition은 그 기록을 보고 새로운 문제나 기회를 스스로 발견할 수 있는가.
+3. 해결 방법이 사전에 목록에 없어도 조사, 새 Work, 새 Goal, system improvement로 이어질 수 있는가.
 4. 새 provider/tool/project 때문에 generic core에 이름별 branch가 늘지 않는가.
-5. 이 구조를 위해 불필요한 새 class/table/service를 만들고 있지 않은가.
+5. 자기 자신의 prompt/policy/code도 같은 observation/evaluation 흐름의 대상이 될 수 있는가.
+6. 특정 기능을 만들기 위해 reflection reviewer, API-problem handler 같은 추상적 하드코딩을 추가하고 있지 않은가.
 
 ## Completion Model
 
-1차/2차/3차는 날짜나 단순 버전 번호가 아니라 **capability milestone**이다. 파일이 생겼거나 mock test가 통과했다는 이유만으로 다음 단계 완료로 올리지 않고, 각 문서의 end-to-end acceptance scenario가 실제 운영 조건에서 통과해야 한다.
+1차/2차/3차는 capability milestone이다.
 
-후속 단계의 schema/interface prototype은 앞 단계에서 만들 수 있지만, 앞 단계의 durability/ownership invariant를 건너뛰고 production 기능부터 활성화하지 않는다.
+각 stage는 사용자에게 보이는 하나의 완성된 역할을 닫는다.
 
-### 1차 완성 — Durable Central Core
+### 1차 완성 — Durable Self-Improving Researcher
 
 문서: [roadmap-01-foundation.md](roadmap-01-foundation.md)
 
 질문:
 
-> 사용자가 어느 기기에서든 중앙에 작업을 맡기고, 그 작업이 durable한 Goal/Work/Run 상태로 남으며, 적절한 pipeline/worker/tool로 실행되고, 필요한 경우 질문으로 멈췄다가 같은 맥락으로 재개되며, 결과와 provenance를 다시 확인할 수 있는가?
+> 시스템이 restart를 견디는 중앙 상태 위에서 스스로 문제와 기회를 발견하고, 새 Goal/Work를 만들고, 자신의 prompt/policy/code까지 평가·개선하며, 허용된 변경은 자동 적용 후 보고하고 보호 변경은 노트북 Approval Authority 없이는 적용하지 못하는가?
 
-1차는 현재 요청 처리 엔진을 **장기 시스템의 올바른 중심부**로 고치는 단계다.
+1차의 첫 구현물은 durable kernel이지만 첫 완성품은 researcher다.
 
-### 2차 완성 — Autonomous Personal & Project Operations
+### 2차 완성 — Reliable Assistant & Remote Control
 
 문서: [roadmap-02-autonomy.md](roadmap-02-autonomy.md)
 
 질문:
 
-> 사용자가 즉시 요청하지 않아도 중앙이 허용된 스케줄·watcher·background work를 durable하게 발생시키고, 프로젝트 간 지식을 재사용하고, 개인 운영과 프로젝트 운영을 같은 authority 아래 연결할 수 있는가?
+> 사용자가 어느 기기에서든 일을 맡기고, 그 요청이 durable Goal/Work로 남아 적절한 worker/tool/resource로 실행되고, 질문·중단·재시작을 견디며, 다른 client에서도 같은 상태를 이어받을 수 있는가?
 
-2차부터 시스템은 반응형 도구를 넘어 지속적으로 움직이는 운영자가 된다.
+2차에서 All Tomorrow는 연구원 위에 믿을 만한 개인 비서가 된다.
 
-### 3차 완성 — Measured Self-Evolving System
+### 3차 완성 — Personal Manager & Generalized Autonomy
 
 문서: [roadmap-03-evolution.md](roadmap-03-evolution.md)
 
 질문:
 
-> 시스템이 새로운 도구·서비스·노하우를 스스로 탐색하고 시험하며, 실제 장기 산출물을 만들고, 자신의 성과를 측정해 개선 후보를 만들고, 검증된 변경만 안전하게 승격·롤백할 수 있는가?
+> 연구원과 비서가 학교·일정·지식·프로젝트·장기 자율 작업까지 owner-aware하게 연결되어, 사용자가 매번 직접 지시하지 않아도 지속적인 개인 운영을 수행할 수 있는가?
 
-3차는 README 원문의 가장 공격적인 자율성과 자기개선 목표를 닫는 단계다.
+3차에서 개인 관리자와 넓은 장기 자율 운영을 닫는다.
 
 ## Original Vision Coverage
 
-원문 요구가 추상화 과정에서 사라지지 않도록 completion stage를 직접 연결한다.
-
 | 원문에서 요구한 결과 | 주 stage | 닫히는 기준 |
 |---|---|---|
-| 어느 기기에서든 웹으로 중앙 접속 | 1차 | remote HTTPS control surface + durable DB/recovery |
-| 범용 답변이 아닌 사용자 맥락 기반 질의응답 | 1차 | Manager/source-owner context를 조립한 Web 질의 경로 |
-| 흩어진 ChatGPT/Discord/CLI 작업을 중앙에서 조정 | 1차 | 공통 Goal/Work/Run authority + edge ingress |
-| 요청을 어디에·어떻게 보낼지 중앙이 자동 판단 | 1차→2차 | 1차 generic planner/capability/worker/executor routing contract, 2차 live provider resource/quota-aware replanning |
-| 작업이 예상대로 진행되지 않을 때 원인을 스스로 찾아 대응 | 1차→2차 | 1차 Work/Event를 독립 observer가 읽고 후속 Work를 만들 수 있는 seam, 2차 실제 metacognitive diagnosis/action |
-| 새로운 무료 API/provider 발견 시 필요하면 사용자에게 key 발급 요청 | 2차 | metacognition/research가 후보의 가치를 판단 → 필요한 경우에만 NEED_USER → 검증 후 resource pool |
-| 유사 시스템의 블로그·repo·문서에서 개선안 발견 후 검증 | 2차→3차 | 2차 generic research artifact/proposal 생성, 3차 sandbox/evaluation/promotion/rollback |
-| 한 곳에서 다른 프로젝트의 실제 수정까지 이어짐 | 1차 | cross-system project resolution → WorkItem → adapter/worker execution |
-| Discord가 모든 말을 무조건 중앙으로 보내지 않음 | 1차 | local-vs-central edge policy + actual escalation |
-| pipeline을 중앙에서 모듈식으로 교체 | 1차 | immutable/versioned pipeline recipe와 work 분리 |
-| 필수 정보가 없으면 즉시 사용자에게 질문 | 1차 | durable NEED_USER + restart-safe resume |
-| 과거 전체 과정을 못 본 worker의 handover 격차 감소 | 1차 | project coordination state + source-owner projection + provenance-aware context pack |
-| 프로젝트 노하우를 다음 프로젝트에 재사용 | 1차→2차 | 1차 manual lesson/bootstrap, 2차 outcome 기반 지속 loop |
-| 스케줄/요청 없이 background work 지속 | 2차 | durable trigger + background scheduler |
-| 커뮤니티·도서·자료를 조사해 지식 축적 | 2차 | research watcher + evidence/artifact + lesson candidate |
-| 지금 안 쓰는 유용한 정보를 aside로 분류 | 2차 | research classification / backlog knowledge |
-| 새 이미지 AI를 background에서 몇 번 시험하고 router에 편입 | 2차→3차 | 2차 bounded experiment + promotion policy로 router binding, 3차 measured self-improvement와 자동 최적화 |
-| 무료 게임 asset 수집 | 2차 | watcher → artifact catalog with source/provenance |
-| 학교 프린트 스캔·저장·실행항목 생성 | 2차 | school material end-to-end artifact/extraction/owner/work flow |
-| 하교시간에 오늘 report와 할 일 선제 전달 | 2차 | scheduled owner-aware daily brief |
-| 여러 API key/계정/기기/서버 자원 활용 | 2차→3차 | 2차 resource pool/fallback, 3차 quota/cost/quality optimization |
-| 유휴 무료 자원으로 제대로 된 game demo 제작 | 3차 | multi-day Goal/Work graph → playable build → user feedback iteration |
-| 시스템이 성과·실패를 보고 스스로 개선 | 3차 | proposal → sandbox → evaluation → promotion/monitoring/rollback |
-
-2차의 service experiment가 통과했다고 곧바로 무인 production 변경을 허용한다는 뜻은 아니다. 2차에서는 candidate 등록과 명시된 promotion policy까지, production self-improvement의 닫힌 자동 loop는 3차에서 검증한다.
+| 시스템이 스스로 문제를 발견하고 진화 | 1차 | unknown-problem diagnosis + autonomous Goal + self-improvement loop |
+| 반성/메타인지 방식 자체도 다시 개선 | 1차 | metacognition이 자기 prompt/policy/evaluation 기록을 관찰하고 개선 |
+| 요청이 없어도 조사·실험 지속 | 1차→3차 | 1차 researcher loop, 3차 broad watcher/long-horizon operation |
+| 자동 자기수정 | 1차 | ordinary change 자동 promotion/report, protected change external approval |
+| 여러 모델/API/CLI 사용 | 1차→2차 | LiteLLM/model gateway + Antigravity/OpenCode/Codex worker, 이후 reliable routing |
+| 어느 기기에서든 웹으로 중앙 접속 | 2차 | AWS remote HTTPS authenticated control surface |
+| 흩어진 ChatGPT/Discord/CLI 작업을 중앙에서 조정 | 2차 | shared Goal/Work authority + multi-client continuity |
+| 사용자가 시킨 일을 중단·재개하며 끝까지 수행 | 2차 | durable request execution + NEED_USER + crash recovery |
+| 한 곳에서 다른 프로젝트 실제 수정 | 2차 | cross-system Work creation and execution |
+| 프로젝트 노하우 재사용 | 2차→3차 | context/lesson candidate + outcome-based cross-project loop |
+| 학교 프린트 처리 | 3차 | artifact → extraction → owner → actionable Work |
+| 일정/할 일 기반 proactive brief | 3차 | owner-aware scheduled personal report |
+| 새로운 AI 서비스 자동 탐색·시험 | 3차 | research/experiment/resource candidate loop |
+| 무료 asset 수집 | 3차 | watcher → artifact catalog with provenance |
+| 여러 기기/서버 자원 활용 | 2차→3차 | 2차 routing contract, 3차 multi-executor growth |
+| 유휴 자원으로 game demo 제작 | 3차 | multi-day autonomous Goal → playable artifact → feedback iteration |
 
 ## Cross-Stage Architecture Invariants
 
 1. **Original vision is constitutional** — 원문 요구와 파생 설계가 충돌하면 파생 설계를 수정한다.
 2. **Control Plane is shared authority, not a serial brain** — 중앙 state를 여러 흐름이 함께 사용한다.
-3. **Work and metacognition run in parallel** — 작업 수행과 시스템 관찰/개선 판단을 한 직렬 chain으로 묶지 않는다.
-4. **Pipeline is an execution recipe** — 문제 종류와 대응표를 Pipeline에 쌓지 않는다.
-5. **No closed problem taxonomy** — 시스템이 앞으로 만날 문제와 해결책을 미리 열거했다고 가정하지 않는다.
-6. **Durable work is above runs** — 하나의 Goal/Work는 여러 run과 시간대를 견딘다.
-7. **Source ownership survives centralization** — 기존 정본을 중앙 편의 때문에 복제 정본으로 만들지 않는다.
-8. **Provenance before promotion** — lesson과 system change는 evidence/evaluation 없이 승격하지 않는다.
-9. **User work dominates background work** — interactive work가 우선한다.
-10. **Ask instead of fabricating** — 필수 정보가 없으면 추정으로 밀어붙이지 않는다.
+3. **Work and metacognition run in parallel** — 작업과 시스템 관찰을 하나의 직렬 chain으로 묶지 않는다.
+4. **Metacognition can observe itself** — 별도 meta-meta 계층을 무한히 쌓지 않는다.
+5. **Pipeline is an execution recipe** — 문제 종류와 대응표를 Pipeline에 쌓지 않는다.
+6. **No closed problem taxonomy** — 앞으로 만날 문제와 해결책을 미리 열거했다고 가정하지 않는다.
+7. **Durable work is above runs** — 하나의 Goal/Work는 여러 run과 시간대를 견딘다.
+8. **Source ownership survives centralization** — 기존 정본을 중앙 편의 때문에 복제 정본으로 만들지 않는다.
+9. **Evaluation before self-change** — ordinary self-change도 sandbox/evaluation/rollback 경계를 가진다.
+10. **Protected authority is external** — 권한·비용·통제 경계를 넓히는 변경은 노트북 Approval Authority 승인 없이는 production 적용 불가.
+11. **No silent user-choice substitution** — 추론된 선호를 이유로 명시적 선택을 몰래 바꾸지 않는다.
+12. **User-owned priority dominates autonomous work** — high-priority user commitment는 background work보다 우선한다.
+13. **Ask instead of fabricating** — 필수 정보가 없으면 추정으로 밀어붙이지 않는다.
+
+## Runtime Placement Strategy
+
+### AWS
+
+항상 켜진 중앙 runtime의 첫 운영 위치.
+
+초기 역할:
+
+- PostgreSQL / central state
+- researcher triggers
+- model/API work
+- background research
+- Goal/Work queue
+- reports
+
+### Laptop
+
+1차 repo mutation의 기본 executor.
+
+또한 ADR 0004의 Approval Authority를 호스팅한다.
+
+1차에서는 laptop 하나의 workspace mapping만 실제로 구현한다. multi-host workspace synchronization은 3차 쪽으로 미룬다.
+
+## User Work Priority
+
+priority는 user-owned policy로 해석한다.
+
+현재 중요한 예:
+
+- 학교 수행평가와 AI 활용 대회 참여처럼 실제 commitment가 높은 요청은 background/autonomous work를 yield시키고 가용 자원을 우선 사용한다.
+- "이거 재밌겠다. 한번 만들어봐." 정도의 낮은 commitment 발화는 즉시 실행보다 TODO/Goal 후보로 남길 수 있다.
+
+이 예를 generic core의 학교/대회 switch문으로 만들지 않는다.
 
 ## Current Position
 
-2026-09-19 현재 위치는 **1차 완성 초반부**다.
+2026-09-19 현재 위치는 **1차 초반 — durable researcher kernel 구축 전환점**이다.
 
-이미 확보한 기반:
+이미 있는 기반:
 
-- Core contracts
+- provider-independent contracts
 - versioned pipeline runtime
+- NEED_USER suspend/resume
 - run/question persistence abstraction
 - PostgreSQL migration
-- event/trace
+- append-only event/trace
 - worker registry
 - Antigravity/OpenCode CLI adapters
-- Discord edge policy/shadow experiment
+- Discord edge policy
 - minimal authenticated Web surface
-- initial scheduler/lesson/evaluation domain objects
+- initial scheduler/lesson/evaluation objects
 
-중요한 구조적 수정:
+현재 다음 구조가 아직 필요하다.
 
-- 기존의 `Request → Pipeline → Worker` 실행 흐름은 Work layer로 두고, 그와 병렬로 중앙 state를 관찰하는 Metacognition layer를 둔다.
-- cross-system project coordination state와 provenance-aware context assembly를 둔다.
-- logical project source와 executor-local workspace path를 분리한다.
-- Worker와 실제 실행 위치/계정/자원 풀을 분리할 수 있는 경계를 만든다.
-- Artifact를 단순 문자열 ref가 아니라 장기 작업의 일급 metadata로 다룰 준비를 한다.
-- in-memory WorkQueue를 최종 scheduler로 간주하지 않는다.
-- 후순위 구현이라는 이유로 autonomy/self-improvement의 **아키텍처 요구사항**까지 미루지 않는다.
+- durable Goal/Work layer
+- restart-safe researcher loop
+- autonomous Goal generation
+- mixed evaluation
+- self-improvement lifecycle
+- ordinary auto-promotion + rollback
+- protected change classification
+- laptop Approval Authority
+- LiteLLM gateway
+- Codex worker
+- AWS always-on researcher deployment
+- daily researcher report
 
 ## Roadmap Maintenance
 
 - README의 Original Vision 원문은 요약문으로 대체하지 않는다.
-- Derived Final Goals를 추가·병합·삭제하면 Original Vision Coverage 표와 completion-stage acceptance를 같은 변경에서 함께 갱신한다.
-- stage 이동은 "나중에 하자"라는 이유만으로 원문 요구를 삭제하는 행위가 아니다. 어느 stage에서 닫히는지 포인터가 남아야 한다.
-- 새 기능 제안이 최종 목적과 직접 연결되지 않으면 기본적으로 backlog 후보이며 core architecture에 즉시 넣지 않는다.
-- 실제 구현이 문서와 달라졌으면 완료했다고 쓰기 전에 Current Position/Architecture/해당 stage 문서를 갱신한다.
+- stage 이동은 요구 삭제가 아니다. 어느 stage에서 닫히는지 포인터를 남긴다.
+- 새 기능이 최종 목적과 직접 연결되지 않으면 기본적으로 backlog 후보로 둔다.
+- 현재 stage의 첫 역할을 닫는 데 필요하지 않은 외부 integration은 뒤로 민다.
+- 실제 구현이 문서와 달라졌으면 완료라고 쓰기 전에 Current Position/Architecture/해당 stage 문서를 갱신한다.
+- protection boundary 변경은 문서 편집만으로 효력이 생긴 것으로 간주하지 않는다. 실제 Approval Authority와 deployment permission으로 강제해야 한다.
 
 ## Architecture Decisions
 
 - [ADR 0001 — Separate Control Plane Repository](decisions/0001-control-plane-boundary.md)
 - [ADR 0002 — Durable Work Above Pipeline](decisions/0002-durable-work-above-pipeline.md)
 - [ADR 0003 — Parallel Metacognition Over Case-Based Orchestration](decisions/0003-generic-planning-over-hardcoded-pipelines.md)
+- [ADR 0004 — Self-Modification Authority and External Approval Boundary](decisions/0004-self-modification-and-approval-boundary.md)
 
 ## Work Discipline
 
-각 변경은 `inspect → plan → implement → test → inspect diff → verify` 순서로 수행한다.
+각 변경은 inspect → plan → implement → test → inspect diff → verify 순서로 수행한다.
 
 작업 종료 시 적절한 event/decision/project state에 최소한 다음을 남긴다.
 
