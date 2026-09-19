@@ -36,27 +36,30 @@ Control Plane, pipeline runtime, event store, worker/tool registry, scheduler, m
    어느 기기에서든 중앙에 접속해 상황을 보고하고 질문하고 작업을 맡길 수 있어야 한다.
 
 2. **Persistent personal and project context**  
-   채팅방·모델·기기·worker가 바뀌어도 사용자와 프로젝트의 연속성이 끊어지지 않아야 한다. 기존 domain 정본을 무작정 중앙으로 복제하지 않고 owner-aware adapter를 통해 사용한다.
+   채팅방·모델·기기·worker가 바뀌어도 사용자와 프로젝트의 연속성이 끊어지지 않아야 한다. 중앙 질의응답은 범용 답변에 머물지 않고 사용자와 현재 프로젝트의 정본 맥락을 owner-aware 방식으로 조립해 사용해야 한다. 실제 model fine-tuning은 이를 달성하는 유일한 방법으로 전제하지 않는다.
 
-3. **Cross-project learning**  
+3. **Cross-system actionability**  
+   한 인터페이스에서 발견한 문제나 요청이 다른 프로젝트·runtime의 실제 work로 이어질 수 있어야 한다. 예를 들어 Manager에게 Eve 프로젝트 문제를 말하면 적절한 권한과 adapter를 통해 Eve 관련 WorkItem을 만들고 수정·검증 흐름까지 이어갈 수 있어야 한다.
+
+4. **Cross-project learning**  
    한 프로젝트에서 얻은 검증된 노하우와 실패가 다음 프로젝트 시작 시 후보로 검색·선별되어 재사용되어야 한다.
 
-4. **Automatic orchestration**  
+5. **Automatic orchestration**  
    사용자가 작업을 요청하면 시스템이 project, pipeline, worker, tool, 실행 위치와 필요한 자원을 판단하고 추적 가능한 방식으로 배치해야 한다.
 
-5. **Autonomous operation**  
+6. **Autonomous operation**  
    사용자의 즉시 요청이 없어도 허용된 범위에서 조사, 수집, 평가, 유지관리, 실험, 보고와 장기 작업을 계속할 수 있어야 한다.
 
-6. **Resource exploitation without provider lock-in**  
+7. **Resource exploitation without provider lock-in**  
    여러 모델, CLI, MCP, API key, 계정, 기기, 서버와 무료 할당량을 하나의 교체 가능한 자원 풀처럼 다룰 수 있어야 한다. credential 값 자체를 중앙 이벤트나 로그에 저장하지 않는다.
 
-7. **Real artifact production**  
+8. **Real artifact production**  
    조사 요약만 하는 시스템이 아니라 코드, 문서, 스캔 결과, 리포트, 데이터, 이미지 파이프라인 결과, 게임 빌드·데모 같은 실제 산출물을 장기간에 걸쳐 만들고 관리할 수 있어야 한다.
 
-8. **Proactive personal operations**  
+9. **Proactive personal operations**  
    학교 자료 처리, 할 일, 일정, 일일 브리프처럼 프로젝트 외의 개인 운영도 같은 중앙에서 owner-aware 방식으로 이어져야 한다.
 
-9. **Measured self-improvement**  
+10. **Measured self-improvement**  
    시스템은 자신의 실패와 성과에서 개선 후보를 만들 수 있어야 하지만, 근거 없는 자기수정이나 production 자동 덮어쓰기는 하지 않는다. 개선은 provenance, sandbox/evaluation, promotion/rollback 경계를 가진다.
 
 ## Architectural Principle
