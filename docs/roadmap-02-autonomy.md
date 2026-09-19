@@ -225,6 +225,10 @@ credential secret 값은 외부 secret owner에 두고 중앙은 opaque ref와 u
 
 game-development watcher가 재사용 가능한 무료 asset 후보 발견 → source/license/provenance와 함께 artifact catalog에 등록 → 프로젝트 요구와 맞을 때 검색 가능. 출처·사용 조건을 모르는 파일을 "무료"로 단정해 축적하지 않음.
 
+### I. No-request day
+
+사용자가 하루 동안 새 요청을 보내지 않아도 이미 허용된 schedule/watcher/Goal에서 background work가 발생 → budget/priority 안에서 실행 → duplicate/runaway work 없이 결과를 artifact/lesson candidate/brief에 정리 → 사용자가 돌아오면 interactive request가 즉시 우선권을 가짐.
+
 ## 10. Explicitly Not Required for 2차
 
 - system code의 무인 production promotion
