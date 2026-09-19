@@ -72,11 +72,16 @@ background work가 사용자의 interactive work를 굶기면 실패다.
 
 이 값은 pipeline 내부 상수가 아니라 current state다.
 
+### Failover before replanning
+
+같은 capability, quality floor, privacy/risk, budget policy를 만족하는 다른 resource가 있으면 Execution Resolution이 concrete resource만 바꿀 수 있다. 이 경우 Work의 의미가 달라지지 않으므로 매번 새 PlanRevision을 만들 필요가 없다.
+
+동등 failover로 해결되지 않고 계획 의미를 바꿔야 할 때 Replanner로 올린다.
+
 ### Generic replanning options
 
 Planner는 policy가 허용하는 범위에서 다음을 조합할 수 있다.
 
-- 같은 capability의 다른 resource로 fallback
 - 더 저렴하거나 더 가벼운 model/tier로 변경
 - 병렬성 또는 batch size 축소
 - 낮은 우선순위 work 연기
@@ -268,7 +273,7 @@ resource pool은 provider별 switch문이 아니라 descriptor/state registry로
 
 ### D. Resource fallback and plan revision
 
-선호 executor/provider의 quota/health 문제 → generic observation 생성 → 같은 Goal에서 새 PlanRevision → 완료된 artifact 보존 → capability가 맞는 다른 자원으로 재배치 또는 policy에 따른 축소/연기. trace/provenance는 이어짐.
+선호 executor/provider의 quota/health 문제 → generic observation 생성 → 동등 resource가 있으면 Execution Resolution이 transparent failover → 없거나 plan 의미 변경이 필요하면 같은 Goal에서 새 PlanRevision → 완료된 artifact 보존 → policy에 따른 축소/연기/분할/NEED_USER. trace/provenance는 이어짐.
 
 ### E. School material flow
 
