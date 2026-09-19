@@ -123,7 +123,21 @@ Goal/acceptance criteria를 조용히 낮추는 것은 replanning이 아니다. 
 
 ### 2.4 Execution Resolution
 
-Execution Resolution은 Planner가 요구한 **capability와 constraints**를 현재 registry/resource state의 구체 worker/tool/executor/provider resource에 늦게 매핑한다.
+Execution Resolution은 Planner가 요구한 **capability와 constraints**를 현재 registry/resource state의 구체 pipeline/worker/tool/executor/provider resource에 늦게 매핑한다.
+
+Capability id는 provider/project 이름을 대신한 또 다른 하드코딩 enum이 아니다. extensible descriptor로 관리한다.
+
+최소 descriptor 후보:
+
+- capability_id
+- human/model-readable description
+- input/output artifact or schema refs
+- side-effect class / retry safety
+- required permissions/risk
+- optional quality/evaluation dimensions
+- version/freshness where semantics can evolve
+
+Worker/Tool/Resource/Pipeline은 capability id를 선언하고 Registry는 존재하지 않는 capability ref를 검증할 수 있어야 한다.
 
 가능하면 Plan은 특정 provider 이름보다 필요한 capability/quality/privacy/budget/deadline constraints를 표현한다. concrete resource pinning이 정말 필요한 경우에만 명시적 resource ref를 둔다.
 
@@ -138,6 +152,8 @@ Execution Resolution은 Planner가 요구한 **capability와 constraints**를 �
 - budget
 - permission/risk
 - pipeline recipe
+
+Pipeline recipe도 특정 intent if/else로만 찾지 않고 metadata/descriptor를 통해 "어떤 capability/work kind를 수행하며 어떤 input/output/side-effect 특성이 있는가"를 표현할 수 있어야 한다. 현재 `PipelineSpec.trigger`는 초기 metadata seam이며, 장기 Trigger authority와 구분한다.
 
 초기 구현은 capability → CLI worker 선택만 수행한다. 이를 최종 형태로 오인하지 않는다.
 
@@ -298,6 +314,7 @@ promotion or rejection
 **Changing domain decisions — generic core에 이름별 하드코딩 금지**
 
 - provider/model/account/project 이름
+- capability 목록을 닫힌 enum으로 고정하고 새 capability마다 core branch 추가
 - quota 숫자와 reset 정책
 - worker/resource ranking 우선순위
 - fallback/degradation 순서
@@ -592,6 +609,7 @@ Redis는 요구가 증명되기 전 필수가 아니다.
 - in-memory + PostgreSQL run/question store 구현
 - initial migrations
 - CapabilityRegistry / WorkerService
+- 현재 capability는 worker/tool의 string set 비교가 중심이며 descriptor registry/validation은 아직 얇음
 - 현재 worker selection의 고정 quality/cost/latency sort와 tool latency sort
 - Antigravity/OpenCode CLI adapters
 - Discord edge policy와 shadow routing experiment
@@ -603,6 +621,7 @@ Redis는 요구가 증명되기 전 필수가 아니다.
 - Goal/Plan/Work graph
 - Planner/Replanner contract와 durable PlanRevision
 - normalized Observation/ResourceState/Policy lifecycle
+- extensible CapabilityDescriptor와 pipeline execution metadata
 - replaceable selection/ranking policy
 - durable trigger engine
 - production scheduler leases
