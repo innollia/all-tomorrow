@@ -1,78 +1,191 @@
 # Architecture
 
-## 1. 시스템 경계
+이 문서는 README의 최종 목적을 기술 구조로 번역한다. README의 Original Vision과 충돌하면 이 문서를 수정한다.
 
-All Tomorrow는 application이 아니라 Control Plane이다. 중앙이 소유하는 것은 authority와 공유 상태이며, 실행은 edge와 worker에 분산된다. 아래 그림은 목표 구조이며, 현재 구현 완료도를 나타내지 않는다.
+현재 구현은 아래 목표 구조의 일부만 존재한다. 구현된 것과 목표 경계를 섞어 "이미 완성됨"으로 서술하지 않는다.
+
+## 1. Target System Shape
+
+All Tomorrow의 중앙 authority는 모든 실행과 모든 domain fact를 직접 소유하는 monolith가 아니다.
 
 ```text
-Discord/Web/CLI/ChatGPT
-        │
-        ▼
-   Edge Agent
-   ├─ local reply/tool
-   └─ escalation envelope
-        │
-        ▼
-All Tomorrow Control Plane
-   ├─ request/project/capability resolution
-   ├─ versioned pipeline runtime
-   ├─ project/task/run/event authority
-   ├─ pending user questions
-   └─ adapter dispatch
-        │
-        ├─ Eve adapter ─────> Eve MCP/runtime ──> Eve-owned Notion/Postgres
-        ├─ Manager adapter ─> Antigravity bridge
-        ├─ Worker adapters ─> Codex/OpenCode/other workers
-        └─ Tool adapters ───> MCP/native tools
+Discord / Web / CLI / ChatGPT / schedules / watchers / external events
+                              │
+                              ▼
+                         Edge / Ingress
+                   local reply or escalation
+                              │
+                              ▼
+                    All Tomorrow Authority
+        ┌──────────────────────────────────────────┐
+        │ project / goal / work / trigger          │
+        │ permission / budget / orchestration      │
+        │ pipeline version / run / question        │
+        │ event / artifact metadata / provenance   │
+        │ lesson / evaluation / proposal metadata  │
+        └──────────────────────────────────────────┘
+                              │
+                              ▼
+                     Execution Resolution
+            capability → worker/agent → executor/host
+                         → provider resource
+                              │
+             ┌────────────────┼────────────────┐
+             ▼                ▼                ▼
+          workers            tools          adapters
+      coding/analysis     MCP/native       Eve/Manager/
+                                           Discord/etc.
+             │                │                │
+             └────────────────┼────────────────┘
+                              ▼
+                    source-owned systems
+              Git / Notion / Discord / DB /
+                object storage / providers
 ```
+
+중앙집권의 의미는 **하나의 authority에서 목표·작업·라우팅·추적·질문·결과를 조정할 수 있다**는 뜻이다. 모든 데이터를 한 DB로 옮긴다는 뜻이 아니다.
+
+## 2. Core Layering
+
+### 2.1 Ingress
+
+사용자 메시지만 ingress가 아니다.
+
+최종적으로 지원할 origin:
+
+- user request
+- schedule
+- external event/webhook
+- watcher condition
+- system-generated proposal
+
+현재 Discord edge policy와 Web API는 이 층의 초기 구현이다.
+
+### 2.2 Goal and Work
+
+장기 목적과 durable work는 pipeline보다 위에 둔다.
+
+- Goal: 여러 work와 여러 run에 걸쳐 살아남는 목적
+- WorkItem: 실제 수행·추적·대기·재시도되는 durable 작업
+- Run: WorkItem을 특정 pipeline version으로 실행한 한 시도
+
+하나의 WorkItem이 worker 교체, 재시도, NEED_USER, 여러 날의 대기를 거쳐도 Work identity를 잃지 않아야 한다.
+
+현재 DB의 `tasks`는 이 목표 WorkItem 모델에 비해 얇으며 1차 완성에서 재검토한다.
+
+### 2.3 Orchestration
+
+오케스트레이션은 다음을 분리해 판단할 수 있어야 한다.
+
+- project
+- capability
+- worker/agent
+- tool
+- executor/host
+- provider resource/account reference
+- budget
+- permission/risk
+- pipeline
+
+초기 구현은 capability → CLI worker 선택만 수행한다. 이를 최종 형태로 오인하지 않는다.
+
+### 2.4 Pipeline
+
+Pipeline은 **하나의 WorkItem을 실행하는 versioned recipe**다.
+
+현재 runtime이 유지하는 좋은 경계:
+
+- YAML/JSON spec load
+- immutable version identity
+- node registry
+- safe variable resolution
+- sequential execution + limited branch
+- retry metadata
+- NEED_USER suspend/resume
+- cancellation
+- event emission
+
+Pipeline 자체가 Goal manager, scheduler, resource pool, long-term memory, self-improvement controller를 모두 먹지 않는다.
+
+### 2.5 Execution
+
+실행 capability와 실행 위치/자원을 분리한다.
+
+- Worker/Agent: 무엇을 할 수 있는가
+- Executor/Host: 어디서 어떻게 실행하는가
+- Provider Resource: 어떤 model/provider/account/quota/credential ref를 쓰는가
+
+현재 AntigravityWorker/OpenCodeWorker는 로컬 CLI worker+executor가 한 adapter 안에 붙어 있는 초기 구현으로 본다. 1차 완성에서 미래 분리를 막지 않는 contract seam을 만든다.
+
+### 2.6 State, Events, Artifacts
+
+- canonical projection과 append-only event를 분리한다.
+- event는 수정 이력이 아니라 provenance/history다.
+- Artifact는 bytes 자체가 아니라 중앙에서 추적할 metadata identity를 가진다.
+- 대용량 bytes는 source/object storage owner에 둘 수 있다.
+
+### 2.7 Knowledge and Improvement
+
+Lesson/Evaluation/Proposal은 중앙 orchestration 지식의 lifecycle이다.
+
+```text
+event/run/artifact
+      ↓
+lesson candidate
+      ↓
+evidence/reuse/evaluation
+      ↓
+accepted lesson or improvement proposal
+      ↓
+sandbox/evaluation
+      ↓
+promotion or rejection
+```
+
+현재 lesson/evaluation class는 초기 골격이다. 자동 promotion은 아직 구현된 것으로 보지 않는다.
+
+## 3. Source Ownership
 
 ### 중앙이 소유하는 정본
 
-- project identity와 등록된 repository/environment 참조
-- 중앙 task와 run 상태
-- versioned pipeline specification
+- project registration identity와 중앙 source references
+- Goal/WorkItem/Run의 orchestration state
+- versioned pipeline specifications/records
 - execution event와 trace linkage
-- pending user question과 resume state
-- worker/tool/capability registry metadata
-- lesson candidate 및 검증 상태
+- pending user questions와 resume state
+- worker/tool/executor/resource registry metadata
+- trigger/schedule metadata
+- artifact catalog metadata
+- lesson/evaluation/improvement proposal metadata
 
 ### 중앙이 소유하지 않는 정본
 
 - Eve persona/world/scene canonical state
-- Manager persona와 대화 세션 내부 상태
-- 각 Git repository의 코드와 Git history
+- Manager persona와 Manager-owned personal facts
+- 각 Git repository의 코드/Git history
 - Discord 원본 메시지
-- Notion에 이미 owner가 있는 Manager/Eve domain facts
+- Notion에 이미 owner가 있는 domain facts
 - provider secret 값
+- 외부 서비스가 소유하는 원본 artifact bytes
 
-## 2. 핵심 invariant
+동일 사실을 여러 저장소에 쓰는 adapter는 projection임을 명시하고 owner/version/provenance를 보존한다.
 
-1. Clients, models, workers, tools, pipelines는 교체 가능하다.
-2. Project history, canonical state, accumulated knowledge, user control은 그 교체에서 살아남는다.
-3. Central authority does not imply central execution.
-4. No new knowledge island.
-5. Ask rather than hallucinate ownership.
-6. Preserve provenance.
+`Project.owner`와 domain canonical owner를 같은 의미로 쓰지 않는다. 현재 catalog의 `owner` 의미가 모호하므로 1차 완성에서 registry ownership과 source/canonical ownership을 구분한다.
 
-## 3. V1 bounded context
+## 4. Core Invariants
 
-```text
-edge         local/central 판단과 escalation envelope
-pipeline     spec load, validation, node execution, branch, resume
-projects     project identity와 source ownership
-tasks        user-visible work item
-runs         pipeline 실행 상태
-events       append-only history
-questions    NEED_USER lifecycle
-registry     worker/tool/capability metadata
-adapters     외부 시스템 경계
-```
+1. Original Vision이 파생 설계보다 우선한다.
+2. Control Plane은 최종 목적을 위한 수단이다.
+3. Clients, models, workers, executors, tools, providers, pipelines는 교체 가능하다.
+4. Goal/Work history, accumulated knowledge, provenance, user control은 교체에서 살아남는다.
+5. Central authority does not imply central execution or central ownership of domain facts.
+6. No new knowledge island.
+7. Ask rather than hallucinate ownership, target, permission or required input.
+8. Preserve provenance.
+9. Background work yields to interactive user work at safe boundaries.
+10. Evaluation precedes production self-improvement promotion.
 
-V1에서는 Memory, Evaluation, Background Research를 확장 가능 경계로만 남기고 자동화하지 않는다.
-
-## 4. Core contracts
-
-현재 구현된 핵심 계약은 다음과 같다.
+## 5. Current Contracts
 
 ### RequestEnvelope
 
@@ -90,7 +203,11 @@ candidate_project_id
 central_reason
 ```
 
+RequestEnvelope는 ingress contract다. 장기 Work identity를 대신하지 않는다.
+
 ### ExecutionContext
+
+현재 구현:
 
 ```text
 request
@@ -117,7 +234,7 @@ user_question
 error
 ```
 
-`NEED_USER`는 `question`, `reason`, `blocked_step`, `resume_token`, `required_fields`를 요구한다. resume token은 임의 pipeline 입력이 아니라 저장된 run/step과 일회성 또는 만료 정책으로 연결한다.
+`NEED_USER`는 저장된 run/step과 연결된 resume token을 사용한다.
 
 ### PipelineSpec
 
@@ -131,7 +248,7 @@ trigger
 steps
 ```
 
-Spec은 immutable version으로 저장한다. 활성 버전 변경은 새 run에만 적용하고, 진행 중인 run은 시작 당시 version을 유지한다.
+Pipeline spec의 `trigger` metadata와 장기 Trigger entity는 역할을 구분한다. Pipeline trigger는 "이 recipe가 어떤 intent/event에 적합한가"를 표현할 수 있고, durable Trigger는 미래 시점/조건에서 WorkItem을 발생시키는 authority다.
 
 ### Event
 
@@ -152,35 +269,13 @@ artifact_refs
 metadata
 ```
 
-Event는 append-only history다. canonical projection은 event와 별도이며, event 수정으로 현재 상태를 고치지 않는다.
+Event는 append-only다.
 
-## 5. Pipeline runtime
+## 6. Edge Escalation
 
-현재 runtime은 DAG 엔진이 아니라 명시적 순차 step과 제한된 조건 분기만 지원한다. `WorkerService`가 capability metadata와 실제 CLI adapter를 묶고, `capability.select`와 `worker.run` node가 `pipelines/coding.yaml`에서 이를 사용한다. 실행 상태는 `RunStateStore`에 저장되며, `NEED_USER` 답변은 동일 run/step/version으로 재개된다.
+Edge는 local 처리와 중앙 escalation을 구분한다.
 
-- YAML/JSON spec load와 schema validation
-- node type registry
-- `${step.output}` 형태의 안전한 변수 참조
-- 순차 실행
-- 명시적 condition/branch
-- retry policy의 횟수와 backoff metadata
-- 모든 step 결과 event 기록
-- `NEED_USER`에서 run 정지
-- 답변 검증 후 동일 run/version/step resume
-- cancellation
-
-초기 비목표:
-
-- 임의 코드 expression 평가
-- 동적 plugin 설치
-- 무한 loop
-- 분산 transaction
-- GUI editor
-- production에서 spec in-place 수정
-
-## 6. Edge escalation
-
-Edge는 최소한 다음 signal을 계산한다.
+현재 Discord signal:
 
 ```text
 needs_shared_memory
@@ -191,63 +286,101 @@ needs_long_running_task
 needs_canonical_mutation
 ```
 
-모두 false이면 local 처리 가능하다. 하나 이상 true여도 자동 중앙 실행을 강제하지 않고, policy 결과와 원문을 envelope로 보낸다. 중앙 resolver가 project와 risk를 다시 검증한다.
+모두 false인 일반 대화는 중앙 Work/Run 생성을 강제하지 않는다.
 
-Edge policy는 YAML로 정의하며 pure classifier 테스트가 있다. 기존 Discord bot에는 별도 Eve worktree에서 shadow routing만 연결했다. 실제 central escalation과 해당 Eve 브랜치의 통합·배포는 아직 완료되지 않았다.
+하나 이상 true여도 edge가 최종 authority가 되지 않는다. 중앙이 project, ownership, risk, permission을 다시 검증한다.
 
-## 7. Source ownership
+## 7. Persistence and Scheduling
 
-| Domain | Owner | 중앙 접근 |
-|---|---|---|
-| Central project/task/run/event | All Tomorrow PostgreSQL | 직접 service |
-| Pipeline specs | Git의 YAML + DB version record | loader/publisher |
-| Eve scene/persona/world | 기존 Eve Notion/PostgreSQL/runtime | Eve adapter |
-| Manager canonical facts | 기존 Notion owner | Manager memory adapter |
-| Discord messages | Discord | Discord service/cache adapter |
-| Repository code/history | Git repository | repo tool adapter |
-| Large artifacts | 향후 object storage | metadata pointer |
-| Secrets | 외부 secret store | opaque key reference |
+### PostgreSQL
 
-동일 사실을 여러 저장소에 쓰는 adapter는 projection임을 명시하고 owner/version/provenance를 함께 기록한다.
+1차 기본 durable authority로 PostgreSQL을 우선한다.
 
-## 8. Persistence
+현재 migration에는 projects/tasks/runs/run_steps/events/pipeline_versions/user_questions/registry 구조와 lessons 구조가 있다.
 
-V1 영속화는 PostgreSQL을 우선한다. pgvector는 lesson retrieval 요구가 실제 구현되는 단계까지 필수 dependency로 넣지 않는다. Redis도 요구가 증명되기 전에는 추가하지 않고 Postgres 기반 claim/queue로 시작한다.
-
-최소 논리 테이블 후보:
+1차 완성에서 추가/보강할 논리 영역:
 
 ```text
-projects
-project_sources
-tasks
-runs
-run_steps
-events
-pipeline_versions
-user_questions
-workers
-tools
-capabilities
-registry_bindings
+goals
+work_items or expanded tasks
+work_dependencies
+triggers
+artifacts
+executors
+provider_resources
+leases / scheduling state
 ```
 
-`migrations/0001_core.sql`과 `0002_lessons.sql`에 초기 DDL이 있다. 다만 local live PostgreSQL 검증이 없고 run state 업데이트와 event append의 단일 트랜잭션 보장도 미완료다. 현재 Web API의 runs/questions 목록은 이 저장소의 영속 상태와 연결되지 않는다.
+정확한 테이블 이름은 구현 시 schema review에서 결정한다.
 
-## 9. Security와 mutation
+### Scheduler
 
-- credential 값은 contract/event/log에 기록하지 않는다.
-- adapter는 최소 권한의 opaque credential reference만 받는다.
+현재 `WorkQueue`는 in-memory prototype이다.
+
+최종 scheduler에는 최소한 다음 경계가 필요하다.
+
+- durable enqueue
+- not-before time
+- priority
+- atomic claim
+- lease/heartbeat or equivalent recovery
+- retry/requeue
+- cancellation
+- crash recovery
+
+Redis는 요구가 증명되기 전 필수가 아니다.
+
+## 8. Remote Operation
+
+"어느 기기에서든 접속"은 architecture requirement다.
+
+1차 목표는 복잡한 분산 시스템이 아니라:
+
+- remotely reachable authenticated Web surface
+- HTTPS
+- persistent DB
+- restart recovery
+- secrets separation
+- health checks
+- minimal backup/restore
+
+배포 provider는 교체 가능하게 두며 현재 사용 가능한 AWS 자원은 첫 배포 후보일 뿐 contract 자체는 아니다.
+
+## 9. Security and Mutation
+
+- credential 값은 contract/event/log/artifact metadata에 기록하지 않는다.
+- adapter/executor는 opaque credential/resource reference만 받는다.
 - canonical write와 high-risk tool은 중앙 policy 확인이 필요하다.
-- mutation 대상 repository/project가 둘 이상이면 `NEED_USER`로 멈춘다.
-- idempotency key는 외부 mutation adapter의 필수 입력으로 한다.
-- trace가 없는 외부 mutation은 허용하지 않는다.
+- mutation target이 모호하면 NEED_USER.
+- 외부 mutation은 idempotency key와 trace를 가진다.
+- provider/account 자동화는 실제 허용 범위와 정책을 따른다.
+- self-improvement proposal은 평가 없이 production을 직접 수정하지 않는다.
 
-## 10. 새로운 지식 섬 검산
+## 10. Current Implementation Boundary
 
-이 설계는 새 중앙 저장소를 만들지만 새 도메인 정본 섬을 만들지 않는다.
+2026-09-19 현재 구현된 중심부:
 
-- All Tomorrow의 고유 정본은 cross-system orchestration 데이터뿐이다.
-- Eve/Manager/Discord facts는 원 owner에 남는다.
-- adapter는 복제 저장이 아니라 참조와 provenance를 기록한다.
-- edge-local cache는 canonical state로 승격되지 않는다.
-- pipeline/trace/event는 모든 client가 공유한다.
+- Request/Execution/Node/Pipeline/Event contracts
+- sequential versioned pipeline runtime
+- NEED_USER resume
+- in-memory + PostgreSQL run/question store 구현
+- initial migrations
+- CapabilityRegistry / WorkerService
+- Antigravity/OpenCode CLI adapters
+- Discord edge policy와 shadow routing experiment
+- minimal authenticated Web UI/API
+- initial scheduler/lesson/evaluation objects
+
+아직 목표 구조로 간주하지 않는 것:
+
+- Goal/Work graph
+- durable trigger engine
+- production scheduler leases
+- executor/provider resource pool
+- end-to-end remote production deployment
+- store-backed Web execution path
+- automatic lesson/evaluation loop
+- autonomous watchers/experiments
+- self-improvement promotion/rollback
+
+세부 구현 순서는 [roadmap.md](roadmap.md)와 각 completion-stage 문서를 따른다.
