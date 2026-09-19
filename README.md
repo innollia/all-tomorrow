@@ -152,7 +152,7 @@ Pipeline은 장기 목표와 전체 자율성을 소유하는 거대한 만능 �
 - 원문 사용자 요구는 구현 편의를 이유로 수정하지 않는다.
 - 사용자의 도움이 필요한 필수 정보가 없으면 우회 추정하지 않고 `NEED_USER`로 멈춘다.
 - edge가 local로 처리 가능한 대화는 중앙 run을 만들지 않는다.
-- secret 값은 event, prompt archive, artifact metadata에 남기지 않는다.
+- secret 값은 event, prompt archive, artifact metadata, lesson/knowledge/evaluation 같은 중앙 장기 기록에 남기지 않는다.
 - pipeline, worker, model, provider는 교체 가능해야 한다.
 - 장기 상태, provenance, user control은 그 교체에서 살아남아야 한다.
 - self-improvement는 측정과 rollback 없이 production을 직접 바꾸지 않는다.
