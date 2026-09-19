@@ -60,7 +60,9 @@ background work가 사용자의 interactive work를 굶기면 실패다.
 
 예:
 
-- provider/account quota remaining
+- provider/account quota remaining, 또는 unknown/estimated 상태
+- state source/freshness/confidence
+- observed rate-limit/quota errors
 - rate-limit reset / concurrency ceiling
 - worker/executor health
 - current cost/budget
@@ -254,6 +256,8 @@ credential secret 값은 외부 secret owner에 두고 중앙은 opaque ref와 u
 2차에서는 "최저 비용 자동 최적화"까지 강제하지 않는다. 우선 availability, quota/capacity, rate-limit, permission, capability, quality floor를 기준으로 정상 라우팅하고, 상태 변화가 생기면 Planner에 observation을 보내 PlanRevision을 만들 수 있어야 한다.
 
 resource pool은 provider별 switch문이 아니라 descriptor/state registry로 동작한다. 같은 capability를 만족하는 새 resource가 등록되면 generic candidate set에 자연스럽게 포함되어야 한다.
+
+정확한 quota telemetry가 없는 resource도 배제하지 않는다. 최근 successful use, rate-limit/quota observation, reset hint, freshness/confidence를 이용해 conservative state를 유지하고 필요하면 probe/실행 결과로 갱신한다.
 
 ## 9. Artifact Catalog
 
