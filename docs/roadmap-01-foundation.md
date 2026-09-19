@@ -18,7 +18,7 @@
 Gate A에서는 새 추상화를 많이 만드는 게 아니라 **현재 구조에서 책임이 잘못 놓인 부분만 최소 이동**한다.
 
 1. 현재 `tasks/runs/events/CapabilityRegistry/capability.select/coding.yaml`에서 장기 planning, resource selection, retry 책임이 어디에 섞여 있는지 확인한다.
-2. Goal과 Work의 durable identity를 먼저 잡고, Plan은 우선 **versioned data**로 표현한다. `PlanRevision` 전용 class/table은 필요가 증명되기 전 만들지 않는다.
+2. Goal과 Work의 durable identity를 먼저 잡고, Plan은 우선 **versioned data**로 표현한다. Plan revision 전용 class/table은 필요가 증명되기 전 만들지 않는다.
 3. quota/rate-limit/resource-unavailable 같은 변화는 우선 기존 Event/metadata를 활용해 generic observation으로 표현하고, 별도 observation table은 조회·수명주기 요구가 생길 때만 추가한다.
 4. worker selection의 고정 정렬과 pipeline-local selection policy를 replaceable policy/execution-resolution 경계로 옮긴다.
 5. 위 변경으로 필요한 최소 migration/test만 추가한 뒤 Gate B의 durable execution 검증으로 넘어간다.
@@ -93,7 +93,7 @@ Goal과 Plan을 분리한다.
 - 환경이 바뀌면 Plan을 새 version으로 바꿀 수 있음
 - 성공한 Work/Artifact는 가능한 한 보존
 
-별도 `PlanRevision` entity는 요구하지 않는다. versioned Plan data면 충분할 수 있다.
+별도 revision entity는 요구하지 않는다. versioned Plan data면 충분할 수 있다.
 
 ### 1.5 Generic state and policy seam
 
