@@ -263,7 +263,9 @@ Acceptance:
 - 중앙은 edge hint를 신뢰만 하지 않고 project/risk를 재검증한다.
 - duplicate delivery가 duplicate mutation을 만들지 않는다.
 
-Discord가 첫 edge일 뿐, 계약은 Web/CLI/ChatGPT에도 재사용 가능해야 한다.
+Discord가 첫 edge일 뿐, 중앙 ingress/execution 계약은 Web/CLI/ChatGPT에도 재사용 가능해야 한다. 각 client마다 별도 project/task state를 만들지 않는다.
+
+기존 inventory의 ChatGPT desktop/WebMCP bridge 같은 표면은 새 중앙 계약을 소비할 adapter 후보로 검토하되, 실제 연결이 검증되지 않은 상태에서 "ChatGPT integration 완료"로 표시하지 않는다.
 
 ## 7. Web as Real Control Surface
 
@@ -405,6 +407,10 @@ Manager/Web에서 "Eve 프로젝트의 이 문제를 고쳐" 같은 요청 → p
 ### I. Handover-gap test
 
 새 worker/session이 과거 채팅 원문을 직접 보지 못하는 상태에서 project context pack을 받아 현재 목표, 핵심 결정, 금지된 변경, 열린 work, 관련 source/lesson을 복원 → 이미 결정된 사항을 다시 처음부터 묻거나 과거 결정과 정면 충돌하는 작업을 시작하지 않음.
+
+### J. Multi-client continuity
+
+Web에서 만든 Work/질문/결과를 Discord 또는 실제 연결 가능한 다른 client가 같은 중앙 identity로 조회·이어받음. 두 client가 별도 task/history 섬을 만들지 않음. ChatGPT/CLI adapter는 지원 표면이 검증되는 대로 같은 ingress contract를 사용함.
 
 ## 12. Explicitly Not Required for 1차
 
