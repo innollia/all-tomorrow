@@ -113,7 +113,7 @@ Pipeline은 작업 계층에서 하나의 WorkItem을 실행하는 versioned rec
 사용자가 체감할 제품 순서는 **Researcher → Reliable assistant → Personal manager**다. 그 앞에 제품 기능이 아닌 **Stage 0 — OSS Assembly & Architecture Proof**를 둔다. 여기서 durable execution, agent/tool plumbing, model gateway, telemetry/eval처럼 이미 잘 풀린 문제를 직접 재구현하지 않고 실제 OSS 조합으로 failure skeleton을 먼저 통과시킨다.
 
 - **[Stage 0 — OSS Assembly & Architecture Proof](docs/roadmap/stage-00-assembly/index.md)**  
-  PydanticAI + DBOS + LiteLLM + OpenTelemetry + GitHub/Actions를 첫 조합으로 실제 연결해 crash/restart, idempotency, HITL, provider gateway, trace/eval 경계를 검증한다. 실패하면 Hatchet/Temporal 같은 대체 substrate를 비교한다. 이 단계가 끝나기 전에는 새 queue/lease/LLM client를 직접 구현하지 않는다.
+  PydanticAI를 공통 agent 층으로 두고 DBOS와 Restate를 같은 failure skeleton로 비교한다. tool 표면은 FastMCP gateway 후보로 모으고, 그 뒤 LiteLLM과 OpenTelemetry/GitHub Actions를 한 seam씩 추가한다. 이 단계가 끝나기 전에는 새 queue/lease/LLM client/MCP aggregator를 직접 구현하지 않는다.
 
 - **[1차 완성 — Durable Self-Improving Researcher](docs/roadmap-01-foundation.md)**  
   Goal/Work/Event의 최소 durable kernel 위에 실제 researcher loop를 올린다. 시스템이 스스로 문제와 기회를 발견하고 새 Goal을 만들며 자기 prompt·policy·code까지 평가·개선하는 폐쇄 루프를 먼저 완성한다. AWS를 항상 켜진 중앙 runtime으로 사용하고, repo mutation은 우선 노트북 단일 executor에 제한한다.

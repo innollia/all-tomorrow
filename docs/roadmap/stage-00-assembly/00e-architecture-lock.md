@@ -13,6 +13,7 @@ spike 결과로만 Stage 1을 다시 연다.
 
 - 채택한 durable substrate와 exact version pin 기록
 - FastMCP gateway 채택/기각 기록
+- 각 substrate consumption mode(package/container/protocol/fork) 기록
 - backend 교체 조건 기록
 - architecture/ADR를 실제 결과에 맞게 갱신
 - Stage 1 schema에서 substrate 내부 상태 제거
@@ -26,6 +27,7 @@ spike 결과로만 Stage 1을 다시 연다.
 ### DBOS 채택 시
 
 DBOS application version과 in-flight workflow recovery 관계를 배포 계획에 넣는다.
+Conductor 없이 single-node production을 시작하는 경우 그 선택을 명시하고, Conductor 기능에 암묵적으로 의존하는 운영 절차를 쓰지 않는다.
 
 초기 single-node AWS에서는 Conductor 없이 사용할 수 있지만, multi-host/high-availability가 필요해질 때는:
 - DBOS Conductor의 운영/라이선스 조건을 재검토하거나
@@ -36,6 +38,7 @@ DBOS application version과 in-flight workflow recovery 관계를 배포 계획�
 
 ### Restate 채택 시
 
+- BSL 1.1의 Public Restate Platform Service 제한과 All Tomorrow 사용 형태가 충돌하지 않는지 기록
 - runtime single-node backup/restore
 - application PostgreSQL과 Restate state의 ownership 중복 여부
 - service/virtual-object/workflow 중 All Tomorrow에 필요한 최소 primitive

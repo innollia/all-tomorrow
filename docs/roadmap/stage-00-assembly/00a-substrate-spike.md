@@ -79,6 +79,30 @@ PydanticAI Agent
 
 FastMCP의 ProxyProvider/mount/composition으로 충분하면 자체 gateway를 만들지 않는다.
 
+## 조립 순서
+
+한 번에 전체 stack을 띄우지 않는다.
+
+1. **Durability only**
+   - PydanticAI TestModel 또는 local deterministic model
+   - DBOS spike
+   - Restate spike
+   - 동일 crash/idempotency/HITL acceptance
+2. **Tool seam**
+   - winner 위에 stable FastMCP gateway 하나만 추가
+   - 실제 upstream MCP 2개 이상 proxy/mount
+   - tool discovery/recovery 확인
+3. **Model gateway**
+   - local/OpenAI-compatible stub을 LiteLLM Proxy로 교체
+   - routing/cost/error normalization 확인
+4. **Telemetry**
+   - 하나의 OTel provider/exporter 연결
+   - duplicate span/privacy 확인
+5. **CI/eval**
+   - 같은 skeleton을 regression으로 고정
+
+각 단계가 깨지면 직전 단계가 통과한 상태에서 원인을 좁힌다.
+
 ## Same Acceptance For Both Durable Finalists
 
 각 finalist에 정확히 같은 scenario를 실행한다.
@@ -135,6 +159,29 @@ retry multiplication이 생기면 한 failure class당 한 주된 retry owner만
 - stable MCP gateway 뒤의 tool 추가조차 agent code 재작성/재배포를 계속 요구
 - in-flight execution recovery가 ordinary dependency update마다 쉽게 깨짐
 - single-node 개인 AWS에서 요구 이상의 상시 infra가 필수
+
+## Dependency Consumption Rule
+
+외부 프로젝트를 "가져온다"는 말은 source를 repo 안에 복붙한다는 뜻이 아니다.
+
+우선순위:
+1. Python/package dependency
+2. pinned container/binary
+3. stable HTTP/MCP protocol
+4. upstream fork는 필요한 patch가 실제로 증명될 때만
+
+초기에는 git submodule, vendored source copy, 장기 private fork를 만들지 않는다. fork가 필요해지면 patch 크기와 upstream merge 가능성을 별도 비용으로 기록한다.
+
+## License Notes
+
+- PydanticAI: MIT
+- DBOS Transact Python: MIT
+- FastMCP: Apache-2.0
+- Restate Python SDK: MIT
+- Restate runtime: BSL 1.1; 자체 production 사용은 허용되지만 Public Restate Platform Service 제한을 유지
+- DBOS Conductor: self-hosted production은 별도 proprietary license
+
+Stage 0의 개인용 single-node 선택과 향후 public/multi-user service 선택을 같은 라이선스 판단으로 뭉개지 않는다.
 
 ## 완료조건
 

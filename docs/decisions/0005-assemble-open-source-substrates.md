@@ -66,6 +66,12 @@ Stage 0 walking skeleton 뒤:
 - DBOS Conductor 라이선스, Restate runtime 라이선스/운영 조건처럼 backend별 제약을 계속 감시해야 한다.
 - 빠르게 변하는 upstream의 persisted compatibility 규칙을 CI로 고정해야 한다.
 
+## Consumption Mode
+
+외부 OSS는 기본적으로 package/container/protocol 경계에서 소비한다.
+
+source vendoring, git submodule, permanent fork는 기본값이 아니다. upstream API로 해결되지 않는 gap이 spike에서 재현되고 patch를 upstream에 보내거나 좁은 fork로 유지하는 비용이 정당화될 때만 사용한다.
+
 ## Guardrails
 
 - 같은 책임의 framework를 둘 이상 동시에 production dependency로 넣지 않는다.
@@ -73,6 +79,7 @@ Stage 0 walking skeleton 뒤:
 - 편의를 이유로 vendor type을 core domain API에 노출하지 않는다.
 - integration이 얇지 않다면 새 framework를 더 붙이기 전에 경계를 다시 검토한다.
 - 외부 OSS의 라이선스와 self-host 조건을 version upgrade 때 다시 확인한다.
+- Restate runtime의 BSL restriction과 DBOS Conductor의 proprietary production license를 SDK/library license와 혼동하지 않는다.
 
 
 ## Observability Boundary
