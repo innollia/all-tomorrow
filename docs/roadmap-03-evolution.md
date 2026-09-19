@@ -196,6 +196,12 @@ vector DB는 retrieval implementation 중 하나일 뿐 지식 정본 자체가 
 
 특정 failure pattern이 누적됨 → observation → proposal. 근거가 부족하면 자동 변경 없이 관찰 상태 유지.
 
+### G. Integrated final-vision loop
+
+사용자 부재 중 watcher가 새 도구/자료를 발견 → bounded experiment와 knowledge candidate 생성 → resource policy가 유휴 자원을 확인 → 장기 Goal의 다음 WorkItem을 실행해 실제 artifact를 진전 → scheduled brief에 근거와 결과를 요약 → 사용자가 피드백 → 같은 Goal의 후속 work와 lesson/evaluation evidence로 연결 → 개선 proposal이 생겨도 root user-control policy를 넘지 않고 sandbox/evaluation을 거침.
+
+이 시나리오가 각각의 subsystem demo로만 성공하고 서로 상태를 이어받지 못하면 최종 통합으로 인정하지 않는다.
+
 ## 10. Final-System Failure Conditions
 
 아래 상태라면 기능이 많아도 최종 목적을 달성하지 못한 것으로 본다.
