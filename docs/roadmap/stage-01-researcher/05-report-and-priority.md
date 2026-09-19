@@ -4,44 +4,23 @@
 
 - 상태: **선행작업 대기**
 - 지금 시작 가능: **아니오**
-- 선행조건: 02-researcher-loop 완료
-- 추가 의존성: 실제 비용/host 정보는 04-runtime-and-tools 필요
+- 선행조건: 02 Researcher Loop 완료
+- 추가 의존성: 01 Durable Queue, 04A LiteLLM, 04D AWS Runtime
 
-## Goal
+이 파일은 05 작업의 local index다.
 
-Researcher가 혼자 움직인 결과를 사용자가 복원할 수 있게 하고, user-owned priority가 autonomous work를 이기도록 한다.
+## Packet Status
 
-## Daily Report
+| 순서 | 작업 | 상태 | 지금 시작 가능 | 선행조건 | 읽을 파일 |
+|---:|---|---|---:|---|---|
+| 05A | Report Projection & Store | 선행작업 대기 | 아니오 | 02 완료 | [05a](05-report-and-priority/05a-report-store.md) |
+| 05B | Daily Report Composer | 선행작업 대기 | 아니오 | 05A + 04A | [05b](05-report-and-priority/05b-report-composer.md) |
+| 05C | User-Owned Priority Policy | 선행작업 대기 | 아니오 | 01 queue + 02 | [05c](05-report-and-priority/05c-priority-policy.md) |
+| 05D | Report Trigger & Minimal Access | 선행작업 대기 | 아니오 | 05A + 05B + 04D | [05d](05-report-and-priority/05d-report-trigger-and-access.md) |
+| 05E | Acceptance | 선행작업 대기 | 아니오 | 05A~05D | [05e](05-report-and-priority/05e-acceptance.md) |
 
-최소 항목:
+## 핵심 구조
 
-- 새로 자율 생성한 Goal
-- 진행/완료/중단한 autonomous Work
-- 조사 내용과 핵심 결과
-- 자동 적용한 self-improvement
-- rollback/rejection
-- 사용한 자원/비용 요약
-- 보호 변경 승인 대기 proposal
-- 사용자 판단이 필요한 질문
-
-사용자 생성 Goal과 autonomous Goal을 provenance에서 구분한다.
-
-보고서는 Event dump가 아니라 오늘 시스템이 무엇을 원해서 무엇을 했고 무엇이 달라졌는지 복원하는 요약이다.
-
-## User Priority
-
-priority는 user-owned policy로 결정한다.
-
-현재 중요한 예:
-
-- 학교 수행평가 또는 AI 활용 대회 참여처럼 실제 commitment가 높은 요청은 잘못 돌고 있던 background work를 yield/cancel하고 가용 자원을 우선 사용
-- "이거 재밌겠다. 한번 만들어봐." 같은 낮은 commitment 발화는 즉시 전체 자원을 점유하지 않고 TODO/Goal 후보로 남길 수 있음
-
-학교/대회 이름을 generic core switch문으로 만들지 않는다. 이는 현재 사용자 정책의 예다.
-
-## Done When
-
-1. autonomous Goal/Work 변화가 일일보고서에서 복원 가능
-2. ordinary self-change와 protected pending proposal이 구분되어 보임
-3. high-priority user request가 background work를 yield시킴
-4. low-commitment idea가 즉시 강제 실행되지 않을 수 있음
+- report는 Event dump가 아니라 source-backed projection + summary
+- LLM 실패 시 deterministic fallback
+- priority는 학교/대회 문자열이 아니라 user-owned commitment metadata로 동작
