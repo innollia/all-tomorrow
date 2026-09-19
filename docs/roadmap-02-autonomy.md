@@ -206,6 +206,22 @@ discovered
 
 예를 들어 무료 API가 새로 발견되어 API key 발급이 필요하면 시스템은 "provider X 전용 key 요청 코드"를 추가하는 대신 candidate의 `prerequisites`에 사용자 action을 기록하고 generic NEED_USER를 생성한다. 사용자가 key를 외부 secret owner에 등록한 뒤 opaque credential ref만 중앙에 연결한다.
 
+### User-interruption gate
+
+새 free-tier candidate가 있다는 이유만으로 전부 사용자에게 key 발급을 요구하지 않는다. public 정보만으로 먼저 다음을 평가한다.
+
+- 현재 Goal/Work에서 실제로 부족한 capability인가
+- 이미 등록된 resource와 중복되는가
+- 예상 free quota/capacity가 의미 있는가
+- quality/reliability signal이 최소 기준을 넘는가
+- privacy/risk/terms가 허용 범위인가
+- 가입/key 발급에 드는 사용자 effort가 기대 효용에 비해 타당한가
+- candidate가 실험할 가치가 있는지
+
+이 gate를 통과한 candidate만 사용자 action을 요구할 수 있다. 동일 목적의 후보가 많으면 묶어서 우선순위를 정하고 NEED_USER spam을 만들지 않는다.
+
+사용자에게 요청할 때는 최소한 **왜 필요한지 / 현재 무엇이 막혔는지 / 기대 효용 / 필요한 action / 이후 검증 과정**을 설명할 수 있어야 한다.
+
 필수:
 
 - isolated credential/resource ref
@@ -301,7 +317,11 @@ game-development watcher가 재사용 가능한 무료 asset 후보 발견 → s
 
 ### K. New free API requires user action
 
-Research watcher가 현재 부족한 capability를 제공하는 새 free-tier API 발견 → ResourceCandidate 생성 → 가입/API key 발급 prerequisite 식별 → 사용자에게 NEED_USER로 필요한 action과 이유 요청 → 사용자가 credential을 secret owner에 등록 → opaque ref 연결 → bounded validation → usable이면 resource pool candidate로 편입. provider 이름을 generic planner/pipeline code에 추가하지 않음.
+Research watcher가 현재 부족한 capability를 제공하는 새 free-tier API 발견 → ResourceCandidate 생성 → public metadata로 utility/duplication/risk/user-effort gate 통과 → 가입/API key 발급 prerequisite 식별 → 사용자에게 NEED_USER로 필요한 action과 이유/기대 효용 요청 → 사용자가 credential을 secret owner에 등록 → opaque ref 연결 → bounded validation → usable이면 resource pool candidate로 편입. provider 이름을 generic planner/pipeline code에 추가하지 않음.
+
+### K2. Candidate does not justify interruption
+
+무료 provider 후보가 발견되었지만 기존 pool과 거의 중복되거나 free quota가 너무 작거나 user effort 대비 효용이 낮음 → candidate를 aside/watch 상태로 보존 → key 발급 요청을 보내지 않음. 이후 resource shortage나 조건 변화가 생기면 재평가 가능.
 
 ### L. Generic resource adapter swap
 
