@@ -7,7 +7,7 @@
 
 3차가 끝나면 README 원문의 가장 장기적인 목표가 하나의 닫힌 루프로 연결되어야 한다.
 
-시스템이 외부 변화와 자신의 실행 결과를 관찰하고, 새로운 도구·노하우·파이프라인 개선 후보를 만들고, 실제 산출물과 평가를 통해 검증하며, 허용된 범위에서 검증된 변경을 승격하고 실패하면 되돌릴 수 있어야 한다.
+시스템이 외부 변화와 자신의 실행 결과를 관찰하고, 새로운 도구·노하우·파이프라인·planner/policy 개선 후보를 만들고, 실제 산출물과 평가를 통해 검증하며, 허용된 범위에서 검증된 변경을 승격하고 실패하면 되돌릴 수 있어야 한다. 이 과정은 특정 블로그·provider·failure 이름에 묶이지 않는 generic research/improvement lifecycle을 사용해야 한다.
 
 "스스로 진화"는 자기 마음대로 production을 고치는 것이 아니다. 관찰 → 제안 → sandbox → 평가 → 승인 정책 → promotion → monitoring → rollback의 체계다.
 
@@ -16,6 +16,8 @@
 대상 예:
 
 - pipeline version
+- planner/replanning policy
+- resource selection/degradation policy
 - worker routing policy
 - prompt/agent configuration
 - tool/provider binding
@@ -98,7 +100,9 @@ README의 다수 API key/계정/무료 자원 활용 목표를 실제 resource s
 - task priority
 - expected quality
 
-목표는 "항상 가장 싼 것"이 아니라 정책에 맞는 자원을 선택하는 것이다.
+목표는 "항상 가장 싼 것"이 아니라 Goal/acceptance criteria와 user policy에 맞는 자원을 선택하고, 상태 변화에 따라 Plan을 다시 계산하는 것이다.
+
+Optimizer가 provider별 분기문을 생성하는 구조는 피한다. 새로운 resource는 descriptor/state/capability/evaluation evidence로 비교 가능해야 하고, 선택 policy 자체도 versioned proposal/evaluation 대상으로 다룰 수 있다.
 
 계정/credential 사용은 provider 약관과 실제 허용 범위 안에서만 자동화한다.
 
@@ -130,12 +134,31 @@ README의 다수 API key/계정/무료 자원 활용 목표를 실제 resource s
 2차 watcher를 발전시킨다.
 
 - 새로운 AI service/model/tool
+- All Tomorrow와 유사한 control-plane/orchestration architecture 글
+- agent/planner/resource scheduler 관련 blog/repository/paper
 - game dev knowledge
 - useful libraries
 - asset sources
 - operational techniques
 
+Research source를 미리 고정 목록으로 제한하지 않는다. 시스템 observation이나 improvement question에서 검색어와 탐색 범위를 만들 수 있어야 한다.
+
 발견 즉시 adoption하지 않고 candidate/experiment/evaluation을 거친다.
+
+외부 설계 글을 읽었다고 곧바로 시스템 코드를 고치지 않는다.
+
+```text
+system observation / improvement question
+→ external research
+→ ResearchArtifact + claims + provenance
+→ current architecture와 비교
+→ ImprovementProposal
+→ bounded implementation/sandbox
+→ evaluation against baseline
+→ promote / reject / retain-as-reference
+```
+
+특정 블로그 URL이나 사이트에 대한 전용 pipeline을 만들지 않는다. 웹/문서/repository라는 source type의 adapter와 generic research/evaluation flow를 재사용한다.
 
 "지금 안 쓰지만 나중에 유용한 것"은 aside/backlog knowledge로 분류하고 production context를 오염시키지 않는다.
 
@@ -167,8 +190,12 @@ vector DB는 retrieval implementation 중 하나일 뿐 지식 정본 자체가 
 - excessive token/tool cost
 - background work starvation
 - 사용자가 반복해서 같은 수정 요구
+- resource quota 때문에 반복되는 PlanRevision
+- fallback을 못 찾아 Goal이 자주 막힘
+- 같은 provider-specific branch가 여러 pipeline에 복제됨
+- 새 integration마다 core code 수정이 반복됨
 
-이 관찰은 개선 proposal을 만들 수 있지만 곧바로 규칙을 추가하지 않는다.
+이 관찰은 개선 proposal을 만들 수 있지만 곧바로 규칙을 추가하지 않는다. 특히 "하드코딩이 늘고 있음" 자체를 meta-observation으로 취급해 abstraction 개선 후보를 만들 수 있어야 한다.
 
 ## 9. 3차 Acceptance Scenarios
 
@@ -190,13 +217,21 @@ vector DB는 retrieval implementation 중 하나일 뿐 지식 정본 자체가 
 
 ### E. Resource optimization
 
-여러 executor/provider/resource 중 policy에 맞게 동적 선택. quota/health/cost 변화에 대응하면서 task provenance와 budget을 유지.
+여러 executor/provider/resource 중 policy에 맞게 동적 선택. quota/health/cost/quality 변화가 observation으로 들어오면 같은 Goal의 PlanRevision을 만들고 task provenance와 budget을 유지. 새 provider가 들어와도 planner core나 기존 pipeline 수정 없이 candidate set에 참여.
 
 ### F. Failure-driven meta improvement
 
 특정 failure pattern이 누적됨 → observation → proposal. 근거가 부족하면 자동 변경 없이 관찰 상태 유지.
 
-### G. Integrated final-vision loop
+### G. Architecture research → measured change
+
+반복되는 orchestration/resource 문제가 observation으로 잡힘 → 시스템이 해결 질문 생성 → 유사 control-plane/agent architecture blog·repo·문서 조사 → ResearchArtifact와 claims/provenance 작성 → 현재 architecture와 차이 분석 → generic ImprovementProposal 생성 → sandbox branch/config에서 구현 → baseline과 평가 → 개선이 검증된 경우에만 promotion. 특정 source 전용 pipeline이나 "블로그 내용 그대로 적용" shortcut은 없음.
+
+### H. Generality regression test
+
+새 provider/resource/tool type 여러 개를 fixture로 추가하고 기존 generic pipeline/planner core diff를 검사 → adapter/metadata/policy 등록 외의 서비스 이름별 변경이 필요하면 실패. 기존 하드코딩을 줄이는 proposal도 evaluation 대상으로 다룸.
+
+### I. Integrated final-vision loop
 
 사용자 부재 중 watcher가 새 도구/자료를 발견 → bounded experiment와 knowledge candidate 생성 → resource policy가 유휴 자원을 확인 → 장기 Goal의 다음 WorkItem을 실행해 실제 artifact를 진전 → scheduled brief에 근거와 결과를 요약 → 사용자가 피드백 → 같은 Goal의 후속 work와 lesson/evaluation evidence로 연결 → 개선 proposal이 생겨도 root user-control policy를 넘지 않고 sandbox/evaluation을 거침.
 
@@ -209,8 +244,11 @@ vector DB는 retrieval implementation 중 하나일 뿐 지식 정본 자체가 
 - 중앙 UI는 있지만 실제 작업은 여전히 채팅방별 수동 handover에 의존함
 - 프로젝트마다 같은 노하우를 처음부터 다시 설명해야 함
 - background 기능이 프로세스 재시작에 사라짐
-- pipeline 하나가 scheduler/goal/resource/memory까지 모두 떠맡은 거대한 monolith가 됨
-- 새 도구가 발견될 때마다 사람이 전체 코드를 직접 배선해야 함
+- pipeline 하나가 scheduler/goal/resource/memory/planning/replanning까지 모두 떠맡은 거대한 monolith가 됨
+- quota/rate-limit/provider 장애마다 pipeline에 서비스 이름별 branch가 늘어남
+- Goal과 Plan이 결합되어 resource 하나가 막히면 전체 Goal을 처음부터 다시 시작함
+- 새 도구/provider가 발견될 때마다 generic core와 기존 pipeline을 직접 수정해야 함
+- 같은 의미의 provider-specific error를 planner가 raw string으로 각각 처리함
 - self-improvement가 평가 없이 production을 수정함
 - 지식이 provenance 없이 전역 사실로 섞임
 - 개인 운영과 project 운영이 서로 다른 섬으로 남음
