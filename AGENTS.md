@@ -6,3 +6,9 @@
 - Stage: 해당 `docs/roadmap/stage-*/index.md`
 - 하위 packet이 있으면 가장 가까운 local index도 갱신
 - 상태: `개발중 / 개발완료 / 시작안했음 / 선행작업 대기`
+
+
+## Stage 0 gate
+
+docs/roadmap.md에서 Stage 0가 개발완료가 아니면 Stage 1의 기존 세부 packet은 구현하지 않는다.
+Stage 1 문서에 남은 custom queue/lease/LLM-client 지시는 Stage 0의 재작성 대상이며 더 높은 우선순위의 구현 지시가 아니다.

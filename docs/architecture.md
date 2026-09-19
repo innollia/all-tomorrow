@@ -351,39 +351,28 @@ needs_canonical_mutation
 
 현재 migration에는 projects/tasks/runs/run_steps/events/pipeline_versions/user_questions/registry 구조와 lessons 구조가 있다.
 
-1차 완성에서 추가/보강할 논리 영역:
+1차 완성에서 All Tomorrow application DB가 추가/보강할 논리 영역은 **도메인 의미**에 한정한다.
 
 ```text
 goals
 work_items or expanded tasks
-plan data/version refs where needed
+external execution refs
+plan/version refs where needed
 work dependencies where needed
-triggers
 artifacts
-executors / provider resources
-leases / scheduling state
 ```
+
+durable backend의 queue row, lease, checkpoint, retry bookkeeping은 application schema에 복제하지 않는다. 초기 substrate는 Stage 0에서 검증한 DBOS를 사용하고, system DB/schema를 All Tomorrow domain DB와 논리적으로 분리한다.
 
 Observation, policy, resource-state는 우선 Event/registry/config를 재사용한다. 별도 table은 실제 persistence/query 요구가 생길 때 추가한다.
 
-정확한 테이블 이름은 구현 시 schema review에서 결정한다.
-
-### Scheduler
+### Scheduler / Durable Execution
 
 현재 `WorkQueue`는 in-memory prototype이다.
 
-최종 scheduler에는 최소한 다음 경계가 필요하다.
+All Tomorrow scheduler가 소유하는 것은 사용자/프로젝트 우선순위와 실행 의도다. 실제 durable enqueue, delay, concurrency, recovery, retry mechanics는 DurableExecutionPort 뒤의 substrate에 위임한다.
 
-- durable enqueue
-- not-before time
-- priority
-- atomic claim
-- lease/heartbeat or equivalent recovery
-- retry/requeue
-- cancellation
-- crash recovery
-
-Redis는 요구가 증명되기 전 필수가 아니다.
+초기 구현에서 custom SQL claim, lease/heartbeat, expired-work requeue daemon을 새로 만들지 않는다. backend를 교체해도 Goal/Work 의미가 유지되어야 한다.
 
 ## 8. Runtime Placement and Remote Operation
 
