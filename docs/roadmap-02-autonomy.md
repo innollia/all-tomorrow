@@ -1,266 +1,174 @@
-# 2차 완성 — Autonomous Personal & Project Operations
+# 2차 완성 — Reliable Assistant & Remote Control
 
-> Status: **Planned.** 1차 durable core가 acceptance criteria를 통과하기 전 production 범위로 확장하지 않는다.
-
+> Status: **Planned.** 1차의 self-improving researcher와 durable kernel이 실제 운영 조건에서 닫힌 뒤 시작한다.
 
 ## Definition of Done
 
-2차가 끝나면 All Tomorrow는 사용자가 매번 버튼을 눌러야만 움직이는 중앙 요청 처리기가 아니다.
+2차가 끝나면 All Tomorrow는 혼자 연구만 잘하는 시스템이 아니라, 사용자가 어디서든 일을 맡길 수 있고 그 요청을 끝까지 책임지는 **믿을 만한 개인 비서형 control plane**이 된다.
 
-스케줄, watcher, 외부 사건과 기존 목표를 근거로 durable work를 스스로 발생시키고, background 실행을 지속하며, 프로젝트 간 검증된 lesson을 재사용하고, 학교·일정·리포트 같은 개인 운영까지 같은 중앙 흐름에서 다룰 수 있어야 한다.
+핵심은 "연구원 위에 요청 처리 기능을 붙인다"이지, 1차 researcher를 버리고 새 구조를 만드는 것이 아니다.
 
-또한 작업과 별개의 메타인지 흐름이 전체 운영을 계속 관찰하고, 미리 정의되지 않은 문제도 새 조사·진단·후속 Work로 연결할 수 있어야 한다.
+사용자 요청은 durable Goal/Work로 들어가고, 적절한 worker/tool/resource로 실행되며, 필요한 경우 질문으로 멈췄다가 같은 맥락으로 재개되고, 결과와 provenance를 다시 확인할 수 있어야 한다.
 
-자율성은 "아무거나 알아서 함"이 아니라 origin, budget, permission, provenance와 중단 가능성을 가진 work 생성이다.
+## Gate A — Real User Ingress
 
-## 1. Trigger Engine
+지원 표면:
 
-지원 목표:
+- authenticated Web UI
+- Discord central escalation
+- CLI / API
+- 이후 가능한 다른 client
 
-- cron/time schedule
-- calendar-like one-shot schedule
-- recurring schedule
-- external event/webhook
-- polling watcher
-- condition watcher
-- idle-resource trigger
+모든 ingress는 같은 Goal/Work authority를 사용한다.
 
-모든 trigger는 직접 작업을 실행하는 대신 WorkItem을 생성하거나 기존 Goal을 깨운다.
+각 client가 별도 task/history 섬을 만들지 않는다.
 
-필수:
+Discord는 모든 메시지를 중앙에 보내지 않고 local 처리 가능한 대화는 local에 남긴다.
 
-- deduplication
-- missed-run policy
-- timezone
-- enable/disable
-- last/next fire
-- provenance
-- per-trigger budget/permission
+## Gate B — Any-Device Remote Control
 
-## 2. Background Scheduler
-
-1차 durable work scheduler를 확장한다.
-
-- background concurrency control
-- resource-aware dispatch
-- interactive priority preemption/yield
-- maintenance/research/experiment class
-- backoff
-- daily/weekly budget
-- user quiet window where relevant
-- long-running Goal progress
-
-background work가 사용자의 interactive work를 굶기면 실패다.
-
-## 3. Metacognitive Operations
-
-1차의 observer seam을 실제 운영에 사용한다.
-
-메타인지 흐름은 작업 계층과 병렬로 중앙의 Goal/Work/Run/Event를 보면서:
-
-- 진행이 멈추거나 이상하게 반복되는지
-- 사용자 의도와 실제 결과가 어긋나는지
-- 같은 문제가 여러 곳에서 반복되는지
-- 지금 조사하거나 바꿔볼 가치가 있는 것이 생겼는지
-
-를 스스로 판단한다.
-
-문제가 발견되면 해결 방법을 미리 정한 목록에서 고르지 않는다. 필요한 경우 새 조사 Work, 진단 Work, 기존 Work 변경, 사용자 질문을 생성할 수 있다.
-
-여러 observer가 서로 다른 관점으로 동시에 움직일 수 있고, 모든 Work가 메타인지 단계를 직렬로 통과하지 않는다.
-
-## 4. Cross-Project Knowledge Loop
-
-목표 흐름:
-
-```text
-run/event/artifact
-      ↓
-lesson candidate
-      ↓
-evidence + review/evaluation
-      ↓
-accepted lesson
-      ↓
-project bootstrap / task context candidate
-      ↓
-reuse outcome
-      ↓
-reuse evidence
-```
-
-초기 retrieval은 tag/metadata 기반이어도 된다.
-
-pgvector/RAG는 실제 recall 문제가 확인될 때 추가한다.
-
-Project bootstrap 시에는 accepted lesson을 곧바로 전역 사실로 박지 않고, 현재 프로젝트의 목표·제약과 맞는 후보를 provenance와 함께 골라 **bootstrap/context pack 후보**로 넣는다.
+AWS의 항상 켜진 중앙 runtime을 실제 사용자 control surface로 사용한다.
 
 필수:
 
-- provenance
-- project/domain scope
-- freshness/version
-- conflict handling
-- reuse count만이 아니라 실제 결과 개선 여부를 기록할 자리
-- stale lesson retirement/review
+- HTTPS
+- authenticated Web access
+- secure session
+- persistent PostgreSQL
+- process restart recovery
+- health/readiness check
+- 최소 backup/restore
+- secrets separation
 
-## 5. Personal Operations
+현재 표시용 WebState를 authority로 승격하지 않는다. Web은 실제 store-backed Goal/Work/Run 상태를 보여주고 사용자 요청과 질문 답변을 연결해야 한다.
 
-프로젝트 작업과 개인 운영을 같은 DB에 무차별 복제하지 않는다. 기존 owner를 adapter로 연결한다.
+## Gate C — Reliable Request Execution
 
-목표 흐름 예시:
+사용자 요청은 다음 흐름으로 처리한다.
 
-### School material
+    user request
+    → project / intent resolution
+    → Goal or Work
+    → context assembly
+    → worker/tool/resource resolution
+    → pipeline/run
+    → artifact/result
+    → evaluation / follow-up
 
-프린트/사진/PDF ingress → artifact 등록 → extraction/classification pipeline → 기존 school/Manager owner에 저장 또는 reference → actionable item이 있으면 WorkItem 생성.
+필수:
 
-### Daily brief
+- durable NEED_USER
+- restart-safe resume
+- idempotent mutation
+- uncertain side-effect reconciliation
+- cancellation
+- retry/replan
+- project context handover
+- artifact/result retrieval
 
-학교/일정/할 일/진행 중 project/background 결과를 owner-aware 조회 → 하교 등 정해진 시점에 brief WorkItem 생성 → 사용자에게 전달.
+Run 실패가 Goal을 자동으로 죽이지 않는다.
 
-### Manager query
+## Gate D — Project Context and Handover
 
-사용자가 "뭐 해야 돼?"라고 물으면 중앙 project state와 Manager-owned personal state를 필요한 owner에서 읽어 Manager application이 응답한다.
+새 worker/session이 과거 전체 채팅을 직접 보지 못해도 현재 프로젝트를 이어갈 수 있어야 한다.
 
-## 6. Research Watchers
+중앙은 다음을 coordination state로 유지한다.
 
-사용자가 즉시 요청하지 않아도 관심 영역을 조사할 수 있다.
+- current objective
+- current constraints/invariants
+- decision/source refs
+- open Goal/Work
+- relevant artifact/result/lesson refs
 
-Research topic도 고정 목록만 도는 방식으로 만들지 않는다. 반복 실패, resource 부족, user correction, architecture friction 같은 observation이 생기면 planner/evaluation layer가 **현재 시스템이 풀어야 할 연구 질문**을 만들 수 있어야 한다.
+Git/Eve/Manager/Discord가 소유하는 canonical fact를 중앙 편의를 위해 새 정본으로 복제하지 않는다.
+
+bounded context pack을 만들어 worker에 전달하고 provenance를 보존한다.
+
+## Gate E — Worker / Model / Resource Routing
+
+1차의 LiteLLM/model gateway와 Antigravity/OpenCode/Codex worker를 실제 요청 처리에 사용한다.
+
+All Tomorrow가 orchestration authority를 유지한다.
+
+provider/model/account의 특수성은 adapter/gateway metadata로 격리한다.
+
+필수:
+
+- worker capability
+- availability/health
+- permission/risk
+- provider/model metadata
+- budget/cost telemetry
+- selection provenance
+- fallback/replan
+
+선택 정책은 Registry 내부의 고정 sort로 영구 고정하지 않는다.
+
+## Gate F — Cross-System Actionability
+
+한 곳에서 발견한 문제가 다른 프로젝트의 실제 Work로 이어질 수 있어야 한다.
 
 예:
 
-- AI tool/service 변화
-- game development 자료
-- 접근 가능한 장문 문서·도서·reference material
-- engine/plugin/library 변화
-- asset sources
-- community practices
+- Web에서 Eve 프로젝트 문제를 보고
+- project:eve를 resolve하고
+- repository/runtime Work를 만들고
+- 적절한 worker가 수정/검증하고
+- 결과를 같은 중앙 trace로 돌려줌
 
-필수 경계:
+이 단계에서 Eve/Manager의 전체 personal application 기능까지 완성할 필요는 없다.
 
-- research query/topic provenance: 왜 지금 이 주제를 조사했는지
-- source/provenance
-- duplicate suppression
-- claim confidence
-- 저장 목적 분류
-- 지금 쓸 것과 aside/later 후보 분리
-- research budget
-- robots/terms/access constraint 준수
+## User Request Priority
 
-읽었다는 이유만으로 자동 global lesson으로 승격하지 않는다.
+1차에서 만든 user-owned priority policy를 실제 assistant 요청 처리에 적용한다.
 
-## 7. Service Experiment Framework
+현재 사용자 정책의 중요한 예:
 
-새 AI/API/tool service가 발견되었다고 바로 production resource로 넣지 않는다.
+- 학교 수행평가 또는 AI 활용 대회 참여처럼 실제 commitment가 높은 요청은 잘못 돌고 있던 background/autonomous work보다 우선한다.
+- "이거 재밌겠다, 한번 만들어봐" 같은 낮은 commitment의 발화는 반드시 즉시 실행하지 않고 TODO/Goal 후보로 해석할 수 있다.
 
-범용 흐름:
+시스템은 일정·현재 workload·사용자 맥락을 이용해 충돌 자체를 사전에 줄여야 한다.
 
-```text
-discover
-→ usefulness / duplication / risk / user-effort 판단
-→ 필요한 user action이 있으면 NEED_USER
-→ bounded sandbox test
-→ artifact/metric 평가
-→ available / watch / rejected
-```
+## 2차 Acceptance Scenarios
 
-이미 지원하는 protocol이면 config/metadata만으로 연결하고, 새로운 protocol이면 core/pipeline 분기가 아니라 별도 adapter implementation work로 분리한다.
+### A. Any-device work
 
-모든 후보에 가입/key 발급을 요구하지 않는다. 현재 capability 부족을 실제로 메우고 기대 효용이 충분한 후보에만 사용자 action을 요청한다.
+노트북이 아닌 기기에서 Web 로그인 → project work 제출 → AWS 중앙에 durable Work 생성 → 적절한 executor/worker 실행 → 결과 확인.
 
-Raw API key는 chat/event에 받지 않는다. external secret owner에 등록하고 opaque credential ref만 사용한다.
+### B. Restart-safe NEED_USER
 
-## 8. Resource Pool Foundation
+필수 정보 부족 → NEED_USER → 중앙 재시작 → Web에서 답변 → 같은 Work에서 재개.
 
-Worker/Executor/Provider Resource seam을 실제 라우팅에 사용한다.
+### C. Multi-client continuity
 
-관리 대상은 local/AWS/Sol Pi 같은 host, API/model/account, free quota/paid budget, concurrency/rate limit 등이다.
+Web에서 만든 Work/질문/결과를 Discord 또는 CLI에서 같은 identity로 조회/이어받음.
 
-resource pool은 provider별 switch문이 아니라 metadata/state registry로 동작한다. 같은 capability를 만족하는 새 resource가 등록되면 기존 candidate set에 들어가야 한다.
+### D. Cross-system action
 
-정확한 quota telemetry가 없는 resource도 recent success/failure와 freshness를 이용해 conservative state로 운영할 수 있다.
+Manager/Web에서 다른 프로젝트의 실제 수정 요청 → 올바른 project/source owner를 유지한 채 Work 생성 → 수정/검증 → trace 유지.
 
-credential 값은 외부 secret owner에 두고 중앙에는 opaque ref만 둔다.
+### E. Handover-gap test
 
-## 9. Artifact Catalog
+새 worker/session이 과거 채팅 없이 context pack만 받고 현재 목표·핵심 결정·금지 변경·열린 Work를 복원해 작업을 이어감.
 
-장기 작업에서 산출물을 다시 찾고 사용할 수 있어야 한다.
+### F. Resource failure
 
-지원 대상 예:
+선호 provider/worker failure → generic observation → 가능한 fallback 또는 replan → Goal 유지 → provenance 유지.
 
-- reports
-- source archives
-- extracted school documents
-- generated images
-- evaluation datasets
-- game assets
-- builds
-- logs
-- structured data
+### G. User-priority preemption
 
-중앙 DB는 artifact metadata와 provenance를 소유하며, bytes는 적절한 source/object storage owner에 둔다.
+background researcher가 자율 Goal을 실행 중 high-priority user request 수신 → background yield → user Work 우선 → 이후 background Goal은 정책에 따라 재개/보류.
 
-## 10. 2차 Acceptance Scenarios
+## Explicitly Not Required for 2차
 
-### A. Proactive daily brief
+- full Manager personal operations
+- school material automatic ingest
+- proactive daily personal brief
+- complete calendar integration
+- broad multi-host repo synchronization
+- full API-key farm optimization
+- autonomous long-horizon game demo
+- every external service watcher
+- multi-user SaaS
 
-사용자 요청이 없어도 정해진 시점에 trigger → WorkItem → owner-aware 조회 → brief 생성 → 전달. 재시작해도 다음 schedule을 잃지 않음.
-
-### B. Research watcher
-
-관심 주제 watcher가 새 후보를 발견 → 중복 제거 → research artifact 생성 → aside 또는 experiment candidate로 분류. 근거 없이 registry promotion하지 않음.
-
-### C. New service evaluation
-
-새 이미지 서비스 발견 → 제한된 sandbox test 여러 건 → artifact/metrics → usable 판정 시 registry candidate 등록.
-
-### D. Resource fallback and plan revision
-
-선호 executor/provider의 quota/health 문제 → generic observation 생성 → 동등 resource가 있으면 Execution Resolution이 transparent failover → 없거나 plan 의미 변경이 필요하면 같은 Goal에서 새 Plan revision → 완료된 artifact 보존 → policy에 따른 축소/연기/분할/NEED_USER. trace/provenance는 이어짐.
-
-### E. School material flow
-
-사용자가 프린트 업로드 → artifact → extraction → 적절한 owner 저장/ref → actionable deadline 발견 시 WorkItem → daily brief에 반영.
-
-### F. Cross-project reuse
-
-새 프로젝트 시작 → 과거 accepted lesson 후보 자동 선택 → 적용 → 결과가 reuse evidence로 다시 기록.
-
-### G. Image-service router flow
-
-새 이미지 AI 서비스 발견 → background bounded test 여러 건 → 결과/비용/제약 artifact와 metric 기록 → usable candidate 판정 → 명시된 promotion policy를 통과하면 이미지 생성 router/registry에서 선택 가능한 provider로 추가. 이 연결을 위해 core 코드를 서비스별로 다시 뜯지 않음.
-
-### H. Free asset collection
-
-game-development watcher가 재사용 가능한 무료 asset 후보 발견 → source/license/provenance와 함께 artifact catalog에 등록 → 프로젝트 요구와 맞을 때 검색 가능. 출처·사용 조건을 모르는 파일을 "무료"로 단정해 축적하지 않음.
-
-### I. No-request day
-
-사용자가 하루 동안 새 요청을 보내지 않아도 이미 허용된 schedule/watcher/Goal에서 background work가 발생 → budget/priority 안에서 실행 → duplicate/runaway work 없이 결과를 artifact/lesson candidate/brief에 정리 → 사용자가 돌아오면 interactive request가 즉시 우선권을 가짐.
-
-### J. Resource adaptation and acquisition suite
-
-실제 autonomous resource 운영은 아래를 함께 통과해야 한다.
-
-- **unknown operational trouble**: 장기 Work가 이유를 사전 라벨링하지 않은 채 반복 지연/실패 → 메타인지 계층이 기록과 외부 상태를 조사해 원인 후보를 만들고 필요한 후속 Work를 생성함
-- **useful new free API**: watcher가 부족한 capability의 free-tier API를 발견 → public metadata로 효용/중복/risk/user-effort 평가 → 가치가 있을 때만 사용자에게 가입/key 발급을 NEED_USER로 요청 → raw key는 chat에 받지 않고 secret owner의 credential ref만 연결 → bounded validation 후 pool 후보가 됨
-- **not worth interrupting**: 중복되거나 효용이 낮은 후보는 aside/watch로 남고 사용자에게 key 발급 요청을 보내지 않음
-- **declarative onboarding**: 이미 지원하는 protocol이면 endpoint/model/config + credential ref만으로 연결되고 core/pipeline 수정 없음
-- **custom protocol**: 새로운 protocol이면 core branch가 아니라 별도 adapter implementation work로 분리되어 sandbox 검증 후 등록 후보가 됨
-- **ambiguous mutation**: timeout 뒤 side effect가 불명확하면 resource B로 즉시 중복 실행하지 않고 reconciliation/idempotency 확인 후 retry/NEED_USER 판단
-
-
-## 11. Explicitly Not Required for 2차
-
-- system code의 무인 production promotion
-- 무제한 웹 크롤링
-- 무제한 provider account rotation
-- 완전 자동 비용 차익 최적화
-- 모든 provider의 quota API를 하나의 강제 schema로 완벽히 표준화
-- 사용자 승인 없이 새 계정/credential을 임의 생성하거나 약관에 동의하는 자동화
-- 장기 게임 제작을 항상 수행하는 정책
-- self-generated benchmark만으로 자기 개선 확정
-- multi-region HA
-
-이 단계의 핵심은 자율성의 양이 아니라 **durable하고 설명 가능하며 중단 가능한 자율 운영**이다.
+2차의 핵심은 **사용자가 시킨 일을 어디서든 안정적으로 맡기고 이어서 끝내는 비서**다.
