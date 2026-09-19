@@ -59,6 +59,8 @@ Web 기능과 application 등록을 크게 늘리기 전에 아래 모델을 먼
 
 Goal은 pipeline run이 아니다. 하나의 Goal은 여러 WorkItem과 여러 run을 낳을 수 있다.
 
+장기 프로젝트의 dependency graph는 WorkItem 관계로 표현한다. 이 요구 때문에 현재 Pipeline runtime을 곧바로 범용 DAG/orchestration engine으로 재작성하지 않는다. Pipeline 내부 DAG가 실제 recipe 요구로 별도 증명되기 전에는 sequential/limited-branch runtime을 유지할 수 있다.
+
 ### 1.2 WorkItem
 
 실제 수행해야 하는 durable 단위.
