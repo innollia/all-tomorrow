@@ -11,8 +11,23 @@
 3. 현재 completion stage의 exit criteria에 필요한가.
 4. 기존 owner/adapter/pipeline/event 경계를 깨지 않고 구현할 수 있는가.
 5. 지금 필요하지 않은 기능을 미래 가능성만으로 과설계하고 있지 않은가.
+6. 특정 provider/project/failure 이름을 pipeline이나 core orchestration에 하드코딩하지 않고 capability/state/policy/adapter로 일반화할 수 있는가.
+7. 실행 중 조건이 바뀌었을 때 Goal을 버리지 않고 Plan/Work revision으로 대응할 수 있는가.
 
 구현 편의를 위해 최종 목적을 작게 다시 정의하지 않는다. 반대로 최종 목적에 있다는 이유만으로 모든 미래 기능을 1차 완성에 밀어 넣지도 않는다.
+
+## Generality Gate
+
+모든 completion stage와 모든 새 integration은 다음 검산을 통과해야 한다.
+
+1. **Novel resource test** — 가짜 신규 provider/resource를 하나 추가할 때 기존 generic pipeline과 planner core를 수정하지 않고 metadata + capability + adapter + policy 등록으로 참여시킬 수 있는가.
+2. **Resource-loss test** — 선택된 자원이 quota/rate-limit/health 문제로 사라졌을 때 provider 이름별 분기 없이 observation → replan으로 fallback/degrade/defer/NEED_USER 중 허용된 행동을 선택할 수 있는가.
+3. **Plan-revision test** — 이미 일부 work가 끝난 뒤 환경이 달라져도 완료 결과를 버리지 않고 새 Plan revision으로 이어갈 수 있는가.
+4. **User-boundary test** — 새 credential, 가입, 결제 승인처럼 자동 수행할 수 없는 필수 입력을 발견하면 우회하지 않고 generic NEED_USER로 전환하는가.
+5. **Research-to-change test** — 새로운 설계 글이나 repository를 발견했을 때 URL/사이트별 전용 code path 없이 research artifact → improvement proposal → evaluation으로 보낼 수 있는가.
+6. **Adapter containment test** — provider 고유 SDK/protocol/auth 로직이 adapter 바깥의 planner/pipeline으로 새지 않는가.
+
+이 gate를 통과하지 못하는 기능 추가는 "작동한다"만으로 완료로 보지 않는다.
 
 ## Completion Model
 
@@ -59,7 +74,10 @@
 | 어느 기기에서든 웹으로 중앙 접속 | 1차 | remote HTTPS control surface + durable DB/recovery |
 | 범용 답변이 아닌 사용자 맥락 기반 질의응답 | 1차 | Manager/source-owner context를 조립한 Web 질의 경로 |
 | 흩어진 ChatGPT/Discord/CLI 작업을 중앙에서 조정 | 1차 | 공통 Goal/Work/Run authority + edge ingress |
-| 요청을 어디에·어떻게 보낼지 중앙이 자동 판단 | 1차→2차 | 1차 project/capability/worker/executor routing, 2차 provider resource/quota-aware routing |
+| 요청을 어디에·어떻게 보낼지 중앙이 자동 판단 | 1차→2차 | 1차 generic planner/capability/worker/executor routing contract, 2차 live provider resource/quota-aware replanning |
+| 무료 resource limit에 맞춰 작업 규모·순서·자원을 재계획 | 1차→2차 | 1차 Plan/Observation/Policy contract, 2차 quota/rate-limit observation → fallback/degrade/defer/split/NEED_USER |
+| 새로운 무료 API/provider 발견 시 필요한 key를 사용자에게 요청 | 2차 | resource candidate → prerequisites → NEED_USER → opaque credential ref → bounded validation → resource pool |
+| 유사 시스템의 블로그·repo·문서에서 개선안 발견 후 검증 | 2차→3차 | 2차 generic research artifact/proposal 생성, 3차 sandbox/evaluation/promotion/rollback |
 | 한 곳에서 다른 프로젝트의 실제 수정까지 이어짐 | 1차 | cross-system project resolution → WorkItem → adapter/worker execution |
 | Discord가 모든 말을 무조건 중앙으로 보내지 않음 | 1차 | local-vs-central edge policy + actual escalation |
 | pipeline을 중앙에서 모듈식으로 교체 | 1차 | immutable/versioned pipeline recipe와 work 분리 |
@@ -90,27 +108,33 @@
    중앙 authority는 최종 목적의 인프라다. 사용자의 장기 운영·학습·생산·자율성을 희생하면서 Control Plane 자체를 완성하는 것을 성공으로 보지 않는다.
 
 3. **Pipeline is an execution recipe**  
-   pipeline 안에 장기 goal, scheduler, resource accounting, self-improvement 전체를 욱여넣지 않는다.
+   pipeline 안에 장기 goal, scheduler, resource accounting, self-improvement, provider-specific replanning 전체를 욱여넣지 않는다.
 
-4. **Durable work is above runs**  
+4. **Planner owns planning and replanning**  
+   Goal + current state + policy + observations에서 Plan/Work revision을 만드는 책임은 planner layer에 둔다. planner 구현은 rule-based, LLM, hybrid로 교체 가능해야 한다.
+
+5. **Novelty enters as data and adapters**  
+   새 provider/tool/executor는 가능한 한 capability/metadata/resource state/policy/adapter로 들어오며 generic core에 이름별 분기를 추가하지 않는다.
+
+6. **Durable work is above runs**  
    하나의 Goal/WorkItem은 여러 run, worker, tool, 시간대를 가질 수 있다. run은 work의 한 실행 시도다.
 
-5. **Execution resource is separable from capability**  
+7. **Execution resource is separable from capability**  
    누가 잘할 수 있는지(Worker/Agent), 어디서 실행되는지(Executor/Host), 어떤 provider/account/quota를 쓰는지는 독립적으로 교체 가능해야 한다.
 
-6. **Source ownership survives centralization**  
+8. **Source ownership survives centralization**  
    Eve, Manager, Discord, Git, Notion 등 기존 정본을 중앙 편의 때문에 복제 정본으로 만들지 않는다.
 
-7. **Provenance before promotion**  
+9. **Provenance before promotion**  
    lesson, skill, system improvement는 evidence와 evaluation 없이 전역 정본으로 승격하지 않는다.
 
-8. **User interruption dominates background work**  
+10. **User interruption dominates background work**  
    P0 interactive work가 들어오면 background work는 안전한 경계에서 양보할 수 있어야 한다.
 
-9. **Ask instead of fabricating**  
+11. **Ask instead of fabricating**  
    project, cwd, mutation target, permission처럼 필수 정보가 없으면 추정으로 밀어붙이지 않는다.
 
-10. **No fake integrations**  
+12. **No fake integrations**  
     실제 연결·검증되지 않은 worker/tool/provider를 이름만 등록해 완성된 것처럼 취급하지 않는다.
 
 ## Current Position
@@ -132,7 +156,7 @@
 
 중요한 구조적 수정:
 
-- 기존의 `Request → Pipeline → Worker` 중심 모델 위에 `Goal/Work/Trigger` 계층을 둔다.
+- 기존의 `Request → Pipeline → Worker` 중심 모델 위에 `Goal → Planner/Replanner → Plan/Work → Execution` 계층을 둔다.
 - cross-system project coordination state와 provenance-aware context assembly를 둔다.
 - logical project source와 executor-local workspace path를 분리한다.
 - Worker와 실제 실행 위치/계정/자원 풀을 분리할 수 있는 경계를 만든다.
@@ -152,6 +176,7 @@
 
 - [ADR 0001 — Separate Control Plane Repository](decisions/0001-control-plane-boundary.md)
 - [ADR 0002 — Durable Work Above Pipeline](decisions/0002-durable-work-above-pipeline.md)
+- [ADR 0003 — Generic Planning Over Hard-coded Pipelines](decisions/0003-generic-planning-over-hardcoded-pipelines.md)
 
 ## Work Discipline
 
