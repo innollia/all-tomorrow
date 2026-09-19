@@ -28,7 +28,7 @@ if blog_Y_found: ...
 - 환경이 바뀌면 Goal을 버리는 대신 Plan을 새 version으로 바꿀 수 있다.
 - 이미 성공한 Work와 Artifact는 가능한 한 보존한다.
 
-별도 `PlanRevision` class/table은 요구하지 않는다. versioned Plan data면 충분할 수 있다.
+별도 revision class/table은 요구하지 않는다. versioned Plan data면 충분할 수 있다.
 
 ### 2. Planner와 Execution Resolution을 분리한다
 
