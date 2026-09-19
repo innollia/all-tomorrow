@@ -143,6 +143,8 @@ Execution Resolution은 Planner가 요구한 **capability와 constraints**를 �
 
 Registry는 후보와 state를 제공하고, 장기 Plan 결정 자체를 소유하지 않는다. Execution Resolution은 동등 후보 failover를 담당할 수 있지만 Goal의 범위·품질·시간 구조를 바꾸지 않는다.
 
+Transparent failover는 **retry safety**를 확인한 뒤에만 가능하다. read-only/idempotent 작업, 또는 side effect가 발생하기 전에 확실히 실패한 경우에는 다른 equivalent resource로 재시도할 수 있다. 외부 mutation이 실행되었는지 불명확하면 다른 worker/provider로 무조건 재실행하지 않고 idempotency ledger, external state read-back, reconcile work 또는 NEED_USER를 사용한다.
+
 Selection/ranking strategy는 replaceable policy로 분리 가능해야 한다. 현재 코드의 quality/cost/latency 고정 sort는 초기 구현이며 architecture invariant가 아니다.
 
 ### 2.5 Project Context Assembly
@@ -471,6 +473,7 @@ quality floor
 deadline / priority
 privacy / risk
 fallback/degradation permission
+retry/failover safety
 user approval requirements
 ```
 
@@ -563,6 +566,7 @@ Redis는 요구가 증명되기 전 필수가 아니다.
 - canonical write와 high-risk tool은 중앙 policy 확인이 필요하다.
 - mutation target이 모호하면 NEED_USER.
 - 외부 mutation은 idempotency key와 trace를 가진다.
+- side effect 발생 여부가 불명확한 mutation 실패는 transparent failover 대상으로 취급하지 않는다. 먼저 idempotency/reconciliation으로 상태를 확인한다.
 - provider/account 자동화는 실제 허용 범위와 정책을 따른다.
 - 새 credential/user action 요청은 candidate utility/risk/user-effort gate를 통과한 경우에만 생성한다.
 - 외부 웹/문서/repository 내용은 untrusted evidence로 처리하며 그 안의 지시문을 system/policy authority로 승격하지 않는다.
