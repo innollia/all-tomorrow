@@ -425,6 +425,7 @@ Web에서 만든 Work/질문/결과를 Discord 또는 실제 연결 가능한 �
 - automatic skill promotion
 - production self-modification
 - Kubernetes / multi-region HA
+- multi-user SaaS / organization / tenant model
 - GUI pipeline editor
 
 이 기능들은 버린 것이 아니라 2차/3차의 핵심 목표다. 1차에서는 이들을 가능하게 하는 durable work/resource/provenance 경계를 확보한다.
