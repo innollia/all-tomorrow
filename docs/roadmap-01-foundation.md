@@ -237,7 +237,7 @@ Planner 구현은 rule-based, LLM, hybrid 등으로 교체 가능해야 한다. 
 
 Pipeline은 planner 결과로 나온 WorkItem을 수행하는 recipe다. quota 감소, 새 API 발견, 사용자 credential 요청 같은 세계 상태 판단을 pipeline마다 하드코딩하지 않는다.
 
-동등한 resource 후보 사이의 단순 failover는 Execution Resolution이 late binding으로 처리할 수 있다. Plan의 범위·품질·시간·구조 또는 사용자 action이 달라질 때만 Replanner로 승격한다.
+동등한 resource 후보 사이의 단순 failover는 Execution Resolution이 late binding으로 처리할 수 있다. 다만 read-only/idempotent이거나 side effect 전 실패가 확실한 경우에만 transparent retry/failover한다. mutation side effect가 불명확하면 reconcile/NEED_USER로 올린다. Plan의 범위·품질·시간·구조 또는 사용자 action이 달라질 때만 Replanner로 승격한다.
 
 ### 1.10 Artifact
 
@@ -300,6 +300,7 @@ Artifact는 문자열 URL 목록을 넘어 장기 작업 산출물의 metadata i
 - context pack 생성 시 provenance/reference 유지
 - context/event/artifact metadata의 민감정보 retention 정책
 - idempotent external mutation의 key ownership 명확화
+- retry/failover safety metadata와 uncertain side-effect reconciliation boundary
 - concurrent answer/resume 방지
 - cancelled/expired question 처리
 
@@ -532,6 +533,10 @@ Planner fixture가 존재하지 않는 resource를 pin하거나 hard budget을 �
 ### P. Unknown quota state
 
 정확한 remaining quota를 제공하지 않는 fake provider → ResourceState가 unknown/estimated로 등록 → 실제 429/quota observation이 들어오면 상태와 freshness 갱신 → provider 이름별 특수 pipeline 없이 failover/replanning boundary가 작동.
+
+### Q. Mutation failover safety
+
+외부 mutation worker가 timeout을 반환했지만 실제 side effect 발생 여부가 불명확함 → equivalent worker가 있어도 즉시 재실행하지 않음 → idempotency ledger/read-back/reconcile로 상태 확인 → 안전한 경우에만 retry, 아니면 NEED_USER. provider failover가 duplicate mutation을 만들지 않음.
 
 ## 12. Explicitly Not Required for 1차
 
