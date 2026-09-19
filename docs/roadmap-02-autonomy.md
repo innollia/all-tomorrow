@@ -54,7 +54,7 @@ background work가 사용자의 interactive work를 굶기면 실패다.
 
 ## 3. Adaptive Planning and Graceful Degradation
 
-1차의 Planner/PlanRevision/Observation contract를 실제 resource 상태와 연결한다.
+1차의 Planner/Plan revision/Observation contract를 실제 resource 상태와 연결한다.
 
 ### Replanning inputs
 
@@ -76,7 +76,7 @@ background work가 사용자의 interactive work를 굶기면 실패다.
 
 ### Failover before replanning
 
-같은 capability, quality floor, privacy/risk, budget policy를 만족하는 다른 resource가 있으면 Execution Resolution이 concrete resource만 바꿀 수 있다. 이 경우 Work의 의미가 달라지지 않으므로 매번 새 PlanRevision을 만들 필요가 없다.
+같은 capability, quality floor, privacy/risk, budget policy를 만족하는 다른 resource가 있으면 Execution Resolution이 concrete resource만 바꿀 수 있다. 이 경우 Work의 의미가 달라지지 않으므로 매번 새 Plan revision을 만들 필요가 없다.
 
 다만 transparent failover는 retry-safe 작업에만 적용한다. mutation side effect가 발생했는지 불명확하면 먼저 reconcile/idempotency 확인을 수행한다.
 
@@ -264,7 +264,7 @@ discovered
 
 credential secret 값은 외부 secret owner에 두고 중앙은 opaque ref와 usage metadata만 가진다.
 
-2차에서는 "최저 비용 자동 최적화"까지 강제하지 않는다. 우선 availability, quota/capacity, rate-limit, permission, capability, quality floor를 기준으로 정상 라우팅하고, 상태 변화가 생기면 Planner에 observation을 보내 PlanRevision을 만들 수 있어야 한다.
+2차에서는 "최저 비용 자동 최적화"까지 강제하지 않는다. 우선 availability, quota/capacity, rate-limit, permission, capability, quality floor를 기준으로 정상 라우팅하고, 상태 변화가 생기면 Planner에 observation을 보내 Plan revision을 만들 수 있어야 한다.
 
 resource pool은 provider별 switch문이 아니라 descriptor/state registry로 동작한다. 같은 capability를 만족하는 새 resource가 등록되면 generic candidate set에 자연스럽게 포함되어야 한다.
 
@@ -304,7 +304,7 @@ resource pool은 provider별 switch문이 아니라 descriptor/state registry로
 
 ### D. Resource fallback and plan revision
 
-선호 executor/provider의 quota/health 문제 → generic observation 생성 → 동등 resource가 있으면 Execution Resolution이 transparent failover → 없거나 plan 의미 변경이 필요하면 같은 Goal에서 새 PlanRevision → 완료된 artifact 보존 → policy에 따른 축소/연기/분할/NEED_USER. trace/provenance는 이어짐.
+선호 executor/provider의 quota/health 문제 → generic observation 생성 → 동등 resource가 있으면 Execution Resolution이 transparent failover → 없거나 plan 의미 변경이 필요하면 같은 Goal에서 새 Plan revision → 완료된 artifact 보존 → policy에 따른 축소/연기/분할/NEED_USER. trace/provenance는 이어짐.
 
 ### E. School material flow
 
@@ -326,33 +326,17 @@ game-development watcher가 재사용 가능한 무료 asset 후보 발견 → s
 
 사용자가 하루 동안 새 요청을 보내지 않아도 이미 허용된 schedule/watcher/Goal에서 background work가 발생 → budget/priority 안에서 실행 → duplicate/runaway work 없이 결과를 artifact/lesson candidate/brief에 정리 → 사용자가 돌아오면 interactive request가 즉시 우선권을 가짐.
 
-### J. Free-resource exhaustion
+### J. Resource adaptation and acquisition suite
 
-여러 background Work가 무료 API resource를 쓰는 중 quota가 거의 소진되거나 exhausted → pipeline YAML 수정 없음 → resource state/observation 갱신 → Planner가 낮은 priority work 연기, batch/parallelism 축소, 동일 capability의 다른 resource 사용 여부를 재계산 → Goal과 acceptance criteria는 유지.
+실제 autonomous resource 운영은 아래를 함께 통과해야 한다.
 
-### K. New free API requires user action
+- **free quota exhaustion**: quota가 줄거나 exhausted되어도 pipeline 수정 없이 동등 failover 또는 낮은 우선순위 연기·batch/parallelism 축소·wait 같은 plan adjustment가 일어남
+- **useful new free API**: watcher가 부족한 capability의 free-tier API를 발견 → public metadata로 효용/중복/risk/user-effort 평가 → 가치가 있을 때만 사용자에게 가입/key 발급을 NEED_USER로 요청 → raw key는 chat에 받지 않고 secret owner의 credential ref만 연결 → bounded validation 후 pool 후보가 됨
+- **not worth interrupting**: 중복되거나 효용이 낮은 후보는 aside/watch로 남고 사용자에게 key 발급 요청을 보내지 않음
+- **declarative onboarding**: 이미 지원하는 protocol이면 endpoint/model/config + credential ref만으로 연결되고 core/pipeline 수정 없음
+- **custom protocol**: 새로운 protocol이면 core branch가 아니라 별도 adapter implementation work로 분리되어 sandbox 검증 후 등록 후보가 됨
+- **ambiguous mutation**: timeout 뒤 side effect가 불명확하면 resource B로 즉시 중복 실행하지 않고 reconciliation/idempotency 확인 후 retry/NEED_USER 판단
 
-Research watcher가 현재 부족한 capability를 제공하는 새 free-tier API 발견 → ResourceCandidate 생성 → public metadata로 utility/duplication/risk/user-effort gate 통과 → 가입/API key 발급 prerequisite 식별 → 사용자에게 NEED_USER로 필요한 action과 이유/기대 효용 요청 → 사용자가 credential을 secret owner에 등록 → opaque ref 연결 → bounded validation → usable이면 resource pool candidate로 편입. provider 이름을 generic planner/pipeline code에 추가하지 않음.
-
-### K2. Candidate does not justify interruption
-
-무료 provider 후보가 발견되었지만 기존 pool과 거의 중복되거나 free quota가 너무 작거나 user effort 대비 효용이 낮음 → candidate를 aside/watch 상태로 보존 → key 발급 요청을 보내지 않음. 이후 resource shortage나 조건 변화가 생기면 재평가 가능.
-
-### L. Generic resource adapter swap
-
-동일 capability의 테스트 provider A/B를 서로 다른 raw quota error와 auth 방식으로 연결 → 각 adapter가 공통 observation/prerequisite contract로 정규화 → 같은 Planner/Policy/Service Experiment lifecycle이 두 provider 모두에서 작동.
-
-### L2. Declarative provider onboarding
-
-새 OpenAI-compatible 또는 이미 지원하는 protocol의 fake provider 발견 → endpoint/model/resource metadata와 credential ref만 추가 → 기존 generic adapter profile로 bounded validation → planner/pipeline core code 변경 없이 resource candidate가 됨.
-
-### L3. Custom protocol requires adapter
-
-완전히 새로운 protocol의 fake provider 발견 → core/planner/pipeline에 조건문을 넣지 않음 → AdapterProposal/implementation Work 생성 → sandbox contract tests → 성공 시 adapter registry candidate. 2차에서는 promotion에 사용자/정책 승인을 요구해도 됨.
-
-### M. Safe failover after ambiguous mutation
-
-resource A에서 mutation 요청 중 timeout → side effect 상태 unknown → resource B로 즉시 중복 실행하지 않음 → external read-back/idempotency reconciliation → 결과에 따라 완료 처리 또는 안전한 retry/NEED_USER. resource-aware autonomy가 correctness보다 우선하지 않음.
 
 ## 11. Explicitly Not Required for 2차
 
