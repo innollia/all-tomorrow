@@ -47,9 +47,9 @@ ADR 0001의 별도 Control Plane repository/source-ownership 경계는 유지한
 
 ### 3. Project coordination context를 중앙에 둔다
 
-중앙은 raw chat 전체나 domain canonical data를 복제하는 대신, cross-system orchestration에 필요한 project coordination projection과 source/provenance refs를 유지한다.
+중앙은 raw chat 전체나 domain canonical data를 복제하는 대신, 자신이 실제로 소유하는 cross-system project coordination state와 source/provenance refs를 유지한다. 외부 owner의 domain fact를 캐시할 경우에는 owner/version/freshness가 붙은 projection으로만 취급한다.
 
-새 worker/session에는 이 projection과 source-owner 조회를 조립한 bounded context pack을 전달한다.
+새 worker/session에는 중앙 coordination state와 source-owner 조회를 조립한 bounded context pack을 전달한다.
 
 ### 4. Worker와 execution resource의 분리를 허용한다
 
