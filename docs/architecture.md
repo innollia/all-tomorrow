@@ -141,6 +141,8 @@ Execution Resolution은 Planner가 요구한 **capability와 constraints**를 �
 
 Registry는 후보와 state를 제공하고, 장기 Plan 결정 자체를 소유하지 않는다. Execution Resolution은 동등 후보 failover를 담당할 수 있지만 Goal의 범위·품질·시간 구조를 바꾸지 않는다.
 
+Selection/ranking strategy는 replaceable policy로 분리 가능해야 한다. 현재 코드의 quality/cost/latency 고정 sort는 초기 구현이며 architecture invariant가 아니다.
+
 ### 2.5 Project Context Assembly
 
 중앙집권의 핵심 문제는 모든 채팅 로그를 한곳에 복제하는 것이 아니라, 새 client/worker가 프로젝트의 현재 상태를 다시 잃지 않게 하는 것이다.
@@ -274,6 +276,31 @@ promotion or rejection
 13. Preserve provenance.
 14. Background work yields to interactive user work at safe boundaries.
 15. Evaluation precedes production self-improvement promotion.
+
+### Hardcoding Boundary
+
+코드에 고정해도 되는 것과 환경/정책 데이터로 남겨야 하는 것을 구분한다.
+
+**Stable primitives / invariants — code contract 가능**
+
+- node/run status semantics: SUCCESS, FAILED, NEED_USER 등
+- provenance/trace requirement
+- permission and secret-handling boundary
+- adapter interface
+- Plan/Work/Event/Observation lifecycle invariants
+- transactional/idempotency rules
+
+**Changing domain decisions — generic core에 이름별 하드코딩 금지**
+
+- provider/model/account/project 이름
+- quota 숫자와 reset 정책
+- worker/resource ranking 우선순위
+- fallback/degradation 순서
+- research site/URL
+- "이 서비스면 이 pipeline" 같은 case table
+- 특정 provider raw error string
+
+범용성은 모든 것을 문자열 metadata로 바꾸는 것이 아니라 **변화 속도가 다른 책임을 올바른 층에 두는 것**이다.
 
 ## 5. Current Contracts
 
@@ -547,6 +574,7 @@ Redis는 요구가 증명되기 전 필수가 아니다.
 - in-memory + PostgreSQL run/question store 구현
 - initial migrations
 - CapabilityRegistry / WorkerService
+- 현재 worker selection의 고정 quality/cost/latency sort와 tool latency sort
 - Antigravity/OpenCode CLI adapters
 - Discord edge policy와 shadow routing experiment
 - minimal authenticated Web UI/API
@@ -557,6 +585,7 @@ Redis는 요구가 증명되기 전 필수가 아니다.
 - Goal/Plan/Work graph
 - Planner/Replanner contract와 durable PlanRevision
 - normalized Observation/ResourceState/Policy lifecycle
+- replaceable selection/ranking policy
 - durable trigger engine
 - production scheduler leases
 - executor/provider resource pool
