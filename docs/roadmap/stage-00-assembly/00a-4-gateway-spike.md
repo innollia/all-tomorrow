@@ -35,13 +35,15 @@ PydanticAI Agent
 - auth/credential ownership
 - config reload/restart 요구
 - 새 server/tool 추가 후 new run discovery
-- in-flight durable run recovery와 tool discovery consistency
+- tool definition/name/version을 안정적으로 기록하고 재현할 수 있는지
 - gateway process restart
 - model route 장애와 MCP route 장애가 같은 process에 있을 때 blast radius
 - required MCP protocol/version compatibility
 - allow/deny/filter
 - OTel duplication
 - prompt/tool payload logging
+
+실제 durable in-flight run과 gateway의 recovery compatibility는 이 단계에서 판정하지 않는다. 선택된 durable backend와 결합한 00A-5에서 검증한다.
 
 LiteLLM DB는 dynamic registry/virtual keys/budgets가 실제로 필요할 때만 추가한다.
 
@@ -70,7 +72,7 @@ FastMCP를 쓰더라도 background task/Docket durability는 활성화하지 않
 - G02 upstream 2개 이상
 - G03 namespace collision 없음
 - G04 new-run discovery
-- G05 in-flight recovery consistency
+- G05 tool definition/name/version을 capture하고 재현 가능
 - G06 gateway restart recovery
 - G07 credential non-leak
 - G08 allow/deny/filter
@@ -84,6 +86,8 @@ FastMCP를 쓰더라도 background task/Docket durability는 활성화하지 않
 LiteLLM이 G01~G12를 만족하면 model gateway와 MCP gateway 통합을 우선한다.
 
 실패하면 durable backend를 탈락시키지 않는다. FastMCP fallback을 같은 G01~G12로 시험한다.
+
+durable execution과 결합했을 때만 드러나는 문제는 00A-5 integration issue로 기록한다.
 
 ## 산출물
 

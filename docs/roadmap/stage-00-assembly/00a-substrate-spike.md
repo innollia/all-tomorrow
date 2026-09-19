@@ -11,7 +11,7 @@
 
 한 문서에서 모든 후보를 동시에 다루지 않는다.
 
-00A는 아래 순서대로 작은 실험을 수행해 durable backend와 tool gateway를 **서로 독립적으로** 검증한 뒤 마지막에 조합을 잠근다.
+00A는 아래 의존 관계대로 작은 실험을 수행해 durable backend와 tool gateway를 **서로 독립적으로** 검증한 뒤 마지막에 조합을 잠근다.
 
 ## Subpackets
 
@@ -22,6 +22,8 @@
 | 00A-3 | Restate Spike | 선행작업 대기 | 아니오 | 00A-1 | [00a-3](00a-3-restate-spike.md) |
 | 00A-4 | Tool Gateway Spike | 선행작업 대기 | 아니오 | 00A-1 | [00a-4](00a-4-gateway-spike.md) |
 | 00A-5 | Selection Record | 선행작업 대기 | 아니오 | 00A-2~00A-4 | [00a-5](00a-5-selection.md) |
+
+00A-1 이후 00A-2/3/4는 독립적으로 진행할 수 있다. 00A-5만 셋 모두를 기다린다.
 
 ## 결정 축 분리
 
