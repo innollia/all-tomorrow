@@ -22,7 +22,7 @@ Gate A의 첫 작업 순서:
 3. Work/Run/Trace correlation과 event retention migration을 설계한다.
 4. logical project source ↔ executor workspace mapping을 설계한다.
 5. project context projection/context-pack contract를 설계한다.
-6. 기존 105개 수준의 회귀 테스트가 깨지는 지점을 확인하고 필요한 migration/unit test를 먼저 추가한 뒤 구현한다.
+6. 현재 회귀 테스트 전체가 깨지는 지점을 확인하고 필요한 migration/unit test를 먼저 추가한 뒤 구현한다.
 7. Gate A가 닫히기 전에는 기존 thin task/run 모델 위에 production Web 기능을 더 쌓지 않는다.
 
 ## 0. Preserve Existing Good Work
