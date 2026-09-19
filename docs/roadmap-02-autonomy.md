@@ -9,7 +9,7 @@
 
 스케줄, watcher, 외부 사건과 기존 목표를 근거로 durable work를 스스로 발생시키고, background 실행을 지속하며, 프로젝트 간 검증된 lesson을 재사용하고, 학교·일정·리포트 같은 개인 운영까지 같은 중앙 흐름에서 다룰 수 있어야 한다.
 
-또한 실행 중 resource availability/quota/rate-limit/cost/quality가 바뀌면 **pipeline별 예외처리가 아니라 generic observation → replanning**으로 대응해야 한다. 작업의 목표는 유지하되 policy에 따라 fallback, 품질/범위 축소, 병렬성 감소, 연기, 분할, 추가 자원 요청 중 적절한 선택을 할 수 있어야 한다.
+또한 작업과 별개의 메타인지 흐름이 전체 운영을 계속 관찰하고, 미리 정의되지 않은 문제도 새 조사·진단·후속 Work로 연결할 수 있어야 한다.
 
 자율성은 "아무거나 알아서 함"이 아니라 origin, budget, permission, provenance와 중단 가능성을 가진 work 생성이다.
 
@@ -52,20 +52,22 @@
 
 background work가 사용자의 interactive work를 굶기면 실패다.
 
-## 3. Adaptive Planning and Graceful Degradation
+## 3. Metacognitive Operations
 
-1차의 Planner / Execution Resolution 경계를 실제 resource 상태와 연결한다.
+1차의 observer seam을 실제 운영에 사용한다.
 
-resource state에는 quota/rate-limit, health, cost, quality, priority, deadline 같은 현재 조건이 들어갈 수 있다. 정확한 quota를 알 수 없으면 unknown/estimated + freshness로 충분하다.
+메타인지 흐름은 작업 계층과 병렬로 중앙의 Goal/Work/Run/Event를 보면서:
 
-처리 순서:
+- 진행이 멈추거나 이상하게 반복되는지
+- 사용자 의도와 실제 결과가 어긋나는지
+- 같은 문제가 여러 곳에서 반복되는지
+- 지금 조사하거나 바꿔볼 가치가 있는 것이 생겼는지
 
-1. 같은 capability와 policy를 만족하는 동등 resource가 있으면 safe failover
-2. 없고 Plan 의미를 바꿔야 하면 Planner가 남은 Work를 다시 계산
-3. 가능한 대응은 병렬성/batch 축소, 낮은 우선순위 연기, Work 분할, quota reset까지 wait, 기존 artifact 재사용, 추가 resource 요청 등
-4. Goal/acceptance criteria를 실질적으로 낮춰야 하면 사전 policy가 없는 한 NEED_USER
+를 스스로 판단한다.
 
-완료된 Work/Artifact는 보존하고 같은 failure에 무한 replan하지 않는다.
+문제가 발견되면 해결 방법을 미리 정한 목록에서 고르지 않는다. 필요한 경우 새 조사 Work, 진단 Work, 기존 Work 변경, 사용자 질문을 생성할 수 있다.
+
+여러 observer가 서로 다른 관점으로 동시에 움직일 수 있고, 모든 Work가 메타인지 단계를 직렬로 통과하지 않는다.
 
 ## 4. Cross-Project Knowledge Loop
 
@@ -241,7 +243,7 @@ game-development watcher가 재사용 가능한 무료 asset 후보 발견 → s
 
 실제 autonomous resource 운영은 아래를 함께 통과해야 한다.
 
-- **free quota exhaustion**: quota가 줄거나 exhausted되어도 pipeline 수정 없이 동등 failover 또는 낮은 우선순위 연기·batch/parallelism 축소·wait 같은 plan adjustment가 일어남
+- **unexpected resource trouble**: 작업이 외부 자원 문제로 막혀도 사전 정의된 provider 분기 없이 메타인지 계층이 원인을 파악하고 필요한 후속 Work를 생성함
 - **useful new free API**: watcher가 부족한 capability의 free-tier API를 발견 → public metadata로 효용/중복/risk/user-effort 평가 → 가치가 있을 때만 사용자에게 가입/key 발급을 NEED_USER로 요청 → raw key는 chat에 받지 않고 secret owner의 credential ref만 연결 → bounded validation 후 pool 후보가 됨
 - **not worth interrupting**: 중복되거나 효용이 낮은 후보는 aside/watch로 남고 사용자에게 key 발급 요청을 보내지 않음
 - **declarative onboarding**: 이미 지원하는 protocol이면 endpoint/model/config + credential ref만으로 연결되고 core/pipeline 수정 없음
