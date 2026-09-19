@@ -18,6 +18,31 @@
 - FastMCP tool gateway candidate
 - 실제 PostgreSQL where needed
 
+## Research Snapshot — 2026-09-19
+
+현재 확인한 최신 stable release:
+
+| substrate | latest | Python compatibility relevant to us |
+|---|---:|---|
+| PydanticAI | 2.46.0 | >=3.10 |
+| DBOS Python | 3.0.0 | >=3.10 |
+| Restate Python SDK | 1.0.5 | >=3.10, PydanticAI >=2,<3 |
+| Restate runtime | 1.7.10 | external runtime |
+| FastMCP | 4.0.5 | >=3.10 |
+| LiteLLM | 1.101.0 | >=3.10,<3.15 |
+
+All Tomorrow의 Python 3.13과 현재 후보 사이에 알려진 Python-version 충돌은 없다.
+
+PydanticAI 2.46.0의 declared extras/ranges도 현재:
+- DBOS >=2.10
+- FastMCP >=3.3,<5
+- Temporal >=1.27
+- Prefect >=3.7.5
+
+범위 안이다.
+
+이 표는 **연구 snapshot**이지 production pin이 아니다. 실제 Stage 0 spike 시작 시 새 release가 있으면 changelog/compatibility를 다시 보고 그 시점의 exact version을 lock한다.
+
 ## Durable Finalists
 
 ### A. DBOS
@@ -103,6 +128,8 @@ FastMCP의 ProxyProvider/mount/composition으로 충분하면 자체 gateway를 
 
 각 단계가 깨지면 직전 단계가 통과한 상태에서 원인을 좁힌다.
 
+Spike dependency는 production dependency와 분리한다. 두 finalist를 동시에 runtime package set에 남기지 않고, 선택이 끝난 뒤 winner만 root production dependency에 승격한다.
+
 ## Same Acceptance For Both Durable Finalists
 
 각 finalist에 정확히 같은 scenario를 실행한다.
@@ -121,6 +148,33 @@ FastMCP의 ProxyProvider/mount/composition으로 충분하면 자체 gateway를 
 12. execution cancel
 13. backend unavailable/reconnect
 14. dynamic gateway tool addition 후 new run discovery
+
+## Hard Gates
+
+점수 계산 전에 하나라도 실패하면 해당 후보를 기본 채택하지 않는다.
+
+- Python 3.13 지원
+- personal AWS self-host 가능
+- crash/restart recovery
+- deterministic duplicate-start handling
+- durable user wait/signal
+- external side-effect idempotency/reconciliation seam
+- stable FastMCP gateway를 통한 tool discovery
+- privacy-safe OTel propagation
+- application Goal/Work schema와 backend state 분리
+- ordinary dependency upgrade에 대한 in-flight recovery 전략
+
+## Tie-break order
+
+Hard gate를 모두 통과한 후보끼리만 아래 순서로 고른다.
+
+1. 지금 필요한 persistent service/process 수가 적음
+2. custom glue/adapter LOC가 적음
+3. failure semantics가 단순하고 inspect 가능
+4. 향후 AWS + laptop + 추가 executor 확장에 paid/proprietary control plane이 강제되지 않음
+5. backup/restore와 local reproduction이 쉬움
+
+기능 개수나 dashboard 화려함은 tie-break 기준이 아니다.
 
 ## Selection Metrics
 
