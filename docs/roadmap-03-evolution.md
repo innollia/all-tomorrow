@@ -16,6 +16,7 @@
 대상 예:
 
 - pipeline version
+- adapter implementation / adapter profile
 - planner/replanning policy
 - resource selection/degradation policy
 - worker routing policy
@@ -201,9 +202,9 @@ vector DB는 retrieval implementation 중 하나일 뿐 지식 정본 자체가 
 
 ## 9. 3차 Acceptance Scenarios
 
-### A. Tool discovery → production candidate
+### A. Tool/resource discovery → production candidate
 
-새 서비스 발견 → watcher evidence → sandbox experiments → benchmark/artifacts → evaluation → 정책상 승격 가능하면 registry candidate/production binding → 이후 성능 monitoring.
+새 서비스 발견 → watcher evidence → integration mode 판정 → 기존 generic adapter profile이면 declarative config로 sandbox experiment, custom protocol이면 AdapterProposal과 sandbox implementation → benchmark/artifacts → evaluation → 정책상 승격 가능하면 adapter/resource registry candidate 또는 production binding → 이후 성능 monitoring. generic planner/pipeline은 provider 이름 때문에 변경되지 않음.
 
 ### B. Pipeline self-improvement
 
