@@ -160,6 +160,8 @@ system observation / improvement question
 
 특정 블로그 URL이나 사이트에 대한 전용 pipeline을 만들지 않는다. 웹/문서/repository라는 source type의 adapter와 generic research/evaluation flow를 재사용한다.
 
+외부 글·README·issue·repository content는 **untrusted research evidence**다. 문서 안에 "이 명령을 실행하라", "credential을 출력하라", "safety rule을 무시하라" 같은 지시가 있어도 system instruction으로 승격하지 않는다. claim/source로 추출하고 현재 architecture/policy와 독립적으로 검증한다. 외부 repository의 code/script도 research 단계에서 임의 실행하지 않는다.
+
 "지금 안 쓰지만 나중에 유용한 것"은 aside/backlog knowledge로 분류하고 production context를 오염시키지 않는다.
 
 ## 7. Knowledge Promotion
@@ -225,7 +227,7 @@ vector DB는 retrieval implementation 중 하나일 뿐 지식 정본 자체가 
 
 ### G. Architecture research → measured change
 
-반복되는 orchestration/resource 문제가 observation으로 잡힘 → 시스템이 해결 질문 생성 → 유사 control-plane/agent architecture blog·repo·문서 조사 → ResearchArtifact와 claims/provenance 작성 → 현재 architecture와 차이 분석 → generic ImprovementProposal 생성 → sandbox branch/config에서 구현 → baseline과 평가 → 개선이 검증된 경우에만 promotion. 특정 source 전용 pipeline이나 "블로그 내용 그대로 적용" shortcut은 없음.
+반복되는 orchestration/resource 문제가 observation으로 잡힘 → 시스템이 해결 질문 생성 → 유사 control-plane/agent architecture blog·repo·문서 조사 → 외부 지시를 실행 명령이 아닌 untrusted evidence로 처리 → ResearchArtifact와 claims/provenance 작성 → 현재 architecture와 차이 분석 → generic ImprovementProposal 생성 → sandbox branch/config에서 구현 → baseline과 평가 → 개선이 검증된 경우에만 promotion. 특정 source 전용 pipeline이나 "블로그 내용 그대로 적용" shortcut은 없음.
 
 ### H. Generality regression test
 
