@@ -41,6 +41,15 @@ Gate A의 첫 작업 순서:
 - credential value를 중앙 로그에서 배제하는 원칙
 - Evaluation이 직접 production mutation을 하지 않는 경계
 
+다만 아래는 **현재 slice의 임시 책임 배치**로 보고 그대로 확대하지 않는다.
+
+- `capability.select`가 pipeline 안에서 concrete worker 선택을 직접 소유
+- no-worker 상황을 곧바로 pipeline FAILED로 끝내는 흐름
+- `allow_policy_relaxation`, `require_user_selection` 같은 cross-cutting selection policy가 pipeline config에 있음
+- `retry_on_fail` 같은 step retry와 resource-level retry/replan 의미가 아직 분리되지 않음
+
+이 코드를 전부 버린다는 뜻은 아니다. selection primitive는 Execution Resolution service로 재사용하고, policy와 durable Work lifecycle을 위층으로 이동한다.
+
 ## 1. Architecture Correction Before More Surface Area
 
 Web 기능과 application 등록을 크게 늘리기 전에 아래 모델을 먼저 확정한다.
@@ -91,6 +100,8 @@ Run은 하나의 WorkItem을 특정 pipeline version으로 실행한 시도다.
 
 - 같은 WorkItem에 여러 run이 붙을 수 있다.
 - retry, resume, worker 교체 때문에 run history가 생겨도 WorkItem identity는 유지한다.
+- 하나의 Run이 FAILED여도 WorkItem/Goal이 자동 terminal이 되지 않는다.
+- resource unavailable/quota/capacity 같은 recoverable 원인이면 Observation을 남기고 Work를 replan/fallback/wait 대상으로 돌릴 수 있다.
 - 사용자 질문은 run을 멈출 수 있지만 상위 WorkItem의 목적을 잃지 않는다.
 
 ### 1.4 Trigger
@@ -458,7 +469,7 @@ Discord가 첫 edge일 뿐, 중앙 ingress/execution 계약은 Web/CLI/ChatGPT�
    Goal/Plan/PlanRevision/Work/Observation/PolicyRef/Trigger/Artifact identity, Planner/Replanner boundary, Work/Run/Trace correlation, project coordination context, registry owner와 canonical/source owner 구분, Worker/Executor/Resource seam을 확정하고 migration 계획을 만든다.
 
 2. **Gate B — durable execution and replanning substrate**  
-   live PostgreSQL, transactional plan/work/run/event state, durable scheduling, crash recovery, NEED_USER restart-resume, observation → PlanRevision persistence를 통과한다.
+   live PostgreSQL, transactional plan/work/run/event state, durable scheduling, crash recovery, NEED_USER restart-resume, Run result → Observation → Work state/replan transition, observation → PlanRevision persistence를 통과한다.
 
 3. **Gate C — routing and ingress**  
    registry/tool routing, Discord central escalation, idempotent ingress를 연결한다.
@@ -546,6 +557,10 @@ Planner fixture가 존재하지 않는 resource를 pin하거나 hard budget을 �
 ### Q. Mutation failover safety
 
 외부 mutation worker가 timeout을 반환했지만 실제 side effect 발생 여부가 불명확함 → equivalent worker가 있어도 즉시 재실행하지 않음 → idempotency ledger/read-back/reconcile로 상태 확인 → 안전한 경우에만 retry, 아니면 NEED_USER. provider failover가 duplicate mutation을 만들지 않음.
+
+### R. No available worker is not automatic Goal failure
+
+required capability를 만족하는 worker/resource가 현재 0개 → pipeline-local provider branch를 추가하지 않음 → resource-unavailable Observation → WorkItem은 replan/block 상태 → Planner가 wait/resource acquisition/NEED_USER/plan change 중 policy상 가능한 경로를 선택 → Goal identity 유지.
 
 ## 12. Explicitly Not Required for 1차
 
