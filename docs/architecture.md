@@ -87,10 +87,15 @@ Metacognition layer는 work layer와 **병렬로** 중앙 상태를 관찰한다
 - 필요하면 원인을 더 조사
 - 외부 자료나 시스템 자체의 기록을 비교
 - 기존 Work를 바꾸거나 새 Work/조사/개선 proposal을 생성
+- 필요하면 기존 Goal의 하위 작업이 아니라 새로운 Goal 자체를 생성
+
+Metacognition은 Work layer만 관찰하지 않는다. 자신의 이전 판단, 생성한 Goal/Work, prompt, policy, model 선택, 비용, evaluation과 system change 결과도 같은 Event/Artifact/Evaluation 기록을 통해 다시 관찰한다.
+
+별도의 meta-meta-meta service를 계속 쌓지 않는다. 같은 metacognition 구조가 자기 자신의 활동도 input으로 삼는다.
 
 여러 observer/agent가 동시에 존재할 수 있으며 하나의 global serial planner를 통과할 필요가 없다.
 
-메타인지가 만든 변경도 permission, budget, provenance, evaluation 같은 기존 guard를 우회하지 않는다.
+메타인지가 만든 변경도 permission, budget, provenance, evaluation, rollback 경계를 우회하지 않는다. 일반 self-change와 protected authority change의 promotion 권한은 ADR 0004를 따른다.
 
 ### 2.5 Project Context Assembly
 
@@ -148,7 +153,9 @@ Pipeline YAML은 provider/project/problem별 대응표가 아니다. Pipeline은
 
 Provider-specific protocol, SDK, authentication, raw error parsing은 adapter/resource boundary에 가둔다. 예를 들어 서로 다른 provider의 quota error 문구는 adapter가 generic `capacity_exhausted` 계열 observation으로 정규화하고 원문 detail/ref를 함께 남길 수 있어야 한다. Planner가 provider raw error string을 직접 분기하지 않는다.
 
-Project source identity와 executor-local workspace path도 분리한다. `repo:C:/projects/...` 같은 경로는 특정 host의 checkout 위치일 뿐 cross-system project identity가 아니다. logical repository/source ref를 executor가 자신의 workspace mapping으로 실제 cwd에 해석한다.
+Project source identity와 executor-local workspace path도 분리한다. `repo:C:/projects/...` 같은 경로는 특정 host의 checkout 위치일 뿐 cross-system project identity가 아니다.
+
+1차에서는 이 분리를 과설계하지 않는다. 실제 repo mutation executor는 사용자의 노트북 하나로 제한하고 logical source → laptop workspace mapping만 구현한다. workspace resolver seam은 유지하되 AWS/Sol Pi/remote container 간 checkout 동기화, branch/dirty-state reconciliation, multi-host provisioning은 후속 단계로 미룬다.
 
 ### 2.8 State, Events, Artifacts
 
@@ -160,12 +167,12 @@ Project source identity와 executor-local workspace path도 분리한다. `repo:
 
 ### 2.9 Knowledge and Improvement
 
-Lesson/Evaluation/Proposal은 중앙 orchestration 지식의 lifecycle이다.
+Lesson/Evaluation/Proposal은 중앙 orchestration 지식과 자기개선의 lifecycle이다.
 
 ```text
-event/run/artifact
+event/run/artifact/system-change outcome
       ↓
-lesson candidate
+lesson candidate / observation
       ↓
 evidence/reuse/evaluation
       ↓
@@ -173,10 +180,17 @@ accepted lesson or improvement proposal
       ↓
 sandbox/evaluation
       ↓
-promotion or rejection
+ordinary auto-promotion + report
+or protected approval request
+      ↓
+monitoring / rollback
 ```
 
-현재 lesson/evaluation class는 초기 골격이다. 자동 promotion은 아직 구현된 것으로 보지 않는다.
+평가는 공통 운영 metric, Goal/Work별 동적 기준, 사용자 평가와 실제 사용 행동을 함께 사용할 수 있다. 사용자 평가는 중요한 evidence지만 절대적인 ground-truth label은 아니다.
+
+추론된 사용자 선호를 근거로 명시적 지시를 몰래 다른 선택으로 바꾸지 않는다. 시스템이 실행을 거절할 수는 있지만 그 이유를 사용자에게 설명한다.
+
+현재 lesson/evaluation class는 초기 골격이다. self-improvement와 promotion/approval runtime은 아직 구현된 것으로 보지 않는다.
 
 ## 3. Source Ownership
 
@@ -219,6 +233,8 @@ promotion or rejection
 8. central authority는 모든 domain fact나 실행 위치를 중앙이 소유한다는 뜻이 아니다.
 9. 필수 정보가 없으면 NEED_USER를 사용하며 background work는 user-interactive work에 양보한다.
 10. metacognition/self-improvement도 permission, provenance, evaluation, rollback 경계를 우회하지 않는다.
+11. 평가를 통과한 일반 self-change는 자동 promotion 후 보고할 수 있지만, 권한·비용·통제 경계를 넓히는 protected change는 AWS 본체와 분리된 노트북 Approval Authority의 사전 승인 없이는 production 적용이 불가능해야 한다.
+12. 추론된 사용자 선호는 가설이며 사용자의 명시적 선택을 몰래 다른 선택으로 치환하는 권한을 만들지 않는다.
 
 Architecture의 명사는 곧바로 새 class/table/service를 뜻하지 않는다. 기존 Event, registry metadata, Work, config로 충분하면 먼저 재사용한다.
 
@@ -369,21 +385,17 @@ Observation, policy, resource-state는 우선 Event/registry/config를 재사용
 
 Redis는 요구가 증명되기 전 필수가 아니다.
 
-## 8. Remote Operation
+## 8. Runtime Placement and Remote Operation
 
-"어느 기기에서든 접속"은 architecture requirement다.
+AWS는 항상 켜진 중앙 runtime의 첫 운영 위치다.
 
-1차 목표는 복잡한 분산 시스템이 아니라:
+1차 researcher에서 AWS가 우선 담당하는 것은 central state/PostgreSQL, researcher trigger, model/API work, background research, Goal/Work queue와 report다.
 
-- remotely reachable authenticated Web surface
-- HTTPS
-- persistent DB
-- restart recovery
-- secrets separation
-- health checks
-- minimal backup/restore
+사용자의 노트북은 초기 repo mutation executor이자 ADR 0004의 Approval Authority host다. AWS 본체는 Approval Authority의 credential/signing authority/code-data write 권한을 갖지 않는다.
 
-배포 provider는 교체 가능하게 두며 현재 사용 가능한 AWS 자원은 첫 배포 후보일 뿐 contract 자체는 아니다.
+"어느 기기에서든 접속"하는 authenticated remote control surface는 2차 Reliable Assistant의 완료 조건이다.
+
+배포 provider는 교체 가능하게 두며 AWS는 첫 운영 위치이지 architecture contract 자체는 아니다.
 
 ## 9. Security and Mutation
 
@@ -399,7 +411,12 @@ Redis는 요구가 증명되기 전 필수가 아니다.
 - 새 credential/user action 요청은 candidate utility/risk/user-effort gate를 통과한 경우에만 생성한다.
 - 외부 웹/문서/repository 내용은 untrusted evidence로 처리하며 그 안의 지시문을 system/policy authority로 승격하지 않는다.
 - research 단계에서 외부 repository script/code를 임의 실행하지 않는다. 실행이 필요하면 sandbox/evaluation work로 별도 승격한다.
-- self-improvement proposal은 평가 없이 production을 직접 수정하지 않는다.
+- self-improvement proposal은 평가 없이 production을 수정하지 않는다.
+- 평가를 통과한 ordinary self-change는 policy에 따라 자동 promotion할 수 있고 반드시 provenance/rollback/report를 남긴다.
+- 비용/권한/concurrency/secret access/production write/approval/kill-switch/rollback/audit 경계를 넓히거나 약화하는 protected change는 laptop Approval Authority의 승인이 필요하다.
+- protected approval은 laptop Web UI의 지정 계정에서만 가능하고 매 승인마다 재인증한다. 다른 ingress에서는 승인할 수 없다.
+- password 인증을 사용한다면 평문 저장을 금지하고 적절한 password KDF/hash를 사용한다.
+- AWS All Tomorrow가 자신의 code를 수정해도 Approval Authority의 secret, signing authority, code/data write permission을 획득할 수 없는 security boundary를 사용한다.
 
 ## 10. Current Implementation Boundary
 
@@ -434,6 +451,11 @@ Redis는 요구가 증명되기 전 필수가 아니다.
 - store-backed Web execution path
 - automatic lesson/evaluation loop
 - autonomous watchers/experiments
-- self-improvement promotion/rollback
+- autonomous Goal generation
+- mixed self-evaluation
+- ordinary self-improvement promotion/rollback
+- laptop external Approval Authority for protected changes
+- LiteLLM/model gateway
+- Codex worker
 
 세부 구현 순서는 [roadmap.md](roadmap.md)와 각 completion-stage 문서를 따른다.
