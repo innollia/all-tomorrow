@@ -133,10 +133,12 @@
 중요한 구조적 수정:
 
 - 기존의 `Request → Pipeline → Worker` 중심 모델 위에 `Goal/Work/Trigger` 계층을 둔다.
+- cross-system project coordination state와 provenance-aware context assembly를 둔다.
+- logical project source와 executor-local workspace path를 분리한다.
 - Worker와 실제 실행 위치/계정/자원 풀을 분리할 수 있는 경계를 만든다.
 - Artifact를 단순 문자열 ref가 아니라 장기 작업의 일급 metadata로 다룰 준비를 한다.
 - in-memory WorkQueue를 최종 scheduler로 간주하지 않는다.
-- Deferred라는 이유로 autonomy/self-improvement의 **아키텍처 요구사항**까지 미루지 않는다.
+- 후순위 구현이라는 이유로 autonomy/self-improvement의 **아키텍처 요구사항**까지 미루지 않는다.
 
 ## Roadmap Maintenance
 
