@@ -11,18 +11,25 @@
 
 ## 현재 우선 조합
 
+공통 조각:
 - Agent layer: PydanticAI
-- Durable backend 첫 후보: DBOS
+- Tool aggregation candidate: FastMCP stable gateway
 - Model gateway: LiteLLM Proxy
 - Telemetry contract: OpenTelemetry
 - Code/evaluation rail: GitHub + Actions
 - 기존 All Tomorrow: Goal/Work 의미, source ownership, metacognition, authority, worker adapters
 
-비교 후보:
-- Temporal: PydanticAI가 native 지원하는 더 무거운 migration 대안
-- Hatchet: embedded/self-host가 강한 task engine 대안. PydanticAI durable 연결은 별도 integration 비용을 먼저 측정
+Durable backend는 Stage 0에서 둘을 같은 acceptance로 경쟁시킨다.
 
-Stage 0에서 여러 durable engine을 production dependency로 동시에 넣지 않는다.
+- **DBOS**: Python/PostgreSQL 중심, PydanticAI native durability, 매우 얇은 single-node 시작
+- **Restate**: PydanticAI integration, single-binary self-host, durable state/RPC/signals/flow-control까지 넓은 substrate
+
+후순위 비교:
+- Temporal: PydanticAI native 지원, 가장 성숙하지만 초기 운영 중량이 큼
+- Hatchet: 100% MIT, Postgres/embedded/self-host와 UI가 강함. PydanticAI per-model/tool durability에는 custom backend 또는 다른 glue가 필요
+- Prefect: PydanticAI native 지원 + Apache 2.0 self-host, 그러나 All Tomorrow 초기 요구보다 workflow platform 면적이 넓을 수 있음
+
+Stage 0에서 production durable engine은 하나만 채택한다.
 
 ## Packet Status
 
@@ -38,9 +45,9 @@ Stage 0에서 여러 durable engine을 production dependency로 동시에 넣지
 
 Stage 0는 다음 질문만 닫는다.
 
-1. PydanticAI + DBOS + LiteLLM 조합이 현재 필수 실행 요구를 실제로 만족하는가?
+1. PydanticAI + DBOS와 PydanticAI + Restate 중 어느 조합이 현재 필수 실행 요구를 더 적은 glue로 만족하는가?
 2. crash/restart, duplicate start, delay/priority, HITL pause/resume가 custom queue 없이 가능한가?
-3. DBOS를 제거하거나 Temporal/Hatchet 등으로 바꿔도 Goal/Work 의미는 유지되는가?
+3. 선택한 durable backend를 제거하거나 다른 backend로 바꿔도 Goal/Work 의미는 유지되는가?
 4. 기존 PipelineRuntime과 worker adapter 중 무엇을 보존하고 무엇을 compatibility layer로 내릴 것인가?
 5. 처음부터 직접 구현해야 하는 최소 코드는 정확히 무엇인가?
 

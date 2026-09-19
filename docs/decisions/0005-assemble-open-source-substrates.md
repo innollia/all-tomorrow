@@ -28,12 +28,13 @@ All Tomorrow는 assemble-first 전략을 사용한다.
 ### 초기 substrate
 
 - PydanticAI: agent/tool/MCP/typed-output/eval interface
-- DBOS: first durable execution backend
+- DBOS와 Restate: first durable backend finalists
+- FastMCP: stable MCP gateway/composition candidate
 - LiteLLM Proxy: model/provider gateway
 - OpenTelemetry: telemetry contract
-- GitHub/Actions: code change and CI rail
+- GitHub/Actions + Dependabot: code, CI, dependency-update rail
 
-초기 조합은 Stage 0 spike 통과를 조건으로 한다. 통과 전 production architecture로 간주하지 않는다.
+durable backend는 Stage 0의 동일 failure acceptance에서 하나만 채택한다. 초기 조합은 spike 통과 전 production architecture로 간주하지 않는다.
 
 ### 교체 경계
 
@@ -41,7 +42,7 @@ All Tomorrow domain은 external execution을 ExecutionRef로만 참조한다.
 
 외부 engine의 queue status, checkpoint schema, provider message object를 domain schema에 복제하지 않는다.
 
-DBOS가 부적합해지면 PydanticAI가 지원하는 다른 durable backend나 별도 adapter로 교체할 수 있어야 한다.
+선택한 durable backend가 부적합해지면 PydanticAI native integration 또는 public durable backend builder 뒤의 다른 engine으로 교체할 수 있어야 한다.
 
 ### 기존 코드
 
@@ -62,7 +63,8 @@ Stage 0 walking skeleton 뒤:
 비용:
 - 여러 OSS의 version/API 변화와 운영 특성을 추적해야 한다.
 - adapter와 contract test가 중요해진다.
-- DBOS의 distributed production 운영 조건처럼 특정 backend 제약을 계속 감시해야 한다.
+- DBOS Conductor 라이선스, Restate runtime 라이선스/운영 조건처럼 backend별 제약을 계속 감시해야 한다.
+- 빠르게 변하는 upstream의 persisted compatibility 규칙을 CI로 고정해야 한다.
 
 ## Guardrails
 

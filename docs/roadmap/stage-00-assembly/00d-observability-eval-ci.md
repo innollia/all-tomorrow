@@ -54,3 +54,32 @@ protected self-change 승인 권한은 GitHub review로 대체하지 않는다. 
 ## 완료조건
 
 한 skeleton 실행을 trace로 따라갈 수 있고, 같은 실행을 작은 eval dataset으로 회귀 검증하며, CI에서 자동 실행 가능하다.
+
+
+## Dependency / Upgrade Rail
+
+OSS를 많이 붙이는 만큼 버전 변화 자체를 Stage 0 failure mode로 취급한다.
+
+초기 원칙:
+- production substrate(PydanticAI, durable backend SDK, FastMCP, LiteLLM)는 exact/lockfile pin
+- Docker image는 mutable `latest` 금지
+- GitHub Actions도 version/digest 관리
+- Dependabot으로 Python/GitHub Actions/Docker update PR 생성
+- 새 버전은 직접 main에 자동 반영하지 않고 compatibility CI를 통과한 PR만 merge
+- security patch도 in-flight durable replay test를 생략하지 않음
+
+Dependabot의 기본 update PR + cooldown을 이용하고, substrate 관련 업데이트는 별도 group으로 묶지 말지 실제 CI 비용을 보고 정한다.
+
+### Upgrade CI
+
+dependency PR에서 추가로:
+- persisted operation/toolset name snapshot
+- old fixture history/replay compatibility
+- MCP list/call contract
+- model gateway contract
+- crash/restart integration
+- eval regression
+
+을 실행한다.
+
+dependency update가 durable history를 깨면 "테스트 수정 후 merge"가 아니라 migration/drain 계획이 먼저다.

@@ -11,7 +11,8 @@ spike 결과로만 Stage 1을 다시 연다.
 
 ## 해야 할 일
 
-- 채택한 substrate와 exact version pin 기록
+- 채택한 durable substrate와 exact version pin 기록
+- FastMCP gateway 채택/기각 기록
 - backend 교체 조건 기록
 - architecture/ADR를 실제 결과에 맞게 갱신
 - Stage 1 schema에서 substrate 내부 상태 제거
@@ -20,7 +21,9 @@ spike 결과로만 Stage 1을 다시 연다.
 - 기존 PipelineRuntime의 지위를 유지/compatibility/retire 중 하나로 결정
 - Stage 1 acceptance를 crash/restart/versioning 중심으로 갱신
 
-## DBOS 채택 시 특별 확인
+## Durable Backend별 특별 확인
+
+### DBOS 채택 시
 
 DBOS application version과 in-flight workflow recovery 관계를 배포 계획에 넣는다.
 
@@ -30,6 +33,14 @@ DBOS application version과 in-flight workflow recovery 관계를 배포 계획�
 - Hatchet은 embedded/self-host 장점이 native-agent integration 비용보다 큰지 별도 비교
 
 를 수행한다.
+
+### Restate 채택 시
+
+- runtime single-node backup/restore
+- application PostgreSQL과 Restate state의 ownership 중복 여부
+- service/virtual-object/workflow 중 All Tomorrow에 필요한 최소 primitive
+- deployment version 변경 중 invocation recovery
+- Pydantic integration upgrade compatibility
 
 ## Persisted Compatibility 확인
 
