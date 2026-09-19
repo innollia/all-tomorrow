@@ -7,7 +7,7 @@
 
 1차 완성은 "pipeline 몇 개가 실행된다"가 아니다.
 
-사용자가 어느 기기에서든 중앙에 들어와 요청을 보내면, 그 요청이 적절한 project와 durable work에 연결되고, 필요한 pipeline/worker/tool로 실행되며, 중간에 사용자 정보가 필요하면 즉시 멈추고 질문하고, 서버 재시작 뒤에도 같은 work/run을 재개하고, 결과·산출물·provenance를 다시 확인할 수 있어야 한다.
+사용자가 어느 기기에서든 중앙에 들어와 요청을 보내면, 그 요청이 적절한 Goal과 durable Work에 연결되고, **generic planner가 현재 context·policy·resource state를 보고 Plan/Work를 구성**하며, 필요한 pipeline/worker/tool로 실행되어야 한다. 실행 중 조건이 바뀌면 Goal을 잃지 않고 Plan을 revision할 수 있고, 사용자 정보가 필요하면 즉시 멈추고 질문하며, 서버 재시작 뒤에도 같은 work/run을 재개하고 결과·산출물·provenance를 다시 확인할 수 있어야 한다.
 
 1차가 끝나면 시스템은 아직 자율 연구원이나 자기개선 시스템은 아니지만, 이후 2차·3차 기능이 core 재작성 없이 올라갈 수 있는 중앙 기반이어야 한다.
 
@@ -18,12 +18,14 @@
 Gate A의 첫 작업 순서:
 
 1. 현재 `Project`, `tasks`, `runs`, `events`, `WorkerRequest`, `projects/catalog.yaml`의 참조 지점을 전수 검사한다.
-2. Goal/WorkItem/ProjectSource/Executor/Artifact의 **최소 contract**와 ownership만 먼저 설계한다. 미래 provider 세부를 미리 다 모델링하지 않는다.
-3. Work/Run/Trace correlation과 event retention migration을 설계한다.
-4. logical project source ↔ executor workspace mapping을 설계한다.
-5. project context projection/context-pack contract를 설계한다.
-6. 현재 회귀 테스트 전체가 깨지는 지점을 확인하고 필요한 migration/unit test를 먼저 추가한 뒤 구현한다.
-7. Gate A가 닫히기 전에는 기존 thin task/run 모델 위에 production Web 기능을 더 쌓지 않는다.
+2. Goal/Plan/PlanRevision/WorkItem/Observation/PolicyRef/ProjectSource/Executor/Artifact의 **최소 contract**와 ownership만 먼저 설계한다. 미래 provider 세부를 미리 다 모델링하지 않는다.
+3. planner input/output와 replanning boundary를 설계한다. Planner 구현은 교체 가능하게 두고 pipeline runtime에 흡수하지 않는다.
+4. Work/Run/Trace correlation과 event retention migration을 설계한다.
+5. logical project source ↔ executor workspace mapping을 설계한다.
+6. project coordination state/context-pack contract를 설계한다.
+7. provider-specific quota/rate-limit/auth/unavailable 결과를 generic observation/resource-state로 정규화하는 adapter boundary를 설계한다.
+8. 현재 회귀 테스트 전체가 깨지는 지점을 확인하고 필요한 migration/unit test를 먼저 추가한 뒤 구현한다.
+9. Gate A가 닫히기 전에는 기존 thin task/run 모델 위에 production Web 기능을 더 쌓지 않는다.
 
 ## 0. Preserve Existing Good Work
 
@@ -153,7 +155,85 @@ context pack에는 크기/비용 budget을 두고, 모든 history를 통째로 p
 
 Project context는 Git 코드, Eve state, Manager personal facts의 복제 정본이 아니다. 그 값들이 필요하면 source reference를 통해 읽는다.
 
-### 1.7 Artifact
+### 1.7 Plan and PlanRevision
+
+Goal과 Plan을 같은 것으로 취급하지 않는다.
+
+- **Goal**: 가능한 한 안정적으로 유지되는 사용자의 의도와 성공 조건
+- **Plan**: 현재 state와 policy에서 Goal을 달성하기 위해 선택한 Work graph
+- **PlanRevision**: 새로운 observation 때문에 기존 Plan을 어떻게 유지·대체·축소·연기했는지 기록하는 변경
+
+최소 의미:
+
+- plan id / version
+- goal id
+- rationale
+- work graph refs
+- assumptions
+- resource/policy snapshot refs
+- created_from observation refs
+- supersedes plan version
+- created_at
+
+resource가 고갈되거나 worker가 실패했다는 이유만으로 Goal을 FAILED로 끝내지 않는다. policy상 가능한 대안이 있으면 Replanner가 새 PlanRevision을 만든다.
+
+Plan revision은 이미 성공한 Work/Artifact를 불필요하게 무효화하지 않는다. 재사용 가능한 결과를 보존하고 아직 필요한 work만 다시 계산한다.
+
+### 1.8 Observation and Policy
+
+Planner가 provider-specific 예외 문자열을 직접 해석하지 않게 한다.
+
+adapter/resource layer는 외부 상태를 **generic observation**으로 정규화한다. 예:
+
+- resource unavailable
+- capacity/quota exhausted
+- rate limited
+- credential/input missing
+- permission/policy blocked
+- cost/latency/quality state changed
+- work result or evaluation changed
+
+generic category와 provider-specific detail/ref를 함께 보존한다. category를 무한 enum으로 미리 고정할 필요는 없지만, planner가 서비스 이름 대신 의미를 읽을 수 있어야 한다.
+
+Policy는 planner가 허용된 선택지를 판단하는 데이터/계약이다.
+
+예:
+
+- free-only 또는 paid 허용 범위
+- quality floor
+- deadline/priority
+- concurrency/budget
+- privacy/risk
+- user approval requirement
+- fallback/degradation 허용 범위
+
+policy를 pipeline step의 서비스별 if/else로 복제하지 않는다.
+
+### 1.9 Generic Planner / Replanner Boundary
+
+Planner 입력의 최소 범위:
+
+- Goal
+- current Plan/Work state
+- project/context pack refs
+- resource/capability snapshot
+- policy/budget
+- recent observations
+- reusable artifact/lesson refs
+
+Planner 출력의 최소 범위:
+
+- 새 Plan 또는 PlanRevision
+- 생성/유지/취소/연기할 WorkItem
+- 필요한 capability/resource constraints
+- NEED_USER가 필요하면 그 이유와 required input
+- 선택 rationale/provenance
+
+Planner 구현은 rule-based, LLM, hybrid 등으로 교체 가능해야 한다. 특정 LLM prompt를 architecture contract로 만들지 않는다.
+
+Pipeline은 planner 결과로 나온 WorkItem을 수행하는 recipe다. quota 감소, 새 API 발견, 사용자 credential 요청 같은 세계 상태 판단을 pipeline마다 하드코딩하지 않는다.
+
+### 1.10 Artifact
 
 Artifact는 문자열 URL 목록을 넘어 장기 작업 산출물의 metadata identity가 필요하다.
 
@@ -194,6 +274,8 @@ Artifact는 문자열 URL 목록을 넘어 장기 작업 산출물의 metadata i
 - worker metadata가 특정 로컬 PC에 구조적으로 고정되지 않는다.
 - credential 값이 아닌 opaque credential/resource reference를 전달할 수 있다.
 - 한 worker capability가 미래에 여러 executor를 가질 수 있는 schema seam이 있다.
+- resource의 provider/model/account identity, availability, quota/capacity, rate-limit, cost class, health 같은 상태를 pipeline code가 아니라 metadata/state로 표현할 seam이 있다.
+- 새 resource type을 추가할 때 기존 generic pipeline을 수정하지 않고 adapter + metadata/capability registration으로 참여시킬 수 있어야 한다.
 
 ## 3. Durable Persistence
 
@@ -244,13 +326,17 @@ Registry는 이름 목록이 아니라 실제 실행 가능성을 반영한다.
 - availability/health
 - permission/risk metadata
 - worker ↔ executor binding
+- provider resource metadata/state
 - tool registration
 - explicit project constraints
+- policy constraints
 - selection provenance
 
-선택 결과에는 최소한 "왜 이 worker/tool/executor가 골라졌는가"를 trace 가능한 metadata로 남긴다.
+선택 결과에는 최소한 "왜 이 worker/tool/executor/resource가 골라졌는가"를 trace 가능한 metadata로 남긴다.
 
-cost optimizer는 3차 대상이지만 1차 contract가 cost/budget metadata를 막지 않아야 한다.
+Registry는 routing decision을 전부 소유하지 않는다. Registry는 현재 후보와 상태를 제공하고, Planner/Policy가 Goal과 Plan 맥락에서 어떤 후보를 사용할지 결정할 수 있어야 한다.
+
+cost optimizer는 3차 대상이지만 1차 contract가 cost/budget/quota/quality metadata를 막지 않아야 한다.
 
 ## 6. Edge → Central Execution
 
@@ -352,10 +438,10 @@ Discord가 첫 edge일 뿐, 중앙 ingress/execution 계약은 Web/CLI/ChatGPT�
 1차 항목을 동시에 벌리지 않는다.
 
 1. **Gate A — contracts and schema correction**  
-   Goal/Work/Trigger/Artifact identity, Work/Run/Trace correlation, project coordination context, registry owner와 canonical/source owner 구분, Worker/Executor/Resource seam을 확정하고 migration 계획을 만든다.
+   Goal/Plan/PlanRevision/Work/Observation/PolicyRef/Trigger/Artifact identity, Planner/Replanner boundary, Work/Run/Trace correlation, project coordination context, registry owner와 canonical/source owner 구분, Worker/Executor/Resource seam을 확정하고 migration 계획을 만든다.
 
-2. **Gate B — durable execution**  
-   live PostgreSQL, transactional event/run state, durable scheduling, crash recovery, NEED_USER restart-resume를 통과한다.
+2. **Gate B — durable execution and replanning substrate**  
+   live PostgreSQL, transactional plan/work/run/event state, durable scheduling, crash recovery, NEED_USER restart-resume, observation → PlanRevision persistence를 통과한다.
 
 3. **Gate C — routing and ingress**  
    registry/tool routing, Discord central escalation, idempotent ingress를 연결한다.
@@ -412,10 +498,23 @@ Manager/Web에서 "Eve 프로젝트의 이 문제를 고쳐" 같은 요청 → p
 
 Web에서 만든 Work/질문/결과를 Discord 또는 실제 연결 가능한 다른 client가 같은 중앙 identity로 조회·이어받음. 두 client가 별도 task/history 섬을 만들지 않음. ChatGPT/CLI adapter는 지원 표면이 검증되는 대로 같은 ingress contract를 사용함.
 
+### K. Novel-resource extensibility
+
+테스트용 신규 provider/resource `provider:new-free-x`를 등록 → 기존 coding/research pipeline이나 planner core에 그 이름을 추가하지 않음 → capability/resource metadata와 adapter registration만으로 후보가 됨 → policy에 맞으면 선택 가능.
+
+### L. Resource-loss replanning contract
+
+진행 중 Work가 사용하는 resource에 quota-exhausted observation 발생 → Goal 유지 → 현재 성공 artifact/work 보존 → Planner가 대체 resource / 축소 / 연기 / 사용자 입력 요청 중 policy상 가능한 새 PlanRevision을 생성. 1차에서는 모든 실제 provider fallback을 구현할 필요는 없지만 lifecycle과 persistence가 provider-independent하게 검증되어야 함.
+
+### M. No hard-coded pipeline branching
+
+테스트 fixture에서 서로 다른 두 provider가 같은 `capacity_exhausted` 의미를 각자 다른 raw error로 반환 → adapter가 generic observation으로 정규화 → 동일 replanning policy가 작동. Pipeline YAML에는 두 provider 이름이나 error string 조건문이 없음.
+
 ## 12. Explicitly Not Required for 1차
 
 - autonomous community research
-- automatic service experiments
+- automatic service discovery/experiments
+- 실제 quota-aware 최적 resource replanning 전체
 - model/account cost optimizer
 - large-scale API-key pool rotation
 - semantic vector retrieval as mandatory dependency
