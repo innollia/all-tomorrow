@@ -193,7 +193,7 @@ vector DB는 retrieval implementation 중 하나일 뿐 지식 정본 자체가 
 - excessive token/tool cost
 - background work starvation
 - 사용자가 반복해서 같은 수정 요구
-- resource quota 때문에 반복되는 PlanRevision
+- resource quota 때문에 반복되는 Plan revision
 - fallback을 못 찾아 Goal이 자주 막힘
 - 같은 provider-specific branch가 여러 pipeline에 복제됨
 - 새 integration마다 core code 수정이 반복됨
@@ -204,7 +204,7 @@ vector DB는 retrieval implementation 중 하나일 뿐 지식 정본 자체가 
 
 ### A. Tool/resource discovery → production candidate
 
-새 서비스 발견 → watcher evidence → integration mode 판정 → 기존 generic adapter profile이면 declarative config로 sandbox experiment, custom protocol이면 AdapterProposal과 sandbox implementation → benchmark/artifacts → evaluation → 정책상 승격 가능하면 adapter/resource registry candidate 또는 production binding → 이후 성능 monitoring. generic planner/pipeline은 provider 이름 때문에 변경되지 않음.
+새 서비스 발견 → watcher evidence → integration mode 판정 → 기존 generic adapter profile이면 declarative config로 sandbox experiment, custom protocol이면 adapter implementation proposal과 sandbox implementation → benchmark/artifacts → evaluation → 정책상 승격 가능하면 adapter/resource registry candidate 또는 production binding → 이후 성능 monitoring. generic planner/pipeline은 provider 이름 때문에 변경되지 않음.
 
 ### B. Pipeline self-improvement
 
@@ -220,7 +220,7 @@ vector DB는 retrieval implementation 중 하나일 뿐 지식 정본 자체가 
 
 ### E. Resource optimization
 
-여러 executor/provider/resource 중 policy에 맞게 동적 선택. quota/health/cost/quality 변화가 observation으로 들어오면 같은 Goal의 PlanRevision을 만들고 task provenance와 budget을 유지. 새 provider가 들어와도 planner core나 기존 pipeline 수정 없이 candidate set에 참여.
+여러 executor/provider/resource 중 policy에 맞게 동적 선택. quota/health/cost/quality 변화가 observation으로 들어오면 같은 Goal의 Plan revision을 만들고 task provenance와 budget을 유지. 새 provider가 들어와도 planner core나 기존 pipeline 수정 없이 candidate set에 참여.
 
 ### F. Failure-driven meta improvement
 
