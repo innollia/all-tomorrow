@@ -173,7 +173,7 @@ Pipeline은 작업 계층에서 하나의 WorkItem을 실행하는 versioned rec
 - [기존 시스템 inventory](docs/inventory.md)
 - [초기 경계 결정 기록](docs/decisions/0001-control-plane-boundary.md)
 - [Durable Work 아키텍처 결정](docs/decisions/0002-durable-work-above-pipeline.md)
-- [범용 Planner/Replanning 아키텍처 결정](docs/decisions/0003-generic-planning-over-hardcoded-pipelines.md)
+- [병렬 메타인지 아키텍처 결정](docs/decisions/0003-generic-planning-over-hardcoded-pipelines.md)
 - [Worker adapter와 pipeline 연결](docs/worker-adapters.md)
 
 ## Development Verification
