@@ -59,11 +59,12 @@
 | 어느 기기에서든 웹으로 중앙 접속 | 1차 | remote HTTPS control surface + durable DB/recovery |
 | 범용 답변이 아닌 사용자 맥락 기반 질의응답 | 1차 | Manager/source-owner context를 조립한 Web 질의 경로 |
 | 흩어진 ChatGPT/Discord/CLI 작업을 중앙에서 조정 | 1차 | 공통 Goal/Work/Run authority + edge ingress |
+| 요청을 어디에·어떻게 보낼지 중앙이 자동 판단 | 1차→2차 | 1차 project/capability/worker/executor routing, 2차 provider resource/quota-aware routing |
 | 한 곳에서 다른 프로젝트의 실제 수정까지 이어짐 | 1차 | cross-system project resolution → WorkItem → adapter/worker execution |
 | Discord가 모든 말을 무조건 중앙으로 보내지 않음 | 1차 | local-vs-central edge policy + actual escalation |
 | pipeline을 중앙에서 모듈식으로 교체 | 1차 | immutable/versioned pipeline recipe와 work 분리 |
 | 필수 정보가 없으면 즉시 사용자에게 질문 | 1차 | durable NEED_USER + restart-safe resume |
-| 과거 전체 과정을 못 본 worker의 handover 격차 감소 | 1차 | project coordination projection + provenance-aware context pack |
+| 과거 전체 과정을 못 본 worker의 handover 격차 감소 | 1차 | project coordination state + source-owner projection + provenance-aware context pack |
 | 프로젝트 노하우를 다음 프로젝트에 재사용 | 1차→2차 | 1차 manual lesson/bootstrap, 2차 outcome 기반 지속 loop |
 | 스케줄/요청 없이 background work 지속 | 2차 | durable trigger + background scheduler |
 | 커뮤니티·도서·자료를 조사해 지식 축적 | 2차 | research watcher + evidence/artifact + lesson candidate |
