@@ -330,7 +330,8 @@ Registry는 이름 목록이 아니라 실제 실행 가능성을 반영한다.
 
 필수:
 
-- capability
+- extensible capability descriptor registry
+- worker/tool/resource/pipeline capability refs validation
 - availability/health
 - permission/risk metadata
 - worker ↔ executor binding
@@ -342,7 +343,11 @@ Registry는 이름 목록이 아니라 실제 실행 가능성을 반영한다.
 
 선택 결과에는 최소한 "왜 이 worker/tool/executor/resource가 골라졌는가"를 trace 가능한 metadata로 남긴다.
 
-Registry는 routing decision을 전부 소유하지 않는다. Registry는 현재 후보와 상태를 제공하고, Planner/Policy가 Goal과 Plan 맥락에서 어떤 후보를 사용할지 결정할 수 있어야 한다.
+Registry는 routing decision을 전부 소유하지 않는다. Registry는 capability 의미, 현재 후보와 상태를 제공하고, Planner/Policy가 Goal과 Plan 맥락에서 어떤 후보를 사용할지 결정할 수 있어야 한다.
+
+현재 `Capability` contract는 description을 갖지만 `CapabilityRegistry`는 실제 descriptor registry로 사용하지 않고 worker/tool의 string set을 직접 비교한다. 1차에서는 capability를 닫힌 enum으로 만들지 않으면서 descriptor 등록/조회/validation seam을 보강한다.
+
+Pipeline도 recipe metadata를 통해 자신이 처리하는 capability/work kind, input/output, side-effect/retry-safety를 설명할 수 있는 방향을 잡는다. 기존 `PipelineSpec.trigger`를 장기 scheduler Trigger와 혼동하지 않는다.
 
 현재 `CapabilityRegistry.select_worker()`의 `evaluation_score → cost_score → latency` 고정 정렬과 `select_tools()`의 latency 정렬은 **초기 selection policy**로만 취급한다. 1차에서는 최소한 selection/ranking policy를 Registry 내부 불변 로직과 분리할 seam을 만든다. 모든 ranking 알고리즘을 구현할 필요는 없지만, 정책을 바꾸기 위해 Registry core를 매번 수정하는 구조로 굳히지 않는다.
 
@@ -522,7 +527,11 @@ Web에서 만든 Work/질문/결과를 Discord 또는 실제 연결 가능한 �
 
 테스트 fixture에서 서로 다른 두 provider가 같은 `capacity_exhausted` 의미를 각자 다른 raw error로 반환 → adapter가 generic observation으로 정규화 → 동일 replanning policy가 작동. Pipeline YAML에는 두 provider 이름이나 error string 조건문이 없음.
 
-### N. Pluggable selection policy
+### N. Extensible capability descriptor
+
+새 fake capability를 descriptor로 등록 → fake worker/tool/pipeline이 capability ref를 선언 → core enum이나 provider branch 수정 없이 registry validation/selection candidate에 참여. 존재하지 않는 capability ref는 명확히 거부.
+
+### N2. Pluggable selection policy
 
 같은 worker/resource 후보 집합에 대해 "quality 우선"과 "free/cost 우선" policy fixture를 바꿈 → Registry 후보 데이터와 adapter는 그대로 → 선택 순서가 policy에 따라 달라짐. `CapabilityRegistry` core에 새 provider 이름이나 별도 정렬 branch를 추가하지 않음.
 
