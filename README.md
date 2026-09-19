@@ -102,7 +102,7 @@ Pipeline은 장기 목표와 전체 자율성을 소유하는 거대한 만능 �
 전체 계획은 한 파일에 계속 누적하지 않는다.
 
 - **[1차 완성 — Durable Central Core](docs/roadmap-01-foundation.md)**  
-  지금 구현된 pipeline/event/adapter 기반을 살리면서 Goal/Work/Trigger/Artifact와 durable execution 경계를 바로잡는다. 사용자가 실제로 중앙에 접속해 작업을 맡기고, 중단·재개하고, 결과를 추적할 수 있는 첫 운영 가능한 중심부가 목표다.
+  지금 구현된 pipeline/event/adapter 기반을 살리면서 Goal/Work/Project Context/Trigger/Artifact와 durable execution 경계를 바로잡는다. 사용자가 실제로 중앙에 접속해 작업을 맡기고, 중단·재개하고, 결과를 추적할 수 있는 첫 운영 가능한 중심부가 목표다.
 
 - **[2차 완성 — Autonomous Personal & Project Operations](docs/roadmap-02-autonomy.md)**  
   스케줄·watcher·background work, cross-project lesson 재사용, 개인 운영, 자원 라우팅을 붙여 사용자의 즉시 요청이 없어도 유용한 일을 지속하는 단계다.
