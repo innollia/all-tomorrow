@@ -105,11 +105,13 @@ Planner가 장기적인 "어떻게 할 것인가"를 소유한다. Pipeline이 �
 
 출력:
 
-- Plan or PlanRevision
+- Plan or PlanRevision candidate
 - create/keep/cancel/defer WorkItem decisions
 - capability/resource constraints
 - user input requirement
 - rationale/provenance
+
+Planner 출력은 곧바로 실행 권한이 아니다. durable Plan/Work로 materialize하기 전에 최소한 contract/schema, dependency consistency, referenced resource existence, permission/risk policy, hard budget, acceptance-criteria preservation, required user approval을 검증한다.
 
 Planner 구현은 rule-based, LLM, hybrid 등으로 교체 가능해야 한다. 특정 모델 prompt나 특정 provider 이름이 architecture contract가 아니다.
 
@@ -204,7 +206,7 @@ Project source identity와 executor-local workspace path도 분리한다. `repo:
 - canonical projection과 append-only event를 분리한다.
 - **Observation**은 Planner/Replanner가 현재 세계 상태 변화를 해석하기 위한 입력이다.
 - Observation은 provider-specific detail을 보존하되 generic semantic category와 resource/work refs를 가져야 한다.
-- ResourceState는 availability, capacity/quota, rate-limit, health, cost/quality class, reset/expiry 같은 현재 상태를 표현할 수 있다.
+- ResourceState는 availability, capacity/quota, rate-limit, health, cost/quality class, reset/expiry 같은 현재 상태를 표현할 수 있다. 모든 provider가 정확한 quota telemetry를 제공한다고 가정하지 않고 known / unknown / estimated와 source, observed_at, freshness/confidence를 표현할 수 있어야 한다.
 - Policy는 허용된 degradation/fallback/budget/approval boundary를 표현한다.
 - event는 수정 이력이 아니라 provenance/history다.
 - Artifact는 bytes 자체가 아니라 중앙에서 추적할 metadata identity를 가진다.
@@ -428,13 +430,14 @@ details_ref / metadata
 resource_id
 capabilities
 availability
-capacity/quota state
+capacity/quota state: known | unknown | estimated + value/ref
 rate-limit state
 health
 cost class
 quality/evaluation refs
 credential_ref
-updated_at / freshness
+source_ref
+observed_at / freshness / confidence
 ```
 
 #### ResourceCandidate
@@ -555,6 +558,7 @@ Redis는 요구가 증명되기 전 필수가 아니다.
 
 - credential 값은 contract/event/log/artifact metadata에 기록하지 않는다.
 - adapter/executor는 opaque credential/resource reference만 받는다.
+- Planner가 만든 Plan/PlanRevision candidate는 schema/policy/permission/budget validation 없이 실행하지 않는다.
 - canonical write와 high-risk tool은 중앙 policy 확인이 필요하다.
 - mutation target이 모호하면 NEED_USER.
 - 외부 mutation은 idempotency key와 trace를 가진다.
