@@ -44,8 +44,8 @@ Control Plane, pipeline runtime, event store, worker/tool registry, scheduler, m
 4. **Cross-project learning**  
    한 프로젝트에서 얻은 검증된 노하우와 실패가 다음 프로젝트 시작 시 후보로 검색·선별되어 재사용되어야 한다.
 
-5. **Automatic orchestration and adaptive replanning**  
-   사용자가 작업을 요청하면 시스템이 project, capability, worker, tool, 실행 위치와 필요한 자원을 판단하고 추적 가능한 방식으로 배치해야 한다. 실행 중 quota, rate limit, health, cost, permission, user input 같은 현실 조건이 달라지면 Goal을 잃지 않은 채 Plan/Work를 다시 계산할 수 있어야 한다.
+5. **Concurrent orchestration and metacognition**  
+   여러 작업을 중앙에서 동시에 조정할 수 있어야 하고, 별도의 메타인지 계층이 전체 진행을 관찰해 정체·실패·비효율·새 가능성을 스스로 발견하고 필요하면 조사나 후속 Work를 만들 수 있어야 한다.
 
 6. **Autonomous operation**  
    사용자의 즉시 요청이 없어도 허용된 범위에서 조사, 수집, 평가, 유지관리, 실험, 보고와 장기 작업을 계속할 수 있어야 한다.
