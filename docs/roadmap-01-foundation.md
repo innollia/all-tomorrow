@@ -479,41 +479,19 @@ Manager/Web에서 "Eve 프로젝트의 이 문제를 고쳐" 같은 요청 → p
 
 Web에서 만든 Work/질문/결과를 Discord 또는 실제 연결 가능한 다른 client가 같은 중앙 identity로 조회·이어받음. 두 client가 별도 task/history 섬을 만들지 않음. ChatGPT/CLI adapter는 지원 표면이 검증되는 대로 같은 ingress contract를 사용함.
 
-### K. Novel-resource extensibility
+### K. Genericity and adaptation suite
 
-테스트용 신규 provider/resource `provider:new-free-x`를 등록 → 기존 coding/research pipeline이나 planner core에 그 이름을 추가하지 않음 → capability/resource metadata와 adapter registration만으로 후보가 됨 → policy에 맞으면 선택 가능.
+아래를 하나의 묶음으로 검증한다.
 
-### L. Resource-loss routing/replanning contract
+- **새 resource**: fake provider/resource를 추가해도 기존 pipeline/planner core에 이름별 branch를 추가하지 않고 adapter + metadata/capability 등록으로 후보가 됨
+- **resource loss**: quota/health 문제에서 동등 resource가 있으면 safe failover, 없으면 Goal을 유지한 채 plan revision/wait/NEED_USER로 이동
+- **raw error normalization**: provider마다 다른 quota error가 generic observation으로 정규화되고 pipeline YAML에는 provider 이름/error string 조건문이 없음
+- **selection policy**: 동일 후보 집합에서 quality 우선과 free/cost 우선 policy를 바꿔도 Registry core를 수정하지 않음
+- **unknown quota**: 정확한 remaining quota가 없어도 unknown/estimated 상태와 실제 실패 observation으로 동작
+- **planner validation**: planner가 잘못된 resource/budget/acceptance 변경을 제안하면 Work 생성 전에 거부됨
+- **mutation safety**: side effect 여부가 불명확한 timeout은 다른 resource로 즉시 중복 실행하지 않고 reconcile/idempotency 확인
+- **no-resource case**: 현재 실행 resource가 0개여도 Run 실패를 Goal 실패로 확정하지 않고 wait/resource acquisition/replan/NEED_USER 후보로 올림
 
-진행 중 Work가 사용하는 resource에 quota-exhausted observation 발생 → Goal 유지 → 먼저 같은 capability/quality/policy를 만족하는 동등 resource가 있으면 Execution Resolution이 transparent failover → 그런 후보가 없고 범위·품질·시간·구조·사용자 action을 바꿔야 하면 Planner가 새 PlanRevision 생성. 현재 성공 artifact/work는 보존. 1차에서는 모든 실제 provider fallback을 구현할 필요는 없지만 두 경계가 provider-independent하게 검증되어야 함.
-
-### M. No hard-coded pipeline branching
-
-테스트 fixture에서 서로 다른 두 provider가 같은 `capacity_exhausted` 의미를 각자 다른 raw error로 반환 → adapter가 generic observation으로 정규화 → 동일 replanning policy가 작동. Pipeline YAML에는 두 provider 이름이나 error string 조건문이 없음.
-
-### N. Extensible capability descriptor
-
-새 fake capability를 descriptor로 등록 → fake worker/tool/pipeline이 capability ref를 선언 → core enum이나 provider branch 수정 없이 registry validation/selection candidate에 참여. 존재하지 않는 capability ref는 명확히 거부.
-
-### N2. Pluggable selection policy
-
-같은 worker/resource 후보 집합에 대해 "quality 우선"과 "free/cost 우선" policy fixture를 바꿈 → Registry 후보 데이터와 adapter는 그대로 → 선택 순서가 policy에 따라 달라짐. `CapabilityRegistry` core에 새 provider 이름이나 별도 정렬 branch를 추가하지 않음.
-
-### O. Invalid planner output is rejected
-
-Planner fixture가 존재하지 않는 resource를 pin하거나 hard budget을 넘기거나 acceptance criteria를 조용히 낮추는 PlanRevision 생성 → validator가 durable Work 생성 전에 거부/NEED_USER/재계획으로 돌림 → Planner 모델의 출력이 직접 실행 권한이 아님.
-
-### P. Unknown quota state
-
-정확한 remaining quota를 제공하지 않는 fake provider → ResourceState가 unknown/estimated로 등록 → 실제 429/quota observation이 들어오면 상태와 freshness 갱신 → provider 이름별 특수 pipeline 없이 failover/replanning boundary가 작동.
-
-### Q. Mutation failover safety
-
-외부 mutation worker가 timeout을 반환했지만 실제 side effect 발생 여부가 불명확함 → equivalent worker가 있어도 즉시 재실행하지 않음 → idempotency ledger/read-back/reconcile로 상태 확인 → 안전한 경우에만 retry, 아니면 NEED_USER. provider failover가 duplicate mutation을 만들지 않음.
-
-### R. No available worker is not automatic Goal failure
-
-required capability를 만족하는 worker/resource가 현재 0개 → pipeline-local provider branch를 추가하지 않음 → resource-unavailable Observation → WorkItem은 replan/block 상태 → Planner가 wait/resource acquisition/NEED_USER/plan change 중 policy상 가능한 경로를 선택 → Goal identity 유지.
 
 ## 12. Explicitly Not Required for 1차
 
