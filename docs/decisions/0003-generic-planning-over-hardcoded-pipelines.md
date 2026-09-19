@@ -54,11 +54,13 @@ Planner 입력:
 
 Planner 출력:
 
-- Plan or PlanRevision
+- Plan or PlanRevision candidate
 - create/keep/cancel/defer WorkItem decisions
 - capability/resource constraints
 - NEED_USER requirements
 - rationale/provenance
+
+Planner output은 실행 명령이 아니라 candidate다. contract/dependency/permission/hard-budget/acceptance-criteria validation을 통과한 뒤에만 durable Plan/Work로 materialize한다.
 
 Planner 구현은 rule-based, LLM, hybrid 등으로 교체 가능하다.
 
@@ -78,7 +80,7 @@ provider-specific raw 상태를 generic semantic layer로 정규화한다.
 - cost/latency/quality state changed
 - evaluation/result changed
 
-세상의 모든 provider를 하나의 완벽한 schema로 강제하지 않는다. 공통 의미와 provider-specific detail/ref를 분리한다.
+세상의 모든 provider를 하나의 완벽한 schema로 강제하지 않는다. 공통 의미와 provider-specific detail/ref를 분리한다. 정확한 quota가 없는 경우 `unknown/estimated`와 source/freshness/confidence를 표현하고 실제 observation으로 갱신한다.
 
 Planner가 provider raw error string이나 서비스 이름으로 직접 분기하지 않는다.
 
