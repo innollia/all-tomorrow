@@ -76,6 +76,8 @@ production 변경에는 최소한 다음이 필요하다.
 
 high-risk mutation 또는 사용자 운영 규칙 변경은 별도 승인을 요구할 수 있다.
 
+Self-improvement subsystem은 자신의 **root promotion gate, user-approval requirement, permission boundary, secret-access policy, hard budget ceiling**을 스스로 완화하거나 제거할 수 없다. 이런 상위 통제 정책 변경은 explicit user-controlled change로만 다룬다.
+
 모델이 "더 좋아 보인다"고 말한 것만으로 승격하지 않는다.
 
 ## 4. Resource Optimization
