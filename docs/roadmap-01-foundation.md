@@ -223,11 +223,13 @@ Planner 입력의 최소 범위:
 
 Planner 출력의 최소 범위:
 
-- 새 Plan 또는 PlanRevision
+- 새 Plan 또는 PlanRevision candidate
 - 생성/유지/취소/연기할 WorkItem
 - 가능한 한 concrete provider가 아니라 필요한 capability/resource constraints
 - NEED_USER가 필요하면 그 이유와 required input
 - 선택 rationale/provenance
+
+Planner output은 durable Work로 materialize하기 전 contract, dependency, permission, hard budget, acceptance-criteria preservation 검증을 통과한다.
 
 Planner 구현은 rule-based, LLM, hybrid 등으로 교체 가능해야 한다. 특정 LLM prompt를 architecture contract로 만들지 않는다.
 
@@ -277,6 +279,7 @@ Artifact는 문자열 URL 목록을 넘어 장기 작업 산출물의 metadata i
 - credential 값이 아닌 opaque credential/resource reference를 전달할 수 있다.
 - 한 worker capability가 미래에 여러 executor를 가질 수 있는 schema seam이 있다.
 - resource의 provider/model/account identity, availability, quota/capacity, rate-limit, cost class, health 같은 상태를 pipeline code가 아니라 metadata/state로 표현할 seam이 있다.
+- quota를 정확히 알 수 없는 provider도 `unknown/estimated` + source/freshness/confidence로 표현할 수 있고, 실제 rate-limit/quota error observation으로 state를 갱신할 수 있다.
 - 새 resource type을 추가할 때 기존 generic pipeline을 수정하지 않고 adapter + metadata/capability registration으로 참여시킬 수 있어야 한다.
 
 ## 3. Durable Persistence
@@ -519,6 +522,14 @@ Web에서 만든 Work/질문/결과를 Discord 또는 실제 연결 가능한 �
 ### N. Pluggable selection policy
 
 같은 worker/resource 후보 집합에 대해 "quality 우선"과 "free/cost 우선" policy fixture를 바꿈 → Registry 후보 데이터와 adapter는 그대로 → 선택 순서가 policy에 따라 달라짐. `CapabilityRegistry` core에 새 provider 이름이나 별도 정렬 branch를 추가하지 않음.
+
+### O. Invalid planner output is rejected
+
+Planner fixture가 존재하지 않는 resource를 pin하거나 hard budget을 넘기거나 acceptance criteria를 조용히 낮추는 PlanRevision 생성 → validator가 durable Work 생성 전에 거부/NEED_USER/재계획로 돌림 → Planner 모델의 출력이 직접 실행 권한이 아님.
+
+### P. Unknown quota state
+
+정확한 remaining quota를 제공하지 않는 fake provider → ResourceState가 unknown/estimated로 등록 → 실제 429/quota observation이 들어오면 상태와 freshness 갱신 → provider 이름별 특수 pipeline 없이 failover/replanning boundary가 작동.
 
 ## 12. Explicitly Not Required for 1차
 
