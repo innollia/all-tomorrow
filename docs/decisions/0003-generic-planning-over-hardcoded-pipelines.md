@@ -64,7 +64,7 @@ Planner output은 실행 명령이 아니라 candidate다. contract/dependency/p
 
 Planner 구현은 rule-based, LLM, hybrid 등으로 교체 가능하다.
 
-Pipeline은 Planner가 만든 WorkItem을 수행하는 bounded execution recipe다.
+Pipeline은 Planner가 만든 WorkItem을 수행하는 bounded execution recipe다. Pipeline Run이 FAILED라는 사실만으로 WorkItem/Goal을 terminal failure로 만들지 않는다. recoverable resource observation이면 상위 orchestrator가 fallback/replan/wait/resource-acquisition lifecycle로 돌릴 수 있다.
 
 ### 3. 외부 변화는 Observation과 ResourceState로 들어온다
 
@@ -212,7 +212,7 @@ system observation / improvement question
 - research source
 - provider raw error branch
 
-현재 `CapabilityRegistry`의 고정 quality/cost/latency ranking은 초기 구현으로 인정하지만 최종 policy contract로 고정하지 않는다.
+현재 `CapabilityRegistry`의 고정 quality/cost/latency ranking과 `capability.select`의 pipeline-local relaxation/user-selection flags는 초기 구현으로 인정하지만 최종 policy contract로 고정하지 않는다.
 
 ## Consequences
 
