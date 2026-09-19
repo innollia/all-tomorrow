@@ -243,7 +243,7 @@ game-development watcher가 재사용 가능한 무료 asset 후보 발견 → s
 
 실제 autonomous resource 운영은 아래를 함께 통과해야 한다.
 
-- **unexpected resource trouble**: 작업이 외부 자원 문제로 막혀도 사전 정의된 provider 분기 없이 메타인지 계층이 원인을 파악하고 필요한 후속 Work를 생성함
+- **unknown operational trouble**: 장기 Work가 이유를 사전 라벨링하지 않은 채 반복 지연/실패 → 메타인지 계층이 기록과 외부 상태를 조사해 원인 후보를 만들고 필요한 후속 Work를 생성함
 - **useful new free API**: watcher가 부족한 capability의 free-tier API를 발견 → public metadata로 효용/중복/risk/user-effort 평가 → 가치가 있을 때만 사용자에게 가입/key 발급을 NEED_USER로 요청 → raw key는 chat에 받지 않고 secret owner의 credential ref만 연결 → bounded validation 후 pool 후보가 됨
 - **not worth interrupting**: 중복되거나 효용이 낮은 후보는 aside/watch로 남고 사용자에게 key 발급 요청을 보내지 않음
 - **declarative onboarding**: 이미 지원하는 protocol이면 endpoint/model/config + credential ref만으로 연결되고 core/pipeline 수정 없음
