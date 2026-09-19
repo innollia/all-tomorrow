@@ -87,6 +87,8 @@ Goal과 Plan을 분리한다. resource 하나가 막혔다고 Goal을 폐기하�
 
 하나의 WorkItem이 worker 교체, 재시도, NEED_USER, 여러 날의 대기를 거쳐도 Work identity를 잃지 않아야 한다.
 
+**Run failure != Work failure != Goal failure.** 특정 pipeline run이 실패해도 resource observation이나 retry/replan 가능성이 있으면 WorkItem은 blocked/replan-pending/queued 같은 비종료 상태로 남을 수 있다. Goal은 acceptance criteria 달성이 불가능하거나 사용자가 취소하는 등 별도 결정 전까지 유지된다.
+
 현재 DB의 `tasks`는 이 목표 WorkItem/Plan 모델에 비해 얇으며 1차 완성에서 재검토한다.
 
 ### 2.3 Planner / Replanner
@@ -204,6 +206,8 @@ Pipeline은 **하나의 WorkItem을 실행하는 versioned recipe**다.
 Pipeline 자체가 Goal manager, planner/replanner, scheduler, resource pool, long-term memory, self-improvement controller를 모두 먹지 않는다.
 
 Pipeline YAML은 provider/project/failure 이름별 의사결정 표가 아니다. 특정 capability의 실행 recipe가 정말 달라질 때만 별도 pipeline을 만들고, quota/resource/user-input 같은 cross-cutting 판단은 Planner/Policy/Observation 계층에서 처리한다.
+
+현재 `capability.select` node와 `allow_policy_relaxation`, `require_user_selection` 같은 pipeline-local selection flag는 초기 slice다. 최종 구조에서는 node가 generic Execution Resolution service를 호출할 수는 있지만 selection/degradation/user-interruption policy 자체를 pipeline config가 소유하지 않는다.
 
 ### 2.7 Execution
 
@@ -610,6 +614,7 @@ Redis는 요구가 증명되기 전 필수가 아니다.
 - initial migrations
 - CapabilityRegistry / WorkerService
 - 현재 capability는 worker/tool의 string set 비교가 중심이며 descriptor registry/validation은 아직 얇음
+- 현재 `capability.select`의 no-worker → FAILED/worker-selection NEED_USER 흐름과 pipeline-local selection flags
 - 현재 worker selection의 고정 quality/cost/latency sort와 tool latency sort
 - Antigravity/OpenCode CLI adapters
 - Discord edge policy와 shadow routing experiment
@@ -620,6 +625,7 @@ Redis는 요구가 증명되기 전 필수가 아니다.
 
 - Goal/Plan/Work graph
 - Planner/Replanner contract와 durable PlanRevision
+- Run result/Observation을 Work/Goal lifecycle로 해석하는 orchestration layer
 - normalized Observation/ResourceState/Policy lifecycle
 - extensible CapabilityDescriptor와 pipeline execution metadata
 - replaceable selection/ranking policy
