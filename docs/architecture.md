@@ -136,6 +136,8 @@ Pipeline 자체가 Goal manager, scheduler, resource pool, long-term memory, sel
 
 현재 AntigravityWorker/OpenCodeWorker는 로컬 CLI worker+executor가 한 adapter 안에 붙어 있는 초기 구현으로 본다. 1차 완성에서 미래 분리를 막지 않는 contract seam을 만든다.
 
+Project source identity와 executor-local workspace path도 분리한다. `repo:C:/projects/...` 같은 경로는 특정 host의 checkout 위치일 뿐 cross-system project identity가 아니다. logical repository/source ref를 executor가 자신의 workspace mapping으로 실제 cwd에 해석한다.
+
 ### 2.7 State, Events, Artifacts
 
 - canonical projection과 append-only event를 분리한다.
