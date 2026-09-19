@@ -32,7 +32,7 @@
 - 원격 최신 `src/discord/audit-log.mjs`: UUID event/audit ID, timestamp, 본문 hash와 제한된 text를 JSONL로 남기는 신규 audit 표면.
 - 원격 최신 Manager/Discord 경로: `audit_id`를 manager turn까지 전달하고 request/completed/failed/boot event를 기록한다.
 
-판정: 새 Discord Gateway client를 만들지 않는다. V1 edge 분류는 기존 bot에 얇은 adapter를 붙이는 방향을 우선 검토한다. Discord cache는 edge-local cache로 남길 수 있지만 project/task canonical state로 승격시키지 않는다. 최신 `audit_id`는 All Tomorrow의 `trace_id`와 연결할 수 있는 유력한 adapter seam이지만 동일 identifier로 즉시 통합한다고 확정하지 않는다.
+판정: 새 Discord Gateway client를 만들지 않는다. 조사 당시 초기 edge 범위는 기존 bot에 얇은 adapter를 붙이는 방향을 우선 검토했다. Discord cache는 edge-local cache로 남길 수 있지만 project/task canonical state로 승격시키지 않는다. 최신 `audit_id`는 All Tomorrow의 `trace_id`와 연결할 수 있는 유력한 adapter seam이지만 동일 identifier로 즉시 통합한다고 확정하지 않는다.
 
 ### Manager/worker 연결
 
@@ -40,7 +40,7 @@
 - `src/discord/manager-settings.mjs`: 모델/추론/문맥 설정 영속화.
 - `src/discord/manager-session-state.mjs`: 현재 manager session 상태.
 
-판정: V1에서 Antigravity worker를 새로 구현하지 않고 이 bridge를 감싸는 adapter 후보로 둔다. 다만 현재 bridge의 persona/session state는 Manager app 소유이며 중앙 canonical project state가 아니다.
+판정: 조사 당시 초기 범위에서는 Antigravity worker를 새로 구현하지 않고 이 bridge를 감싸는 adapter 후보로 두었다. 다만 현재 bridge의 persona/session state는 Manager app 소유이며 중앙 canonical project state가 아니다.
 
 ### MCP와 host ingress
 
@@ -90,7 +90,7 @@
 - 사용 가능한 AWS 예산, domain, authentication provider
 - Notion의 Manager/Eve source ownership 전체 지도
 
-이 항목은 해당 Phase가 막힐 때 사용자에게 좁게 질문한다. 지금 가짜 integration이나 placeholder network client를 만들지 않는다.
+이 항목은 현재 completion-stage 작업에서 실제로 필요해질 때 다시 검증하고, 필요한 정보가 없으면 사용자에게 좁게 질문한다. 지금 가짜 integration이나 placeholder network client를 만들지 않는다.
 
 ## 재사용 우선순위
 
