@@ -192,6 +192,14 @@ Research topic도 고정 목록만 도는 방식으로 만들지 않는다. 반�
 
 이 framework는 서비스별 onboarding pipeline을 만드는 것이 아니라 **generic ResourceCandidate lifecycle**을 제공한다.
 
+Candidate discovery 후 integration mode를 판정한다.
+
+- 기존 OpenAI-compatible/MCP/기타 supported adapter profile로 연결 가능 → declarative metadata/config
+- OpenAPI/HTTP schema 등 generic configurable adapter로 연결 가능 → schema/config
+- 새로운 protocol/auth semantics가 필요 → "core 수정"이 아니라 **새 adapter implementation Work/Proposal**로 분리
+
+2차에서는 custom adapter의 완전 무인 production promotion까지 요구하지 않는다. 하지만 "새 provider = planner/pipeline 수정" 구조는 허용하지 않는다.
+
 목표 단계:
 
 ```text
@@ -332,6 +340,14 @@ Research watcher가 현재 부족한 capability를 제공하는 새 free-tier AP
 ### L. Generic resource adapter swap
 
 동일 capability의 테스트 provider A/B를 서로 다른 raw quota error와 auth 방식으로 연결 → 각 adapter가 공통 observation/prerequisite contract로 정규화 → 같은 Planner/Policy/Service Experiment lifecycle이 두 provider 모두에서 작동.
+
+### L2. Declarative provider onboarding
+
+새 OpenAI-compatible 또는 이미 지원하는 protocol의 fake provider 발견 → endpoint/model/resource metadata와 credential ref만 추가 → 기존 generic adapter profile로 bounded validation → planner/pipeline core code 변경 없이 resource candidate가 됨.
+
+### L3. Custom protocol requires adapter
+
+완전히 새로운 protocol의 fake provider 발견 → core/planner/pipeline에 조건문을 넣지 않음 → AdapterProposal/implementation Work 생성 → sandbox contract tests → 성공 시 adapter registry candidate. 2차에서는 promotion에 사용자/정책 승인을 요구해도 됨.
 
 ### M. Safe failover after ambiguous mutation
 
