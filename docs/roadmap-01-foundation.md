@@ -147,6 +147,16 @@ Artifact는 문자열 URL 목록을 넘어 장기 작업 산출물의 metadata i
 
 1차에서는 모든 계정 라우터를 구현하지 않는다.
 
+### Project source vs executor workspace
+
+현재 catalog의 `repo:C:/projects/...` 같은 host-local path를 project의 영구 source identity로 간주하지 않는다.
+
+- project source: Git repository / logical source identity
+- executor workspace: 특정 host에서 그 source가 checkout/mount된 실제 path
+- WorkItem은 가능하면 logical source를 가리키고, executor가 자신의 workspace mapping으로 `cwd`를 해석한다.
+- 동일 project가 local PC, AWS, Sol Pi에 각각 다른 checkout path를 가질 수 있어야 한다.
+- path가 실제로 모호하거나 checkout이 없을 때만 NEED_USER 또는 provisioning work로 멈춘다.
+
 필수 결과:
 
 - worker metadata가 특정 로컬 PC에 구조적으로 고정되지 않는다.
@@ -329,7 +339,7 @@ Discord가 첫 edge일 뿐, 계약은 Web/CLI/ChatGPT에도 재사용 가능해�
 
 ### A. Any-device coding request
 
-Web에서 repo 수정 요청 → project resolution → WorkItem → coding pipeline → worker selection → executor run → event/artifact/result 표시.
+Web에서 repo 수정 요청 → project resolution → logical project source → WorkItem → worker/executor selection → executor-local workspace/cwd resolution → coding pipeline run → event/artifact/result 표시. 중앙 project identity가 특정 PC의 `C:\...` path에 묶이지 않음.
 
 ### B. Missing required context
 
