@@ -23,6 +23,8 @@ Date: 2026-09-19
 
 또한 현재 CLI Worker는 capability와 local execution location이 한 adapter에 붙어 있어 미래의 multi-host/provider resource routing을 직접 표현하기 어렵다.
 
+ADR 0001의 별도 Control Plane repository/source-ownership 경계는 유지한다. 이 ADR은 그 위에서 초기 `task/run/pipeline` 해석을 장기 Goal/Work 구조로 확장한다.
+
 ## Decision
 
 ### 1. Goal/Work는 Pipeline보다 위에 둔다
