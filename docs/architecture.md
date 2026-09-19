@@ -447,10 +447,19 @@ observed_at / freshness / confidence
 
 새 resource/tool/provider를 바로 production registry에 넣지 않고 candidate lifecycle을 거칠 수 있어야 한다.
 
+Candidate는 integration mode를 구분한다.
+
+- **existing adapter profile**: OpenAI-compatible/MCP 등 이미 지원하는 protocol/config로 등록 가능
+- **declarative schema/config**: OpenAPI/HTTP schema처럼 generic adapter에 configuration만 추가하면 됨
+- **new adapter required**: provider-specific protocol/auth/response mapping이 필요해 새 adapter artifact를 만들어야 함
+
+세 번째 경우에도 generic planner/pipeline을 수정하지 않는다. AdapterProposal/implementation work를 별도로 만들어 sandbox/evaluation 뒤 adapter registry에 등록한다.
+
 ```text
 candidate_id
 source/provenance refs
 claimed capabilities
+integration_mode / adapter_profile_ref
 public quota/pricing/terms metadata
 prerequisites / required_user_action
 expected utility
