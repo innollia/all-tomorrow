@@ -113,13 +113,17 @@ Planner가 장기적인 "어떻게 할 것인가"를 소유한다. Pipeline이 �
 
 Planner 구현은 rule-based, LLM, hybrid 등으로 교체 가능해야 한다. 특정 모델 prompt나 특정 provider 이름이 architecture contract가 아니다.
 
-Replanner는 quota, rate limit, resource health, cost, quality, deadline, user input 같은 현실 변화가 들어왔을 때 Goal을 기준으로 남은 Plan을 다시 계산한다. policy에 따라 fallback, scope/quality degradation, concurrency reduction, defer, split, wait, NEED_USER 등을 선택할 수 있다.
+Replanner는 quota, rate limit, resource health, cost, quality, deadline, user input 같은 현실 변화가 들어왔을 때 **계획 의미가 달라져야 하는 경우** Goal을 기준으로 남은 Plan을 다시 계산한다. policy에 따라 scope/quality degradation, concurrency reduction, defer, split, wait, NEED_USER 등을 선택할 수 있다.
+
+같은 capability, quality floor, permission, budget 조건을 만족하는 동등 resource로의 단순 failover는 PlanRevision 없이 Execution Resolution이 처리할 수 있다. 모든 transient failure를 Planner로 끌어올려 불필요한 plan churn을 만들지 않는다.
 
 Goal/acceptance criteria를 조용히 낮추는 것은 replanning이 아니다. 사용자 의도를 바꿀 정도의 축소는 명시된 policy가 없으면 NEED_USER로 간다.
 
 ### 2.4 Execution Resolution
 
-Execution Resolution은 Planner가 요구한 capability와 constraints를 현재 registry/resource state에 매핑한다.
+Execution Resolution은 Planner가 요구한 **capability와 constraints**를 현재 registry/resource state의 구체 worker/tool/executor/provider resource에 늦게 매핑한다.
+
+가능하면 Plan은 특정 provider 이름보다 필요한 capability/quality/privacy/budget/deadline constraints를 표현한다. concrete resource pinning이 정말 필요한 경우에만 명시적 resource ref를 둔다.
 
 분리해서 다룬다.
 
@@ -135,7 +139,7 @@ Execution Resolution은 Planner가 요구한 capability와 constraints를 현재
 
 초기 구현은 capability → CLI worker 선택만 수행한다. 이를 최종 형태로 오인하지 않는다.
 
-Registry는 후보와 state를 제공하고, 장기 Plan 결정 자체를 소유하지 않는다.
+Registry는 후보와 state를 제공하고, 장기 Plan 결정 자체를 소유하지 않는다. Execution Resolution은 동등 후보 failover를 담당할 수 있지만 Goal의 범위·품질·시간 구조를 바꾸지 않는다.
 
 ### 2.5 Project Context Assembly
 
