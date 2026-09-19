@@ -44,8 +44,8 @@ Control Plane, pipeline runtime, event store, worker/tool registry, scheduler, m
 4. **Cross-project learning**  
    한 프로젝트에서 얻은 검증된 노하우와 실패가 다음 프로젝트 시작 시 후보로 검색·선별되어 재사용되어야 한다.
 
-5. **Automatic orchestration**  
-   사용자가 작업을 요청하면 시스템이 project, pipeline, worker, tool, 실행 위치와 필요한 자원을 판단하고 추적 가능한 방식으로 배치해야 한다.
+5. **Automatic orchestration and adaptive replanning**  
+   사용자가 작업을 요청하면 시스템이 project, capability, worker, tool, 실행 위치와 필요한 자원을 판단하고 추적 가능한 방식으로 배치해야 한다. 실행 중 quota, rate limit, health, cost, permission, user input 같은 현실 조건이 달라지면 Goal을 잃지 않은 채 Plan/Work를 다시 계산할 수 있어야 한다.
 
 6. **Autonomous operation**  
    사용자의 즉시 요청이 없어도 허용된 범위에서 조사, 수집, 평가, 유지관리, 실험, 보고와 장기 작업을 계속할 수 있어야 한다.
@@ -70,13 +70,19 @@ Control Plane, pipeline runtime, event store, worker/tool registry, scheduler, m
 user request / schedule / watcher / external event / system proposal
                               │
                               ▼
-                     goal & work layer
+                       Goal + current state
                               │
                               ▼
-                      orchestration policy
-                    project / capability /
-                 worker / tool / executor /
-                    budget / permission
+                     Planner / Replanner
+                  policy / budget / context
+                              │
+                              ▼
+                    versioned Plan / Work
+                              │
+                              ▼
+                    execution resolution
+                 capability / worker / tool /
+                 executor / provider resource
                               │
                               ▼
                     versioned pipeline run
@@ -95,7 +101,20 @@ user request / schedule / watcher / external event / system proposal
              next work item          user report
 ```
 
-Pipeline은 장기 목표와 전체 자율성을 소유하는 거대한 만능 엔진이 아니라, **하나의 work item을 실행하는 버전 관리된 recipe**로 유지한다.
+Pipeline은 장기 목표와 전체 자율성을 소유하는 거대한 만능 엔진이 아니라, **하나의 work item을 실행하는 버전 관리된 recipe**로 유지한다. Goal은 비교적 안정적으로 유지되고, Plan/Work graph는 현재 자원·관측·정책에 따라 revision될 수 있다.
+
+## Generality Rule
+
+범용성은 선택사항이 아니라 최상위 설계 조건이다.
+
+- 새 provider, model, tool, executor, project가 추가될 때 generic orchestration core나 기존 pipeline에 서비스 이름별 조건문을 추가하는 것을 기본 해법으로 삼지 않는다.
+- 새로운 종류는 가능한 한 **capability + metadata + adapter + policy + resource state**로 등록되어 기존 planner와 execution machinery에 참여해야 한다.
+- quota 고갈, rate limit, 일시 장애, credential 부재, 가격·품질 변화 같은 현실 변화는 provider 전용 pipeline 분기가 아니라 **state/observation**으로 들어와 planner가 Plan을 revision하는 입력이 된다.
+- 작업 축소, 대체 자원 사용, 병렬성 감소, 연기, 분할, 사용자에게 추가 자원 요청 같은 대응은 하나의 서비스에 박힌 예외처리가 아니라 policy가 허용하는 일반적인 replanning 선택지다.
+- 가입, API key 발급, 결제 승인처럼 사용자가 직접 해야 하는 필수 단계가 생기면 generic `NEED_USER` lifecycle로 전환한다.
+- 외부 글, repository, 문서에서 개선 아이디어를 얻는 흐름도 특정 사이트 전용 pipeline이 아니라 observation → research → proposal → sandbox/evaluation의 일반 lifecycle을 사용한다.
+- provider 고유 protocol, SDK, authentication 형식 같은 불가피한 특수성은 adapter 경계에 가둔다. 특수 adapter가 존재하는 것과 orchestration을 하드코딩하는 것은 구분한다.
+- 새로운 유형 하나를 지원하기 위해 core planner/pipeline 코드를 계속 수정해야 한다면 구조적 실패 신호로 본다.
 
 ## Completion Stages
 
@@ -153,7 +172,9 @@ Pipeline은 장기 목표와 전체 자율성을 소유하는 거대한 만능 �
 - 사용자의 도움이 필요한 필수 정보가 없으면 우회 추정하지 않고 `NEED_USER`로 멈춘다.
 - edge가 local로 처리 가능한 대화는 중앙 run을 만들지 않는다.
 - secret 값은 event, prompt archive, artifact metadata, lesson/knowledge/evaluation 같은 중앙 장기 기록에 남기지 않는다.
-- pipeline, worker, model, provider는 교체 가능해야 한다.
+- pipeline, planner, worker, model, provider는 교체 가능해야 한다.
+- pipeline은 provider/project별 예외처리 목록이 되어서는 안 되며, 범용 planner/policy가 현재 state를 해석해 plan/work를 구성한다.
+- Goal은 resource failure 하나로 사라지지 않고, 허용된 범위에서 Plan revision 또는 NEED_USER로 이어진다.
 - 장기 상태, provenance, user control은 그 교체에서 살아남아야 한다.
 - self-improvement는 측정과 rollback 없이 production을 직접 바꾸지 않는다.
 
@@ -167,6 +188,7 @@ Pipeline은 장기 목표와 전체 자율성을 소유하는 거대한 만능 �
 - [기존 시스템 inventory](docs/inventory.md)
 - [초기 경계 결정 기록](docs/decisions/0001-control-plane-boundary.md)
 - [Durable Work 아키텍처 결정](docs/decisions/0002-durable-work-above-pipeline.md)
+- [범용 Planner/Replanning 아키텍처 결정](docs/decisions/0003-generic-planning-over-hardcoded-pipelines.md)
 - [Worker adapter와 pipeline 연결](docs/worker-adapters.md)
 
 ## Development Verification
