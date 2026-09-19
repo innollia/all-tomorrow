@@ -54,3 +54,21 @@ backend 내부 테이블을 application migration에서 관리하지 않는다.
 ## 완료조건
 
 실제 PostgreSQL에서 process kill/restart를 포함한 skeleton이 통과한다. mock-only 결과로 완료 처리하지 않는다.
+
+
+## Data-retention probe
+
+같은 skeleton에 식별 가능한 canary 문자열을 prompt/tool input/tool output에 각각 넣는다.
+
+완료 뒤:
+- All Tomorrow application DB
+- durable backend state/journal
+- LiteLLM logs/spend logs
+- OTel exporter
+- process stdout/stderr
+
+를 확인해 canary가 어느 저장소에 남는지 표로 기록한다.
+
+"안 남아야 하는 곳"에서 발견되면 해당 substrate/config는 acceptance 실패다.
+
+large file/raw document는 durable step output으로 직접 반환하지 않고 artifact store/ref pattern을 시험한다.

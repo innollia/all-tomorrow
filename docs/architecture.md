@@ -390,6 +390,9 @@ AWS는 항상 켜진 중앙 runtime의 첫 운영 위치다.
 ## 9. Security and Mutation
 
 - credential 값은 contract/event/log/artifact metadata에 기록하지 않는다.
+- durable execution engine의 journal/checkpoint는 별도의 trusted sensitive store로 분류한다. 모델/도구 I/O가 recovery를 위해 저장될 수 있으므로 encryption-at-rest, backup, retention, access boundary를 명시한다.
+- large/raw artifacts는 가능한 한 durable step payload에 직접 넣지 않고 artifact_ref를 전달한다.
+- LiteLLM prompt/response logging과 spend-log payload 저장은 기본 off로 시작하며 명시적 필요가 생길 때만 켠다.
 - credential이 필요한 NEED_USER는 raw secret paste를 요구하지 않고 external secret-registration action + opaque credential_ref/confirmation을 요구한다.
 - adapter/executor는 opaque credential/resource reference만 받는다.
 - Planner가 만든 Plan candidate/revision은 schema/policy/permission/budget validation 없이 실행하지 않는다.

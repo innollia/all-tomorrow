@@ -161,6 +161,7 @@ Spike dependency는 production dependency와 분리한다. 두 finalist를 동�
 - external side-effect idempotency/reconciliation seam
 - stable FastMCP gateway를 통한 tool discovery
 - privacy-safe OTel propagation
+- durable journal이 저장하는 prompt/tool payload의 위치·retention·backup/encryption 경계 설명 가능
 - application Goal/Work schema와 backend state 분리
 - ordinary dependency upgrade에 대한 in-flight recovery 전략
 
@@ -192,6 +193,36 @@ Hard gate를 모두 통과한 후보끼리만 아래 순서로 고른다.
 - AWS idle footprint
 
 기능 수가 많은 쪽이 아니라 **All Tomorrow가 직접 유지할 코드와 운영 상태가 적은 쪽**을 고른다.
+
+## Durable Data Footprint Check
+
+"Event에 prompt를 안 남긴다"만으로는 충분하지 않다.
+
+DBOS는 workflow input/output과 step output을 system DB에 checkpoint한다. Restate도 handler/state/action payload를 journal/state에 보존한다. PydanticAI model/tool durability를 쓰면 모델 요청/응답과 도구 결과 일부가 durable substrate의 복구 데이터가 될 수 있다.
+
+각 finalist에서 반드시 기록:
+- 어떤 model/tool payload가 journal에 실제 저장되는가
+- raw user content가 어디에 남는가
+- workflow 완료 후 retention 기본값
+- retention/cleanup 설정
+- backup에 포함되는 민감 payload
+- disk/database at-rest encryption 경계
+- application-level encryption/custom serializer를 쓸 수 있는지와 recovery/tooling 손실
+- large artifact는 payload 대신 artifact_ref로 넘길 수 있는지
+
+민감한 원문을 피하기 위해 durability를 깨뜨리지 않는다. 복구에 필요한 내용은 trusted durable store로 인정하되 최소화·암호화·retention을 명시한다.
+
+## LiteLLM Stage 0 data policy
+
+LiteLLM은 처음에는 **stateless-ish model gateway**로만 붙인다.
+
+- `store_prompts_in_spend_logs=false` 유지
+- `turn_off_message_logging=true` 검증
+- external logging callbacks 비활성
+- LiteLLM 자체 DB는 virtual key/budget 기능이 실제로 필요해질 때 추가
+- provider credential은 LiteLLM runtime env/secret에서 소유
+
+Stage 0에서 "대시보드가 있으니까" spend-log DB까지 켜지 않는다.
 
 ## Retry Ownership Check
 

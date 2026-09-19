@@ -81,6 +81,8 @@ protected self-change 승인 권한은 GitHub review로 대체하지 않는다. 
 - 같은 MCP call이 중복 span tree로 보이지 않음
 - Event row 수가 trace span 수에 비례해 폭증하지 않음
 - telemetry export에서 prompt/secret fixture가 검색되지 않음
+- LiteLLM logging/spend-log 설정에서 raw prompt/response 저장이 기본 off
+- durable store에 저장되는 recovery payload는 별도 retention/security inventory로 설명 가능
 
 
 ## Dependency / Upgrade Rail
