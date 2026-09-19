@@ -1,5 +1,8 @@
 # 2차 완성 — Autonomous Personal & Project Operations
 
+> Status: **Planned.** 1차 durable core가 acceptance criteria를 통과하기 전 production 범위로 확장하지 않는다.
+
+
 ## Definition of Done
 
 2차가 끝나면 All Tomorrow는 사용자가 매번 버튼을 눌러야만 움직이는 중앙 요청 처리기가 아니다.
