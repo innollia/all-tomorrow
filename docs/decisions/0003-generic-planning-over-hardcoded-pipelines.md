@@ -179,6 +179,27 @@ system observation / improvement question
 - Goal과 Plan이 결합되어 작은 환경 변화가 전체 작업 재시작을 유발
 - research source마다 별도 pipeline 생성
 
+### 10. Stable primitives may remain coded
+
+"하드코딩 금지"를 모든 상수와 enum 제거로 해석하지 않는다.
+
+코드에 안정적으로 고정할 수 있는 예:
+
+- SUCCESS / FAILED / NEED_USER 같은 lifecycle semantics
+- provenance, trace, permission, secret boundary
+- adapter protocol
+- transactional/idempotency invariant
+
+변화 가능한 policy/data로 분리해야 하는 예:
+
+- provider/model/project 이름
+- quota threshold/reset
+- ranking/fallback/degradation preference
+- research source
+- provider raw error branch
+
+현재 `CapabilityRegistry`의 고정 quality/cost/latency ranking은 초기 구현으로 인정하지만 최종 policy contract로 고정하지 않는다.
+
 ## Consequences
 
 장점:
