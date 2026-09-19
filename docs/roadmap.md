@@ -133,6 +133,11 @@
 - in-memory WorkQueue를 최종 scheduler로 간주하지 않는다.
 - Deferred라는 이유로 autonomy/self-improvement의 **아키텍처 요구사항**까지 미루지 않는다.
 
+## Architecture Decisions
+
+- [ADR 0001 — Separate Control Plane Repository](decisions/0001-control-plane-boundary.md)
+- [ADR 0002 — Durable Work Above Pipeline](decisions/0002-durable-work-above-pipeline.md)
+
 ## Work Discipline
 
 각 변경은 `inspect → plan → implement → test → inspect diff → verify` 순서로 수행한다.
