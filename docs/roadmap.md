@@ -18,16 +18,15 @@
 
 ## Generality Gate
 
-모든 completion stage와 모든 새 integration은 다음 검산을 통과해야 한다.
+새 기능은 "문제 종류 → 대응"을 core나 pipeline에 추가하는 방식으로 만들지 않는다.
 
-1. **Novel resource test** — 가짜 신규 provider/resource를 하나 추가할 때 기존 generic pipeline과 planner core를 수정하지 않고 metadata + capability + adapter + policy 등록으로 참여시킬 수 있는가.
-2. **Resource-loss test** — 선택된 자원이 quota/rate-limit/health 문제로 사라졌을 때 provider 이름별 분기 없이 observation → replan으로 fallback/degrade/defer/NEED_USER 중 허용된 행동을 선택할 수 있는가.
-3. **Plan-revision test** — 이미 일부 work가 끝난 뒤 환경이 달라져도 완료 결과를 버리지 않고 새 Plan revision으로 이어갈 수 있는가.
-4. **User-boundary test** — 새 credential, 가입, 결제 승인처럼 자동 수행할 수 없는 필수 입력을 발견하면 우회하지 않고 generic NEED_USER로 전환하는가.
-5. **Research-to-change test** — 새로운 설계 글이나 repository를 발견했을 때 URL/사이트별 전용 code path 없이 research artifact → improvement proposal → evaluation으로 보낼 수 있는가.
-6. **Adapter containment test** — provider 고유 SDK/protocol/auth 로직이 adapter 바깥의 planner/pipeline으로 새지 않는가.
+검산 기준:
 
-이 gate를 통과하지 못하는 기능 추가는 "작동한다"만으로 완료로 보지 않는다.
+1. 작업 계층은 문제를 미리 이해하지 못해도 결과와 사건을 중앙에 남길 수 있는가.
+2. 메타인지 계층은 그 기록을 보고 **새 문제를 스스로 발견**할 수 있는가.
+3. 해결 방법이 사전에 목록에 없어도 조사나 새 Work 생성으로 이어질 수 있는가.
+4. 새 provider/tool/project 때문에 generic core에 이름별 branch가 늘지 않는가.
+5. 이 구조를 위해 불필요한 새 class/table/service를 만들고 있지 않은가.
 
 ## Completion Model
 
@@ -99,43 +98,16 @@
 
 ## Cross-Stage Architecture Invariants
 
-아래는 stage가 올라가도 유지한다.
-
-1. **Original vision is constitutional**  
-   원문 요구와 파생 설계가 충돌하면 파생 설계를 수정한다.
-
-2. **Control Plane is a means**  
-   중앙 authority는 최종 목적의 인프라다. 사용자의 장기 운영·학습·생산·자율성을 희생하면서 Control Plane 자체를 완성하는 것을 성공으로 보지 않는다.
-
-3. **Pipeline is an execution recipe**  
-   pipeline 안에 장기 goal, scheduler, resource accounting, self-improvement, provider-specific replanning 전체를 욱여넣지 않는다.
-
-4. **Planner owns planning and replanning**  
-   Goal + current state + policy + observations에서 Plan/Work revision을 만드는 책임은 planner layer에 둔다. planner 구현은 rule-based, LLM, hybrid로 교체 가능해야 한다.
-
-5. **Novelty enters as data and adapters**  
-   새 provider/tool/executor는 가능한 한 capability/metadata/resource state/policy/adapter로 들어오며 generic core에 이름별 분기를 추가하지 않는다.
-
-6. **Durable work is above runs**  
-   하나의 Goal/WorkItem은 여러 run, worker, tool, 시간대를 가질 수 있다. run은 work의 한 실행 시도다.
-
-7. **Execution resource is separable from capability**  
-   누가 잘할 수 있는지(Worker/Agent), 어디서 실행되는지(Executor/Host), 어떤 provider/account/quota를 쓰는지는 독립적으로 교체 가능해야 한다.
-
-8. **Source ownership survives centralization**  
-   Eve, Manager, Discord, Git, Notion 등 기존 정본을 중앙 편의 때문에 복제 정본으로 만들지 않는다.
-
-9. **Provenance before promotion**  
-   lesson, skill, system improvement는 evidence와 evaluation 없이 전역 정본으로 승격하지 않는다.
-
-10. **User interruption dominates background work**  
-   P0 interactive work가 들어오면 background work는 안전한 경계에서 양보할 수 있어야 한다.
-
-11. **Ask instead of fabricating**  
-   project, cwd, mutation target, permission처럼 필수 정보가 없으면 추정으로 밀어붙이지 않는다.
-
-12. **No fake integrations**  
-    실제 연결·검증되지 않은 worker/tool/provider를 이름만 등록해 완성된 것처럼 취급하지 않는다.
+1. **Original vision is constitutional** — 원문 요구와 파생 설계가 충돌하면 파생 설계를 수정한다.
+2. **Control Plane is shared authority, not a serial brain** — 중앙 state를 여러 흐름이 함께 사용한다.
+3. **Work and metacognition run in parallel** — 작업 수행과 시스템 관찰/개선 판단을 한 직렬 chain으로 묶지 않는다.
+4. **Pipeline is an execution recipe** — 문제 종류와 대응표를 Pipeline에 쌓지 않는다.
+5. **No closed problem taxonomy** — 시스템이 앞으로 만날 문제와 해결책을 미리 열거했다고 가정하지 않는다.
+6. **Durable work is above runs** — 하나의 Goal/Work는 여러 run과 시간대를 견딘다.
+7. **Source ownership survives centralization** — 기존 정본을 중앙 편의 때문에 복제 정본으로 만들지 않는다.
+8. **Provenance before promotion** — lesson과 system change는 evidence/evaluation 없이 승격하지 않는다.
+9. **User work dominates background work** — interactive work가 우선한다.
+10. **Ask instead of fabricating** — 필수 정보가 없으면 추정으로 밀어붙이지 않는다.
 
 ## Current Position
 
@@ -156,7 +128,7 @@
 
 중요한 구조적 수정:
 
-- 기존의 `Request → Pipeline → Worker` 중심 모델 위에 `Goal → Planner/Replanner → Plan/Work → Execution` 계층을 둔다.
+- 기존의 `Request → Pipeline → Worker` 실행 흐름은 Work layer로 두고, 그와 병렬로 중앙 state를 관찰하는 Metacognition layer를 둔다.
 - cross-system project coordination state와 provenance-aware context assembly를 둔다.
 - logical project source와 executor-local workspace path를 분리한다.
 - Worker와 실제 실행 위치/계정/자원 풀을 분리할 수 있는 경계를 만든다.
