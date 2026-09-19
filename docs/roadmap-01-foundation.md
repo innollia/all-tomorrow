@@ -7,25 +7,20 @@
 
 1차 완성은 "pipeline 몇 개가 실행된다"가 아니다.
 
-사용자가 어느 기기에서든 중앙에 들어와 요청을 보내면, 그 요청이 적절한 Goal과 durable Work에 연결되고, Planner / Execution Resolution / Pipeline의 책임이 분리된 채 실행되어야 한다. 사용자 정보가 필요하면 즉시 멈추고 질문하며, 서버 재시작 뒤에도 같은 Work/Run을 재개하고 결과·산출물·provenance를 다시 확인할 수 있어야 한다.
-
-1차에서는 **resource 변화 → generic state/event → safe failover 또는 Plan revision** 경계를 fixture 수준에서 검증하면 충분하다. 실제 provider quota를 지속 추적하고 background에서 작업 규모를 자동 조절하거나 새 무료 API를 발견·획득하는 운영은 2차 범위다.
+사용자가 어느 기기에서든 중앙에 작업을 맡기고, 그 Work가 durable하게 실행·중단·재개되며 결과와 provenance를 다시 확인할 수 있어야 한다. 동시에 Work가 남긴 중앙 state/event를 **작업과 독립된 observer가 읽고 후속 Work를 만들 수 있는 seam**이 있어야 한다.
 
 1차가 끝나면 시스템은 아직 자율 연구원이나 자기개선 시스템은 아니지만, 이후 2차·3차 기능이 core 재작성 없이 올라갈 수 있는 중앙 기반이어야 한다.
 
 ## Immediate Next Work
 
-이 문서 개편 직후에는 Web 기능 추가나 watcher 구현으로 가지 않는다.
+Gate A에서는 새 framework를 만들지 않고 현재 구조에 두 가지 seam만 확보한다.
 
-Gate A에서는 새 추상화를 많이 만드는 게 아니라 **현재 구조에서 책임이 잘못 놓인 부분만 최소 이동**한다.
+1. Goal/Work/Run의 durable identity를 바로잡는다.
+2. Work 실행이 남기는 Event/state를 **별도 metacognition flow가 읽고 새 Work를 만들 수 있게** 한다.
+3. `capability.select` 같은 현재 실행 선택 로직은 Work layer 안의 초기 구현으로 유지하되 최종 정책으로 고정하지 않는다.
+4. 필요한 최소 migration/test만 추가한다.
 
-1. 현재 `tasks/runs/events/CapabilityRegistry/capability.select/coding.yaml`에서 장기 planning, resource selection, retry 책임이 어디에 섞여 있는지 확인한다.
-2. Goal과 Work의 durable identity를 먼저 잡고, Plan은 우선 **versioned data**로 표현한다. Plan revision 전용 class/table은 필요가 증명되기 전 만들지 않는다.
-3. quota/rate-limit/resource-unavailable 같은 변화는 우선 기존 Event/metadata를 활용해 generic observation으로 표현하고, 별도 observation table은 조회·수명주기 요구가 생길 때만 추가한다.
-4. worker selection의 고정 정렬과 pipeline-local selection policy를 replaceable policy/execution-resolution 경계로 옮긴다.
-5. 위 변경으로 필요한 최소 migration/test만 추가한 뒤 Gate B의 durable execution 검증으로 넘어간다.
-
-**Gate A의 성공 기준은 타입 수가 늘어나는 것이 아니라, 새 provider/resource 상황을 기존 pipeline에 이름별 조건문 없이 처리할 수 있는 seam이 생기는 것**이다.
+1차의 목표는 "메타인지 AI 완성"이 아니라 **작업 계층 밖에서 시스템 전체를 관찰하고 개입할 수 있는 자리**를 만드는 것이다.
 
 ## 0. Preserve Existing Good Work
 
@@ -52,79 +47,42 @@ Gate A에서는 새 추상화를 많이 만드는 게 아니라 **현재 구조�
 
 ## 1. Architecture Correction Before More Surface Area
 
-Web 기능과 application 등록을 크게 늘리기 전에 **책임 경계만 바로잡는다.** 새 개념마다 class/table/service를 만드는 작업은 하지 않는다.
-
 ### 1.1 Goal / Work / Run
 
-- **Goal**: 여러 실행을 넘어 유지되는 사용자 의도와 성공 조건
-- **WorkItem**: 실제 수행·대기·재시도되는 durable 작업
-- **Run**: WorkItem을 특정 pipeline version으로 실행한 한 시도
+- Goal: 여러 작업을 넘어 유지되는 목적
+- WorkItem: 실제 수행되는 durable 작업
+- Run: WorkItem의 한 실행 시도
 
-Run이 실패해도 Work/Goal이 자동 terminal이 되지 않는다. recoverable resource 문제면 wait/failover/replan 대상이 될 수 있다.
+Run 하나의 실패가 자동으로 Work/Goal 실패가 되지 않는다.
 
-기존 `tasks`는 title/status/priority보다 더 많은 durable Work 의미를 담을 수 있도록 보강하되, 이름 변경이나 대규모 재작성은 필수가 아니다.
+### 1.2 Shared Central State
 
-### 1.2 Trigger and identity
+Work가 수행되면 결과·질문·실패·artifact·event를 중앙에 남긴다.
 
-Work origin은 user request뿐 아니라 schedule, external event, watcher, system proposal까지 확장 가능하게 둔다.
+이 기록은 다음 Work뿐 아니라 **메타인지 계층의 관찰 입력**이 된다. 특정 문제 taxonomy를 먼저 만들 필요는 없다.
 
-`work_id`, `run_id`, `trace_id`의 역할을 섞지 않는다.
+### 1.3 Parallel Metacognition Seam
 
-- work_id: 장기 작업 identity
-- run_id: 실행 시도
-- trace_id: 한 실행 흐름의 trace
+1차에서는 별도 거대 planner를 만들지 않는다.
 
-현재 `runs.trace_id UNIQUE`를 Work identity 대신 사용하지 않는다.
+필요한 것은:
 
-### 1.3 Project coordination context
+- 중앙 state/event를 작업 실행과 독립적으로 읽을 수 있음
+- observer가 이상/정체/반복을 발견하면 새 Work 또는 proposal을 생성할 수 있음
+- 여러 observer가 동시에 존재할 수 있음
+- observer가 작업 실행의 필수 직렬 단계가 아님
 
-handover gap을 줄이기 위해 중앙은 cross-system coordination에 필요한 **목표·제약·결정 ref·열린 Work·관련 결과/lesson ref**를 유지한다.
+실제 고급 관찰·원인추론·외부조사는 2차/3차에서 확장한다.
 
-Git/Eve/Manager/Discord가 이미 소유하는 domain fact를 새 중앙 정본으로 복제하지 않는다.
+### 1.4 Project Coordination Context
 
-Worker에는 raw Request 하나만 던지지 않고 Work task, acceptance criteria, active constraints, project/source refs, 필요한 context/artifact refs를 조립해 전달한다.
+handover gap을 줄이기 위해 중앙은 현재 목표, 제약, 결정/source ref, 열린 Work, 관련 결과/lesson ref를 유지한다.
 
-현재 `coding.yaml`의 `task: ${request.message}`는 초기 slice일 뿐 최종 execution input contract가 아니다.
+Worker에는 raw Request만 던지지 않고 필요한 project context를 조립해 전달한다.
 
-### 1.4 Plan and replanning
+### 1.5 Artifact
 
-Goal과 Plan을 분리한다.
-
-- Goal은 비교적 안정적
-- Plan은 현재 context/policy/resource 상태에서 Goal을 달성하기 위한 Work 구성
-- 환경이 바뀌면 Plan을 새 version으로 바꿀 수 있음
-- 성공한 Work/Artifact는 가능한 한 보존
-
-별도 revision entity는 요구하지 않는다. versioned Plan data면 충분할 수 있다.
-
-### 1.5 Generic state and policy seam
-
-quota/rate-limit/resource-unavailable 같은 변화는 provider 이름별 pipeline 분기가 아니라 **generic 의미**로 위쪽에 전달한다.
-
-1차에서는 기존 primitive를 우선 재사용한다.
-
-- observation → Event + metadata
-- resource state → registry metadata/state
-- policy → versioned config/ref
-
-정확한 quota를 알 수 없으면 unknown/estimated + freshness 정도면 충분하다.
-
-### 1.6 Planner / Execution Resolution / Pipeline
-
-- **Planner**: 어떤 Work가 필요한지 결정
-- **Execution Resolution**: 그 Work를 어떤 concrete worker/tool/resource로 실행할지 결정
-- **Pipeline**: 선택된 Work를 수행하는 versioned recipe
-
-동등 resource failover는 Execution Resolution에서 처리할 수 있다. 범위·품질·시간·작업구조·사용자 action이 달라져야 하면 Planner가 Plan을 바꾼다.
-
-Planner 구현은 rule-based/LLM/hybrid 중 무엇이든 가능하고, 출력은 permission/budget/acceptance 검증 뒤에만 Work로 반영한다.
-
-### 1.7 Artifact
-
-Artifact는 장기 작업 결과의 metadata identity를 가진다.
-
-최소한 producing work/run, type, source/storage ref, version/hash where available, provenance를 추적할 수 있으면 된다. 대용량 bytes 자체를 PostgreSQL에 넣는다는 뜻은 아니다.
-
+Artifact는 producing work/run과 provenance를 추적할 수 있는 metadata identity를 가진다.
 ## 2. Worker / Executor / Resource Boundary
 
 현재 CLI adapter는 유지한다. 다만 미래 자원 라우팅을 막지 않도록 개념을 분리한다.
