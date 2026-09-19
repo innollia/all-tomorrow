@@ -26,9 +26,16 @@ DBOS application version과 in-flight workflow recovery 관계를 배포 계획�
 
 초기 single-node AWS에서는 Conductor 없이 사용할 수 있지만, multi-host/high-availability가 필요해질 때는:
 - DBOS Conductor의 운영/라이선스 조건을 재검토하거나
-- Temporal/Hatchet 등 대체 backend로 migration spike
+- PydanticAI native 지원인 Temporal로 migration spike
+- Hatchet은 embedded/self-host 장점이 native-agent integration 비용보다 큰지 별도 비교
 
 를 수행한다.
+
+## Persisted Compatibility 확인
+
+PydanticAI/DBOS가 durable history에 사용하는 agent name, toolset id, durable operation/step name은 compatibility data로 취급한다.
+
+일반적인 tool 추가가 기존 workflow를 깨지 않도록 stable MCP/DynamicToolset 경계를 선택하고 versioning/upgrade 문서에 남긴다.
 
 ## 완료조건
 

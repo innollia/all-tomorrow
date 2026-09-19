@@ -19,8 +19,8 @@
 - 기존 All Tomorrow: Goal/Work 의미, source ownership, metacognition, authority, worker adapters
 
 비교 후보:
-- Hatchet: self-hosted durable task engine 대안
-- Temporal: 더 무거운 장기 migration 대안
+- Temporal: PydanticAI가 native 지원하는 더 무거운 migration 대안
+- Hatchet: embedded/self-host가 강한 task engine 대안. PydanticAI durable 연결은 별도 integration 비용을 먼저 측정
 
 Stage 0에서 여러 durable engine을 production dependency로 동시에 넣지 않는다.
 
