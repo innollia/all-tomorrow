@@ -118,7 +118,7 @@ Work identity와 execution trace를 같은 것으로 쓰지 않는다.
 
 원문의 "전체 과정을 본 사용자와 handover 문서만 가진 worker 사이의 격차"를 직접 해결하는 층이다.
 
-중앙은 raw chat 전체를 새 정본으로 복제하는 대신, cross-system project coordination에 필요한 현재 projection과 provenance reference를 유지한다.
+중앙은 raw chat 전체를 새 정본으로 복제하는 대신, **중앙이 실제로 소유해야 하는 cross-system coordination state**와 외부 owner를 가리키는 provenance/source reference를 유지한다. 외부 domain fact를 캐시해야 한다면 owner/version/freshness가 있는 projection으로 취급한다.
 
 최소 포함 후보:
 
@@ -205,7 +205,7 @@ Artifact는 문자열 URL 목록을 넘어 장기 작업 산출물의 metadata i
 - run state transition과 event append의 transaction boundary 명확화
 - append-only provenance가 runtime row 삭제에 따라 사라지지 않도록 retention/foreign-key 정책 검토. 현재 `events.run_id ... ON DELETE CASCADE`를 그대로 장기 audit 모델로 간주하지 않음
 - Work/Run/Trace correlation migration 검증
-- project coordination projection과 event history의 역할 분리
+- central coordination state, source-owned projection/cache, event history의 역할 분리
 - context pack 생성 시 provenance/reference 유지
 - context/event/artifact metadata의 민감정보 retention 정책
 - idempotent external mutation의 key ownership 명확화
