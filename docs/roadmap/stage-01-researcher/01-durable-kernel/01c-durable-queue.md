@@ -1,126 +1,61 @@
-# 01C — Durable Queue and Lease
+# 01C — Durable Execution Bridge
 
 ## Status
 
 - 상태: **선행작업 대기**
 - 지금 시작 가능: **아니오**
-- 선행조건: 01A + 01B 완료
-- 완료 후 열림: 01E Live DB Verification
+- 선행조건: 01B + Stage 0 substrate 채택
 
 ## 목적
 
-현재 메모리 전용 `scheduler.WorkQueue`를 production durable queue로 사용하지 않고 PostgreSQL Work row 자체를 queue authority로 만든다.
+custom DurableWorkQueue를 만들지 않고 All Tomorrow Work를 durable backend에 연결한다.
 
-## 수정 파일
+Stage 0 primary가 통과하면 첫 구현은 DBOS다.
 
-- 수정: `src/all_tomorrow/scheduler.py`
-- 수정: `src/all_tomorrow/storage/work_store.py`
-- 수정: `src/all_tomorrow/storage/postgres.py`
-- 수정: `tests/test_scheduler.py`
-- 보강: `tests/test_postgres_store.py`
+## Stable Port
 
-## 기존 WorkQueue 처리
+DurableExecutionPort 최소 contract:
 
-현재 `WorkQueue`는 unit-test용 cooperative in-memory queue로 유지한다.
+- start(work_id, execution_spec, *, idempotency_key, priority, delay)
+- get(execution_ref)
+- cancel(execution_ref)
+- signal(execution_ref, topic, payload)
+- result(execution_ref)
 
-이름을 당장 깨지 말고 docstring에 prototype/in-memory임을 명시한다.
+필요한 기능만 contract에 올린다. DBOS API 전체를 추상화하지 않는다.
 
-production path용 새 class:
+## DBOS adapter
 
-`DurableWorkQueue`
+초기 매핑:
 
-이 class는 heap을 소유하지 않고 `WorkStateStore`에 위임한다.
+- All Tomorrow work_id/derived id → workflow id 또는 deduplication id
+- P0~P6 → DBOS priority mapping
+- not-before 요구 → enqueue delay
+- duplicate ingress → deduplication/return-existing
+- user response → durable message/event
+- crash/restart → DBOS recovery
+- concurrency/rate → DBOS queue configuration
 
-## Store method
+DBOS system DB는 application DB 정본과 논리적으로 분리한다.
 
-01B의 Protocol에 추가:
+## scheduler.py
 
-- `enqueue_work(work)` — 내부적으로 create_work 또는 명시적 alias
-- `claim_next_work(executor_id, *, lease_seconds, now=None)`
-- `heartbeat_work(work_id, executor_id, *, lease_seconds, expected_revision)`
-- `complete_work(work_id, executor_id, expected_revision, event)`
-- `fail_work(work_id, executor_id, expected_revision, event, *, retry_at=None)`
-- `requeue_expired_work(*, now=None, limit=...)`
-- `has_higher_priority_pending(priority, *, now=None)`
+기존 in-memory WorkQueue는 test/prototype로 남길 수 있다.
 
-## claim SQL
+production durable queue를 대체하는 새 SQL heap/lease class는 만들지 않는다.
 
-한 transaction:
+상위 scheduler는 "무슨 Work가 우선인가"를 결정하고 adapter에 enqueue parameter를 준다.
 
-1. status=PENDING
-2. `not_before IS NULL OR not_before <= now()`
-3. claim 가능한 row를 `FOR UPDATE SKIP LOCKED`
-4. `ORDER BY priority ASC, created_at ASC, work_id ASC`
-5. 하나 선택
-6. status=RUNNING
-7. claimed_by=executor_id
-8. lease_expires_at=now + lease
-9. attempt_count += 1
-10. revision += 1
-11. `work.claimed` Event append
-12. updated Work 반환
+## Side Effect Rule
 
-두 executor가 같은 Work를 claim하지 못해야 한다.
+durable engine이 재시도한다고 모든 외부 mutation이 자동으로 안전해지는 것은 아니다.
 
-## heartbeat
-
-다음 조건을 모두 만족할 때만 lease 연장:
-
-- work_id 일치
-- status=RUNNING
-- claimed_by=executor_id
-- revision 일치
-
-claim owner가 아닌 executor heartbeat는 실패 closed.
-
-## expired lease recovery
-
-`requeue_expired_work`:
-
-- RUNNING
-- lease_expires_at < now
-- PENDING으로 되돌림
-- claimed_by/lease clear
-- wait_reason clear
-- revision 증가
-- `work.lease_expired` Event
-
-실행 중 외부 mutation의 side effect가 불명확한 Work를 무조건 재실행하는 정책은 여기서 만들지 않는다. 그런 Work는 payload/metadata의 retry safety를 읽어 WAITING/reconciliation으로 보내는 상위 정책 대상이다.
-
-이번 packet은 queue primitive만 만든다.
-
-## Priority / yield
-
-기존 `Priority` enum 유지.
-
-`DurableWorkQueue.should_yield(current_priority)`는 DB의 실행 가능한 pending Work 중 더 높은 priority가 존재하는지만 확인한다.
-
-학교/대회 같은 의미를 scheduler enum에 추가하지 않는다.
-
-## 테스트
-
-- 두 concurrent claim 중 하나만 성공
-- P0가 P4보다 먼저 claim
-- not_before 미래 Work skip
-- heartbeat owner mismatch 실패
-- lease expiration 후 requeue
-- complete 후 다시 claim 불가
-- expired recovery Event 존재
-- DB row + Event atomicity
-
-## 하지 말 것
-
-- Redis
-- Celery
-- provider별 queue
-- BackgroundTaskClass 종류 확장
-- automatic retry policy reasoning
-- cron/trigger engine
+worker/tool mutation에는 별도 idempotency/reconciliation contract를 유지한다.
 
 ## 완료조건
 
-1. process-local heap 없이 PostgreSQL에서 claim 가능
-2. crash 뒤 lease expiration으로 Work 회수 가능
-3. double claim 방지
-4. priority ordering 유지
-5. canonical Work transition과 Event atomic
+1. custom lease code 없음
+2. 같은 Work 중복 start가 duplicate side effect를 만들지 않음
+3. priority/delay가 adapter를 통해 동작
+4. backend restart 뒤 execution recovery
+5. domain package가 DBOS 내부 type을 import하지 않음

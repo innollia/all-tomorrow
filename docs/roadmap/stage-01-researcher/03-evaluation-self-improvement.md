@@ -6,21 +6,41 @@
 - 지금 시작 가능: **아니오**
 - 선행조건: 02 Researcher Loop 완료
 
-이 파일은 03 작업의 local index다.
+## 기본 조립
+
+- evaluation dataset/runner: Pydantic Evals 우선
+- code change rail: Git branch/commit/PR
+- regression gate: GitHub Actions
+- execution telemetry: OpenTelemetry
+- production promotion/rollback: All Tomorrow policy + deployment adapter
+- protected approval: laptop Approval Authority
+
+Promptfoo/Langfuse를 초기 필수 dependency로 넣지 않는다.
+
+Promptfoo는 adversarial/red-team 요구가 실제로 생길 때,
+Langfuse는 telemetry backend가 필요해질 때 후보로 검토한다.
 
 ## Packet Status
 
-| 순서 | 작업 | 상태 | 지금 시작 가능 | 선행조건 | 읽을 파일 |
-|---:|---|---|---:|---|---|
-| 03A | Improvement/Evaluation Persistence | 선행작업 대기 | 아니오 | 02 완료 | [03a](03-evaluation-self-improvement/03a-persistence.md) |
-| 03B | Mixed Evaluator | 선행작업 대기 | 아니오 | 03A | [03b](03-evaluation-self-improvement/03b-mixed-evaluator.md) |
-| 03C | Generic Sandbox Experiment | 선행작업 대기 | 아니오 | 03A + 03B | [03c](03-evaluation-self-improvement/03c-sandbox-experiment.md) |
-| 03D | Ordinary Promotion & Rollback | 선행작업 대기 | 아니오 | 03C | [03d](03-evaluation-self-improvement/03d-promotion-rollback.md) |
-| 03E | Protected Classification & Handoff | 선행작업 대기 | 아니오 | 03A + 03C | [03e](03-evaluation-self-improvement/03e-protection-classification.md) |
-| 03F | Acceptance | 선행작업 대기 | 아니오 | 03A~03E | [03f](03-evaluation-self-improvement/03f-acceptance.md) |
+| 순서 | 작업 | 상태 | 지금 시작 가능 | 선행조건 |
+|---:|---|---|---:|---|
+| 03A | Evaluation/Proposal Persistence | 선행작업 대기 | 아니오 | 02 |
+| 03B | Pydantic Evals + Domain Metrics | 선행작업 대기 | 아니오 | 03A |
+| 03C | Git Sandbox Experiment | 선행작업 대기 | 아니오 | 03A + 03B |
+| 03D | CI-Gated Ordinary Promotion & Rollback | 선행작업 대기 | 아니오 | 03C |
+| 03E | Protected Classification & Laptop Handoff | 선행작업 대기 | 아니오 | 03A + 03C |
+| 03F | Acceptance | 선행작업 대기 | 아니오 | 03A~03E |
 
-## 중요 의존성
+## Version-safe Self Change
 
-03은 protected 변경을 **분류하고 approval package를 만드는 데까지** 닫는다.
+durable workflow가 살아 있는 동안 application code가 바뀔 수 있다.
 
-실제 protected apply 권한과 재인증 UI는 04E Laptop Approval Authority가 담당한다. 이 분리로 03↔04E 순환 의존성을 피한다.
+따라서 ordinary self-promotion도:
+- 새 version 배포
+- old in-flight execution drain/recovery
+- regression/eval 통과
+- rollback
+
+을 하나의 acceptance로 본다.
+
+새 코드가 올라갔다는 이유로 old workflow를 버리지 않는다.
