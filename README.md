@@ -166,6 +166,7 @@ Pipeline은 장기 목표와 전체 자율성을 소유하는 거대한 만능 �
 - [현재 기술 아키텍처](docs/architecture.md)
 - [기존 시스템 inventory](docs/inventory.md)
 - [초기 경계 결정 기록](docs/decisions/0001-control-plane-boundary.md)
+- [Durable Work 아키텍처 결정](docs/decisions/0002-durable-work-above-pipeline.md)
 - [Worker adapter와 pipeline 연결](docs/worker-adapters.md)
 
 ## Development Verification
