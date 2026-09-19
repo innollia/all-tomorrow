@@ -64,60 +64,42 @@ Control Plane, pipeline runtime, event store, worker/tool registry, scheduler, m
 
 ## Architectural Principle
 
-최종 흐름은 단순한 `request → pipeline → worker`가 아니다.
+All Tomorrow는 하나의 직렬 planner가 모든 판단을 통과시키는 시스템이 아니다. 중앙에는 여러 작업 흐름이 동시에 존재하고, **작업 계층과 별개의 메타인지 계층이 같은 중앙 상태를 계속 관찰한다.**
 
 ```text
-user request / schedule / watcher / external event / system proposal
-                              │
-                              ▼
-                       Goal + current state
-                              │
-                              ▼
-                     Planner / Replanner
-                  policy / budget / context
-                              │
-                              ▼
-                    versioned Plan / Work
-                              │
-                              ▼
-                    execution resolution
-                 capability / worker / tool /
-                 executor / provider resource
-                              │
-                              ▼
-                    versioned pipeline run
-                              │
-                              ▼
-                  workers / tools / adapters
-                              │
-                              ▼
-                   artifacts + events + state
-                              │
-                              ▼
-               evaluation / lessons / proposals
-                              │
-                  ┌───────────┴───────────┐
-                  ▼                       ▼
-             next work item          user report
+                 shared central state
+          goals / work / runs / events / artifacts
+                 ↑                 ↑
+                 │                 │
+        ┌────────┴───────┐ ┌──────┴─────────┐
+        │   work layer   │ │ metacognition  │
+        │                │ │     layer      │
+        │ execute work   │ │ observe system │
+        │ use tools      │ │ notice trouble │
+        │ produce output │ │ investigate    │
+        │ advance goals  │ │ propose change │
+        └────────┬───────┘ └──────┬─────────┘
+                 │                 │
+                 └────────┬────────┘
+                          ↓
+                 new / changed Work
 ```
 
-Pipeline은 장기 목표와 전체 자율성을 소유하는 거대한 만능 엔진이 아니라, **하나의 work item을 실행하는 버전 관리된 recipe**로 유지한다. Goal은 비교적 안정적으로 유지되고, Plan/Work graph는 현재 자원·관측·정책에 따라 revision될 수 있다.
+Pipeline은 작업 계층에서 하나의 WorkItem을 실행하는 versioned recipe다. 메타인지 계층은 특정 문제 목록을 기다리지 않고 전체 시스템의 진행·실패·낭비·정체·새 가능성을 관찰해 필요하면 조사나 개선 Work를 새로 만든다.
+
+중앙관제탑의 핵심은 **사전에 정의된 문제→대응표**가 아니라, 여러 실행과 관찰이 병렬로 돌아가며 같은 Goal/Work/state를 통해 서로 영향을 주는 구조다.
 
 ## Generality Rule
 
-범용성은 선택사항이 아니라 최상위 설계 조건이다.
+범용성은 "모든 경우를 추상적인 대응표로 미리 적어두는 것"이 아니다.
 
-- 새 provider, model, tool, executor, project가 추가될 때 generic orchestration core나 기존 pipeline에 서비스 이름별 조건문을 추가하는 것을 기본 해법으로 삼지 않는다.
-- 새로운 종류는 가능한 한 **capability + metadata + adapter + policy + resource state**로 등록되어 기존 planner와 execution machinery에 참여해야 한다.
-- quota 고갈, rate limit, 일시 장애, credential 부재, 가격·품질 변화 같은 현실 변화는 provider 전용 pipeline 분기가 아니라 **state/observation**으로 들어와 planner가 Plan을 revision하는 입력이 된다.
-- 동일 capability·품질·정책을 만족하는 단순 자원 교체는 execution resolver의 failover로 처리할 수 있다. 범위·품질·시간·작업구조·사용자 입력이 달라지는 경우에 Planner/Replanner가 Plan을 revision한다.
-- 작업 축소, 병렬성 감소, 연기, 분할, 사용자에게 추가 자원 요청 같은 **계획 의미의 변경**은 하나의 서비스에 박힌 예외처리가 아니라 policy가 허용하는 일반적인 replanning 선택지다.
-- 가입, API key 발급, 결제 승인처럼 사용자가 직접 해야 하는 필수 단계가 생기면 generic `NEED_USER` lifecycle로 전환한다.
-- 외부 글, repository, 문서에서 개선 아이디어를 얻는 흐름도 특정 사이트 전용 pipeline이 아니라 observation → research → proposal → sandbox/evaluation의 일반 lifecycle을 사용한다.
-- provider 고유 protocol, SDK, authentication 형식 같은 불가피한 특수성은 adapter 경계에 가둔다. 특수 adapter가 존재하는 것과 orchestration을 하드코딩하는 것은 구분한다.
-- 새로운 유형 하나를 지원하기 위해 core planner/pipeline 코드를 계속 수정해야 한다면 구조적 실패 신호로 본다.
-- 범용성이 "아무것도 코드에 고정하지 않는다"는 뜻은 아니다. `SUCCESS/FAILED/NEED_USER`, provenance 요구, permission boundary, adapter protocol 같은 **안정적인 control-plane primitive와 safety invariant**는 코드 계약으로 고정할 수 있다. 하드코딩을 피해야 하는 것은 provider/project 이름, quota threshold, research source, fallback 순서처럼 환경과 정책에 따라 바뀌는 domain decision이다.
-- **개념적 경계 하나마다 새 class/table/service를 만들지 않는다.** 기존 Event metadata, registry metadata, versioned config, Work state로 충분히 표현되면 먼저 그것을 재사용한다. 별도 영속 엔티티는 실제 조회·동시성·수명주기 요구가 증명될 때 추가한다.
+- Pipeline이나 core에 provider/project/problem 종류별 대응을 쌓지 않는다.
+- 작업 계층은 자기 일을 수행하고 결과와 사건을 중앙에 남긴다.
+- 메타인지 계층은 그 기록과 현재 상태를 보고 **문제가 무엇인지부터** 판단한다.
+- 해결책 역시 미리 정한 목록에서만 고르지 않고, 필요하면 원인 조사·외부 연구·새 Work 생성·기존 Work 변경으로 이어질 수 있다.
+- 새 도구나 provider의 고유 protocol 같은 특수성은 adapter 경계에 가둔다.
+- 안정적인 lifecycle, permission, provenance, secret, idempotency 규칙은 code invariant로 둘 수 있다.
+- 개념 하나마다 새 class/table/service를 만들지 않고 기존 Event, registry, Work, config로 충분하면 재사용한다.
 
 ## Completion Stages
 
