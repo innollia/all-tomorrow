@@ -162,6 +162,7 @@ Project source identity와 executor-local workspace path도 분리한다. `repo:
 - canonical projection과 append-only event를 분리한다.
 - Work가 성공·실패·대기하거나 외부 상태가 달라지면 그 사실과 provenance를 중앙에 남긴다.
 - Event는 메타인지 계층이 시스템 전체를 관찰하는 주요 입력 중 하나다.
+- Event는 OpenTelemetry span archive가 아니다. 장기 domain/audit fact만 남기고 request/model/tool 내부 latency와 세부 call tree는 OTel에 맡긴다.
 - provider/tool 고유 detail은 adapter가 보존할 수 있지만 중앙 판단이 특정 raw error 문자열에 종속되지 않게 한다.
 - Artifact는 중앙에서 추적할 metadata identity를 가지며 bytes는 외부 storage owner에 둘 수 있다.
 
@@ -362,7 +363,7 @@ work dependencies where needed
 artifacts
 ```
 
-durable backend의 queue row, lease, checkpoint, retry bookkeeping은 application schema에 복제하지 않는다. 초기 substrate는 Stage 0에서 검증한 DBOS를 사용하고, system DB/schema를 All Tomorrow domain DB와 논리적으로 분리한다.
+durable backend의 queue row, lease, checkpoint, retry bookkeeping은 application schema에 복제하지 않는다. Stage 0에서 DBOS와 Restate를 같은 failure acceptance로 비교해 하나를 선택하며, 외부 durable state와 All Tomorrow domain DB를 논리적으로 분리한다.
 
 Observation, policy, resource-state는 우선 Event/registry/config를 재사용한다. 별도 table은 실제 persistence/query 요구가 생길 때 추가한다.
 
@@ -434,7 +435,7 @@ AWS는 항상 켜진 중앙 runtime의 첫 운영 위치다.
 - extensible capability/pipeline metadata
 - replaceable selection/ranking policy
 - durable trigger engine
-- production scheduler leases
+- production durable-execution substrate selection/bridge
 - executor/provider resource pool
 - end-to-end remote production deployment
 - store-backed Web execution path
@@ -444,7 +445,11 @@ AWS는 항상 켜진 중앙 runtime의 첫 운영 위치다.
 - mixed self-evaluation
 - ordinary self-improvement promotion/rollback
 - laptop external Approval Authority for protected changes
+- selected durable backend bridge
+- PydanticAI researcher integration
+- FastMCP stable tool gateway
 - LiteLLM/model gateway
+- OpenTelemetry privacy-safe integration
 - Codex worker
 
 세부 구현 순서는 [roadmap.md](roadmap.md)와 각 completion-stage 문서를 따른다.

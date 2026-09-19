@@ -21,9 +21,31 @@ OpenTelemetry를 공통 contract로 사용한다.
 - agent/model span
 - worker/tool execution ref
 
-PydanticAI의 OpenTelemetry instrumentation을 우선 사용하고, 자체 tracing framework를 중복 구현하지 않는다.
+OpenTelemetry SDK/TracerProvider는 프로세스당 하나만 구성한다. PydanticAI, durable backend, FastMCP가 그 context를 공유하게 하고 자체 tracing framework를 중복 구현하지 않는다.
 
-Stage 0에서는 Langfuse/대형 telemetry backend self-host를 요구하지 않는다. stdout/file/가벼운 collector exporter로 contract만 검증 가능하다.
+### Telemetry ownership
+
+- PydanticAI: agent/model/tool semantic spans
+- selected durable backend: workflow/invocation recovery spans
+- FastMCP: MCP transport/delegation spans
+- All Tomorrow Event: domain/audit fact
+
+Event log를 trace backend처럼 모든 span으로 복제하지 않는다. Event에는 Goal/Work 상태 변화, user question, authority decision, artifact/proposal 같은 장기 domain fact만 남긴다.
+
+FastMCP span이 다른 MCP-aware instrumentation과 중복되면 `FASTMCP_TELEMETRY_MODE=propagation_only`를 우선 검증한다.
+
+### Privacy defaults
+
+PydanticAI instrumentation은 production 기본값으로:
+- `include_content=False`
+- `include_binary_content=False`
+- `include_model_request_parameters=False`
+
+를 spike한다. 필요한 debugging content는 별도 명시적 opt-in 경로로만 허용한다.
+
+OTel attribute에는 raw prompt, tool args/result, secret, credential, 개인 원문을 기본 저장하지 않는다.
+
+Stage 0에서는 Langfuse/대형 telemetry backend self-host를 요구하지 않는다. console/in-memory/가벼운 OTLP collector로 contract만 검증 가능하다.
 
 ## Evaluation
 
@@ -54,6 +76,11 @@ protected self-change 승인 권한은 GitHub review로 대체하지 않는다. 
 ## 완료조건
 
 한 skeleton 실행을 trace로 따라갈 수 있고, 같은 실행을 작은 eval dataset으로 회귀 검증하며, CI에서 자동 실행 가능하다.
+
+추가로:
+- 같은 MCP call이 중복 span tree로 보이지 않음
+- Event row 수가 trace span 수에 비례해 폭증하지 않음
+- telemetry export에서 prompt/secret fixture가 검색되지 않음
 
 
 ## Dependency / Upgrade Rail

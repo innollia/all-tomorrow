@@ -73,3 +73,26 @@ Stage 0 walking skeleton 뒤:
 - 편의를 이유로 vendor type을 core domain API에 노출하지 않는다.
 - integration이 얇지 않다면 새 framework를 더 붙이기 전에 경계를 다시 검토한다.
 - 외부 OSS의 라이선스와 self-host 조건을 version upgrade 때 다시 확인한다.
+
+
+## Observability Boundary
+
+외부 substrate가 모두 telemetry를 내보내더라도 All Tomorrow가 별도 trace system을 만들지 않는다.
+
+- one global OpenTelemetry context/provider
+- domain Event와 diagnostic span을 분리
+- prompt/tool content는 default-off
+- 중복 instrumentation은 propagation-only/suppression으로 제거
+
+관측을 위해 domain payload를 복제 저장하는 것은 assemble-first의 예외가 아니다.
+
+## Dependency Boundary
+
+외부 substrate version은 기능 dependency가 아니라 durable-history compatibility dependency다.
+
+- exact/lockfile pin
+- update PR만 자동 생성
+- auto-merge 금지
+- old-history replay/contract CI 없이 substrate version 변경 금지
+
+특히 persisted agent/toolset/operation 이름이 바뀌는 업데이트는 일반 dependency bump가 아니라 migration으로 취급한다.
