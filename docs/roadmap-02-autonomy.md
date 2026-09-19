@@ -153,6 +153,7 @@ discovered
 - output artifact retention
 - failure reason
 - provider terms/limits metadata
+- 가입, 결제, 약관 동의, 사용자 인증처럼 사용자가 직접 처리해야 하는 필수 단계가 생기면 우회하지 않고 해당 WorkItem을 NEED_USER로 전환
 
 ## 7. Resource Pool Foundation
 
