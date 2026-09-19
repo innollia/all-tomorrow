@@ -46,6 +46,34 @@
 
 3차는 README 원문의 가장 공격적인 자율성과 자기개선 목표를 닫는 단계다.
 
+## Original Vision Coverage
+
+원문 요구가 추상화 과정에서 사라지지 않도록 completion stage를 직접 연결한다.
+
+| 원문에서 요구한 결과 | 주 stage | 닫히는 기준 |
+|---|---|---|
+| 어느 기기에서든 웹으로 중앙 접속 | 1차 | remote HTTPS control surface + durable DB/recovery |
+| 범용 답변이 아닌 사용자 맥락 기반 질의응답 | 1차 | Manager/source-owner context를 조립한 Web 질의 경로 |
+| 흩어진 ChatGPT/Discord/CLI 작업을 중앙에서 조정 | 1차 | 공통 Goal/Work/Run authority + edge ingress |
+| 한 곳에서 다른 프로젝트의 실제 수정까지 이어짐 | 1차 | cross-system project resolution → WorkItem → adapter/worker execution |
+| Discord가 모든 말을 무조건 중앙으로 보내지 않음 | 1차 | local-vs-central edge policy + actual escalation |
+| pipeline을 중앙에서 모듈식으로 교체 | 1차 | immutable/versioned pipeline recipe와 work 분리 |
+| 필수 정보가 없으면 즉시 사용자에게 질문 | 1차 | durable NEED_USER + restart-safe resume |
+| 과거 전체 과정을 못 본 worker의 handover 격차 감소 | 1차 | project coordination projection + provenance-aware context pack |
+| 프로젝트 노하우를 다음 프로젝트에 재사용 | 1차→2차 | 1차 manual lesson/bootstrap, 2차 outcome 기반 지속 loop |
+| 스케줄/요청 없이 background work 지속 | 2차 | durable trigger + background scheduler |
+| 커뮤니티·도서·자료를 조사해 지식 축적 | 2차 | research watcher + evidence/artifact + lesson candidate |
+| 지금 안 쓰는 유용한 정보를 aside로 분류 | 2차 | research classification / backlog knowledge |
+| 새 이미지 AI를 몰래 몇 번 시험하고 usable 후보로 만들기 | 2차 | bounded service experiment + artifacts/metrics + router candidate |
+| 무료 게임 asset 수집 | 2차 | watcher → artifact catalog with source/provenance |
+| 학교 프린트 스캔·저장·실행항목 생성 | 2차 | school material end-to-end artifact/extraction/owner/work flow |
+| 하교시간에 오늘 report와 할 일 선제 전달 | 2차 | scheduled owner-aware daily brief |
+| 여러 API key/계정/기기/서버 자원 활용 | 2차→3차 | 2차 resource pool/fallback, 3차 quota/cost/quality optimization |
+| 유휴 무료 자원으로 제대로 된 game demo 제작 | 3차 | multi-day Goal/Work graph → playable build → user feedback iteration |
+| 시스템이 성과·실패를 보고 스스로 개선 | 3차 | proposal → sandbox → evaluation → promotion/monitoring/rollback |
+
+2차의 service experiment가 통과했다고 곧바로 무인 production 변경을 허용한다는 뜻은 아니다. 2차에서는 candidate 등록과 명시된 promotion policy까지, production self-improvement의 닫힌 자동 loop는 3차에서 검증한다.
+
 ## Cross-Stage Architecture Invariants
 
 아래는 stage가 올라가도 유지한다.
