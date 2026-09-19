@@ -1,169 +1,122 @@
-# Phased Implementation Plan
+# All Tomorrow Roadmap Index
 
-각 phase는 `inspect → plan → implement → test → inspect diff → verify` 순서로 수행한다. 다음 phase로 넘어가기 전 README 원문과 architecture invariant를 검산한다.
+이 문서는 세부 구현 항목을 끝없이 쌓는 backlog가 아니라, README의 최종 목적이 구현 과정에서 축소되거나 다른 목표로 치환되지 않도록 잡아두는 계획 인덱스다.
 
-## Phase 0 — Inventory and boundaries
+## Planning Rule
 
-상태: 문서 기준 완료, live system 검증은 미수행.
+모든 작업은 아래 순서로 판단한다.
 
-- 기존 repository와 integration surface 조사
-- source ownership 초안 작성
-- 재사용 지점과 금지할 복제 식별
-- production code 미작성
+1. README의 `Original Vision`과 `Additional Hard Requirements`에 실제로 기여하는가.
+2. README의 `Derived Final Goals` 중 어떤 목표를 전진시키는가.
+3. 현재 completion stage의 exit criteria에 필요한가.
+4. 기존 owner/adapter/pipeline/event 경계를 깨지 않고 구현할 수 있는가.
+5. 지금 필요하지 않은 기능을 미래 가능성만으로 과설계하고 있지 않은가.
 
-Exit criteria:
+구현 편의를 위해 최종 목적을 작게 다시 정의하지 않는다. 반대로 최종 목적에 있다는 이유만으로 모든 미래 기능을 1차 완성에 밀어 넣지도 않는다.
 
-- 중앙 저장소와 Eve 저장소의 ownership이 분리되어 있다.
-- 확인되지 않은 integration을 사실처럼 문서화하지 않는다.
-- 새 knowledge island 검산을 통과한다.
+## Completion Model
 
-## Phase 1 — Core Contracts
+### 1차 완성 — Durable Central Core
 
-상태: 기본 계약 및 단위 테스트 구현. provider-independent contract는 유지 중이다.
+문서: [roadmap-01-foundation.md](roadmap-01-foundation.md)
 
-범위:
+질문:
 
-- `RequestEnvelope`
-- `ExecutionContext`
-- `NodeResult`와 모든 status
-- `PipelineSpec`
-- `Event`
-- `Project`, `Worker`, `Capability`, `Tool`, `UserQuestion`
-- schema validation과 contract unit tests
+> 사용자가 어느 기기에서든 중앙에 작업을 맡기고, 그 작업이 durable한 Goal/Work/Run 상태로 남으며, 적절한 pipeline/worker/tool로 실행되고, 필요한 경우 질문으로 멈췄다가 같은 맥락으로 재개되며, 결과와 provenance를 다시 확인할 수 있는가?
 
-결정 전 확인할 사항:
+1차는 현재 요청 처리 엔진을 **장기 시스템의 올바른 중심부**로 고치는 단계다.
 
-- Python/FastAPI를 실제 첫 runtime으로 확정할지
-- package/build/test 표준
-- identifier와 timestamp 규칙
+### 2차 완성 — Autonomous Personal & Project Operations
 
-Exit criteria:
+문서: [roadmap-02-autonomy.md](roadmap-02-autonomy.md)
 
-- invalid contract는 명확한 field-level error로 거부된다.
-- `NEED_USER` payload의 필수 필드가 강제된다.
-- contract에 provider-specific SDK type이 새지 않는다.
+질문:
 
-## Phase 2 — Minimal Pipeline Runtime
+> 사용자가 즉시 요청하지 않아도 중앙이 허용된 스케줄·watcher·background work를 durable하게 발생시키고, 프로젝트 간 지식을 재사용하고, 개인 운영과 프로젝트 운영을 같은 authority 아래 연결할 수 있는가?
 
-상태: YAML loader, 순차/분기 실행, 버전 고정, `NEED_USER` 중단·재개, run store 기반 재시작 후 재개 구현. 운영 환경의 전체 장애 복구 검증은 남았다.
+2차부터 시스템은 반응형 도구를 넘어 지속적으로 움직이는 운영자가 된다.
 
-범위:
+### 3차 완성 — Measured Self-Evolving System
 
-- YAML spec loader
-- immutable version identity
-- node registry와 공통 interface
-- 순차 실행과 제한된 branch
-- variable resolution
-- error/retry/cancel
-- in-memory trace/event sink
-- `NEED_USER` suspend/resume
+문서: [roadmap-03-evolution.md](roadmap-03-evolution.md)
 
-Acceptance scenario:
+질문:
 
-1. 같은 runtime code로 두 YAML의 step 순서가 다르게 실행된다.
-2. 한 node가 `NEED_USER`를 반환한다.
-3. runtime은 이후 node를 실행하지 않고 resume token을 만든다.
-4. 사용자 답변 후 동일 pipeline version과 blocked step에서 재개한다.
-5. 원 실행과 재개 실행이 같은 trace/run에 연결된다.
+> 시스템이 새로운 도구·서비스·노하우를 스스로 탐색하고 시험하며, 실제 장기 산출물을 만들고, 자신의 성과를 측정해 개선 후보를 만들고, 검증된 변경만 안전하게 승격·롤백할 수 있는가?
 
-## Phase 3 — Event Store
+3차는 README 원문의 가장 공격적인 자율성과 자기개선 목표를 닫는 단계다.
 
-상태: PostgreSQL migration과 run/question store 구현, in-memory 원자적 재개 및 PostgreSQL 트랜잭션 코드가 있다. live PostgreSQL 통합 테스트와 run state + event append 원자성은 미완료다.
+## Cross-Stage Architecture Invariants
 
+아래는 stage가 올라가도 유지한다.
+
+1. **Original vision is constitutional**  
+   원문 요구와 파생 설계가 충돌하면 파생 설계를 수정한다.
+
+2. **Control Plane is a means**  
+   중앙 authority는 최종 목적의 인프라다. 사용자의 장기 운영·학습·생산·자율성을 희생하면서 Control Plane 자체를 완성하는 것을 성공으로 보지 않는다.
+
+3. **Pipeline is an execution recipe**  
+   pipeline 안에 장기 goal, scheduler, resource accounting, self-improvement 전체를 욱여넣지 않는다.
+
+4. **Durable work is above runs**  
+   하나의 Goal/WorkItem은 여러 run, worker, tool, 시간대를 가질 수 있다. run은 work의 한 실행 시도다.
+
+5. **Execution resource is separable from capability**  
+   누가 잘할 수 있는지(Worker/Agent), 어디서 실행되는지(Executor/Host), 어떤 provider/account/quota를 쓰는지는 독립적으로 교체 가능해야 한다.
+
+6. **Source ownership survives centralization**  
+   Eve, Manager, Discord, Git, Notion 등 기존 정본을 중앙 편의 때문에 복제 정본으로 만들지 않는다.
+
+7. **Provenance before promotion**  
+   lesson, skill, system improvement는 evidence와 evaluation 없이 전역 정본으로 승격하지 않는다.
+
+8. **User interruption dominates background work**  
+   P0 interactive work가 들어오면 background work는 안전한 경계에서 양보할 수 있어야 한다.
+
+9. **Ask instead of fabricating**  
+   project, cwd, mutation target, permission처럼 필수 정보가 없으면 추정으로 밀어붙이지 않는다.
+
+10. **No fake integrations**  
+    실제 연결·검증되지 않은 worker/tool/provider를 이름만 등록해 완성된 것처럼 취급하지 않는다.
+
+## Current Position
+
+2026-09-19 현재 위치는 **1차 완성 초반부**다.
+
+이미 확보한 기반:
+
+- Core contracts
+- versioned pipeline runtime
+- run/question persistence abstraction
 - PostgreSQL migration
-- projects/tasks/runs/run_steps/events/pipeline_versions/user_questions
-- transactional run state + append-only event
-- pending question query
-- restart 후 resume 검증
+- event/trace
+- worker registry
+- Antigravity/OpenCode CLI adapters
+- Discord edge policy/shadow experiment
+- minimal authenticated Web surface
+- initial scheduler/lesson/evaluation domain objects
 
-Redis와 pgvector는 이 phase의 필수 조건이 아니다.
+중요한 구조적 수정:
 
-## Phase 4 — Registry
+- 기존의 `Request → Pipeline → Worker` 중심 모델 위에 `Goal/Work/Trigger` 계층을 둔다.
+- Worker와 실제 실행 위치/계정/자원 풀을 분리할 수 있는 경계를 만든다.
+- Artifact를 단순 문자열 ref가 아니라 장기 작업의 일급 metadata로 다룰 준비를 한다.
+- in-memory WorkQueue를 최종 scheduler로 간주하지 않는다.
+- Deferred라는 이유로 autonomy/self-improvement의 **아키텍처 요구사항**까지 미루지 않는다.
 
-상태: Worker binding 및 selection/pipeline 실행 slice 구현 완료. Tool live discovery 및 risk metadata 확장은 진행 예정.
+## Work Discipline
 
-- worker/tool/capability metadata
-- health와 availability
-- risk/permission metadata
-- mock worker 및 fake adapter selection tests
-- `WorkerService`: CapabilityRegistry metadata와 executable WorkerAdapter를 1:1 consistent binding (mismatch/duplicate 거부)
-- Pipeline nodes `capability.select` 및 `worker.run` (`agent.run` alias) 구현
-- Data-driven coding pipeline (`pipelines/coding.yaml`) 및 missing cwd `NEED_USER` resume 지원
-- Event provenance 기록 및 민감정보(prompt, task, secret, payload) 누출 방지
+각 변경은 `inspect → plan → implement → test → inspect diff → verify` 순서로 수행한다.
 
-실제 연결 가능한 worker만 등록한다. 이름만 있는 Codex/OpenCode/Antigravity integration은 만들지 않는다.
-
-## Phase 5 — First real adapters
-
-상태: CLI worker adapter (AntigravityWorker, OpenCodeWorker)의 runtime pipeline dispatch 연동 완료. Eve read-only MCP adapter 코드는 있으나 운영 연결 검증은 미완료. DiscordService read adapter와 Manager bridge adapter는 미구현.
-
-우선순위:
-
-1. Eve read-only/status adapter using existing MCP
-2. DiscordService-compatible read adapter
-3. 기존 Antigravity Manager bridge adapter (참고: CLI worker adapter인 AntigravityWorker/OpenCodeWorker와는 별개의 매니저 브릿지)
-
-각 adapter는 source owner, timeout, idempotency, error mapping, trace propagation을 명시한다.
-
-## Phase 6 — Discord edge experiment
-
-상태: 순수 policy와 테스트 구현. 최신 Eve `origin/main` 기반 별도 worktree `C:\projects\eve-control-plane-edge`에서 Discord shadow routing을 구현·테스트했으나, Eve 본 저장소에 통합·배포하지 않았다. 중앙 실행으로의 실제 escalation은 아직 없다.
-
-- pure routing policy와 fixture dataset
-- `LOCAL_REPLY`, `LOCAL_TOOL`, `CENTRAL_QUERY`, `CENTRAL_TASK`, `PROJECT_ACTION`, `USER_CLARIFICATION`
-- 기존 bot과 충돌하지 않는 shadow decision logging
-- 충분히 검증한 뒤에만 central escalation 활성화
-
-일반 대화가 중앙 run을 만들지 않는 것을 acceptance test로 둔다.
-
-## Phase 7 — Minimal API and Web
-
-상태: 인증, Projects/Runs/Questions 표시용 API와 Discord edge 결정 API만 구현. Chat 실행, store-backed run/question 조회, 질문 답변 후 동일 run 재개, worker status UI는 미구현이다. 현재 `WebState` 목록을 production 정본으로 취급하지 않는다.
-
-- authentication 선택은 비용/외부 가입 결정을 사용자에게 질문한 뒤 확정
-- Chat, Projects, Runs, Questions
-- 질문 답변과 run resume
-- worker status
-
-## Phase 8 — Manager and Eve registration
-
-- `project:eve` 등록
-- Eve persona runtime과 Eve Maintainer routing 분리
-- Manager app을 중앙 위 application으로 등록
-- Notion migration 없이 Memory Gateway adapter 연결
-
-## Phase 9 — Lessons
-
-- event에서 수동 lesson candidate 생성
-- project bootstrap 시 후보 검색
-- provenance와 reuse evidence
-- 자동 global skill 승격 없음
-
-## Deferred
-
-- research watcher
-- autonomous background experiments
-- self-improvement promotion
-- pgvector semantic retrieval
-- model cost optimizer
-- GUI pipeline editor
-- school ingest full automation
-- scheduled brief
-- game generation
-- graph database
-- Kubernetes/multi-region HA
-
-## 매 작업 종료 기록
-
-각 작업은 event/decision/project state의 올바른 위치에 다음을 남긴다.
+작업 종료 시 적절한 event/decision/project state에 최소한 다음을 남긴다.
 
 - 무엇을 바꿨는가
 - 왜 바꿨는가
-- 무엇을 테스트했는가
+- 무엇을 검증했는가
 - 결과
 - 남은 문제
 - architecture decision 발생 여부
 - lesson 후보
 
-거대한 누적 handover 파일은 만들지 않는다.
-
+거대한 누적 handover 문서를 history 원본으로 만들지 않는다.
