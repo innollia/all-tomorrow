@@ -74,6 +74,8 @@ reuse evidence
 
 pgvector/RAG는 실제 recall 문제가 확인될 때 추가한다.
 
+Project bootstrap 시에는 accepted lesson을 곧바로 전역 사실로 박지 않고, 현재 프로젝트의 목표·제약과 맞는 후보를 provenance와 함께 골라 **bootstrap/context pack 후보**로 넣는다.
+
 필수:
 
 - provenance
