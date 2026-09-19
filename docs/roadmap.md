@@ -74,8 +74,8 @@
 | 범용 답변이 아닌 사용자 맥락 기반 질의응답 | 1차 | Manager/source-owner context를 조립한 Web 질의 경로 |
 | 흩어진 ChatGPT/Discord/CLI 작업을 중앙에서 조정 | 1차 | 공통 Goal/Work/Run authority + edge ingress |
 | 요청을 어디에·어떻게 보낼지 중앙이 자동 판단 | 1차→2차 | 1차 generic planner/capability/worker/executor routing contract, 2차 live provider resource/quota-aware replanning |
-| 무료 resource limit에 맞춰 작업 규모·순서·자원을 재계획 | 1차→2차 | 1차 Plan/Observation/Policy contract, 2차 quota/rate-limit observation → fallback/degrade/defer/split/NEED_USER |
-| 새로운 무료 API/provider 발견 시 필요한 key를 사용자에게 요청 | 2차 | resource candidate → prerequisites → NEED_USER → opaque credential ref → bounded validation → resource pool |
+| 작업이 예상대로 진행되지 않을 때 원인을 스스로 찾아 대응 | 1차→2차 | 1차 Work/Event를 독립 observer가 읽고 후속 Work를 만들 수 있는 seam, 2차 실제 metacognitive diagnosis/action |
+| 새로운 무료 API/provider 발견 시 필요하면 사용자에게 key 발급 요청 | 2차 | metacognition/research가 후보의 가치를 판단 → 필요한 경우에만 NEED_USER → 검증 후 resource pool |
 | 유사 시스템의 블로그·repo·문서에서 개선안 발견 후 검증 | 2차→3차 | 2차 generic research artifact/proposal 생성, 3차 sandbox/evaluation/promotion/rollback |
 | 한 곳에서 다른 프로젝트의 실제 수정까지 이어짐 | 1차 | cross-system project resolution → WorkItem → adapter/worker execution |
 | Discord가 모든 말을 무조건 중앙으로 보내지 않음 | 1차 | local-vs-central edge policy + actual escalation |
