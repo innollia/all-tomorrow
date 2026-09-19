@@ -1,5 +1,8 @@
 # 1차 완성 — Durable Central Core
 
+> Status: **In progress.** 현재 구현은 이 단계의 초기 실행 엔진이며, 다음 구조 작업은 Gate A다.
+
+
 ## Definition of Done
 
 1차 완성은 "pipeline 몇 개가 실행된다"가 아니다.
