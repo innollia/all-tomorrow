@@ -39,11 +39,14 @@ LiteLLM:
 - provider credentials/config
 - gateway-level usage/cost/rate observations
 
-FastMCP gateway:
-- upstream MCP connection/proxy/composition
-- tool namespace aggregation
-- tool discovery surface
-- transport/auth proxy mechanics
+LiteLLM Proxy:
+- model/provider gateway
+- upstream MCP connection/gateway
+- MCP namespace aggregation
+- MCP transport/auth mechanics
+- provider credentials/config
+
+FastMCP는 LiteLLM MCP Gateway가 acceptance를 못 닫을 때만 fallback으로 위 MCP 책임을 가져간다.
 
 OpenTelemetry:
 - telemetry representation/transport
@@ -103,9 +106,9 @@ Retry 횟수/timeout/backoff는 한 파일에서 policy로 조립하고 provider
 
 PydanticAI에는 가능한 한 stable `all-tomorrow-tools` MCP endpoint 하나를 등록한다.
 
-FastMCP가 upstream composition/proxy를 담당하고 All Tomorrow가 소유하는 것은:
+기본은 LiteLLM MCP Gateway다. All Tomorrow가 소유하는 것은:
 - 어떤 upstream/tool을 노출할지의 policy
 - project/user authority에 따른 filter decision
 - source/provenance metadata
 
-FastMCP 내부 registry를 canonical Tool Registry로 취급하지 않는다.
+LiteLLM MCP registry를 canonical Tool Registry로 취급하지 않는다. FastMCP fallback을 쓰더라도 같은 원칙을 유지한다.

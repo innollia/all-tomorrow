@@ -29,8 +29,8 @@ All Tomorrow는 assemble-first 전략을 사용한다.
 
 - PydanticAI: agent/tool/MCP/typed-output/eval interface
 - DBOS와 Restate: first durable backend finalists
-- FastMCP: stable MCP gateway/composition candidate
-- LiteLLM Proxy: model/provider gateway
+- LiteLLM Proxy: model/provider gateway + first MCP gateway candidate
+- FastMCP: LiteLLM MCP gateway가 acceptance를 못 닫을 때만 fallback
 - OpenTelemetry: telemetry contract
 - GitHub/Actions + Dependabot: code, CI, dependency-update rail
 
@@ -103,3 +103,16 @@ source vendoring, git submodule, permanent fork는 기본값이 아니다. upstr
 - old-history replay/contract CI 없이 substrate version 변경 금지
 
 특히 persisted agent/toolset/operation 이름이 바뀌는 업데이트는 일반 dependency bump가 아니라 migration으로 취급한다.
+
+
+## Gateway Consolidation
+
+한 service가 검증된 public surface로 두 책임을 안정적으로 제공한다면 process 수를 줄이는 쪽을 우선한다.
+
+Stage 0 기본은 LiteLLM Proxy 하나가:
+- model gateway
+- fixed MCP gateway
+
+를 겸하는 것이다.
+
+FastMCP는 feature-rich하다는 이유만으로 추가하지 않는다. LiteLLM MCP Gateway의 실제 gap이 증명될 때만 넣으며, 넣더라도 FastMCP task/Docket durability는 사용하지 않는다.

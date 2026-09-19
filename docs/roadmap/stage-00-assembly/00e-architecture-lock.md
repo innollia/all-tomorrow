@@ -12,7 +12,8 @@ spike 결과로만 Stage 1을 다시 연다.
 ## 해야 할 일
 
 - 채택한 durable substrate와 exact version pin 기록
-- FastMCP gateway 채택/기각 기록
+- LiteLLM MCP Gateway 채택 결과 기록
+- FastMCP fallback 필요 여부 기록
 - 각 substrate consumption mode(package/container/protocol/fork) 기록
 - backend 교체 조건 기록
 - durable journal data-classification/retention/backup 정책 기록

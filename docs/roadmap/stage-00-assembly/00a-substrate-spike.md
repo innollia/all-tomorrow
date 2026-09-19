@@ -15,7 +15,7 @@
 - PydanticAI
 - LiteLLM Proxy
 - OpenTelemetry
-- FastMCP tool gateway candidate
+- LiteLLM Proxy의 model gateway + MCP gateway
 - 실제 PostgreSQL where needed
 
 ## Research Snapshot — 2026-09-19
@@ -35,7 +35,7 @@ All Tomorrow의 Python 3.13과 현재 후보 사이에 알려진 Python-version 
 
 PydanticAI 2.46.0의 declared extras/ranges도 현재:
 - DBOS >=2.10
-- FastMCP >=3.3,<5
+- FastMCP >=3.3,<5 (fallback MCP client/server compatibility)
 - Temporal >=1.27
 - Prefect >=3.7.5
 
@@ -87,22 +87,33 @@ Primary 두 조합이 acceptance를 닫지 못할 때만 더 깊게 판다.
 
 agent에는 매번 새 MCPToolset을 꽂지 않는다.
 
-후보 구조:
+기본 구조:
 
 PydanticAI Agent
 → 하나의 stable MCPToolset id: `all-tomorrow-tools`
-→ FastMCP gateway
+→ LiteLLM Proxy fixed MCP endpoint
 → Eve / GitHub / filesystem / custom MCP / HTTP-backed tools
 
+LiteLLM 공식 MCP Gateway는 fixed endpoint, multiple-server tool namespacing, HTTP/SSE/stdio, key/team/org permissions와 여러 auth 방식을 제공한다. 따라서 model gateway와 tool gateway를 한 service로 합칠 수 있는지 먼저 시험한다.
+
 검증:
-- backend tool 추가 후 **새 run**의 list_tools에 반영
+- backend MCP 추가 후 **새 run**의 list_tools에 반영
 - in-flight durable run은 자신의 기록된 discovery/definition과 모순 없이 recovery
 - namespace collision 방지
 - allow/deny/filter 가능
 - gateway failure가 agent durability와 어떻게 상호작용하는지 확인
 - raw credential이 agent/work payload에 들어가지 않음
+- model routing 장애와 MCP gateway 장애를 같은 process failure로 묶어도 복구 가능한지 확인
 
-FastMCP의 ProxyProvider/mount/composition으로 충분하면 자체 gateway를 만들지 않는다.
+### FastMCP fallback
+
+LiteLLM MCP Gateway가 아래 중 하나에서 실패할 때만 FastMCP를 추가한다.
+- 필요한 MCP protocol/version compatibility
+- custom dynamic provider/composition
+- fine-grained transformation/filter
+- LiteLLM model gateway와 MCP gateway failure domain을 반드시 분리해야 함
+
+FastMCP를 쓰더라도 `fastmcp-tasks`/Docket background task engine은 켜지 않는다. durable execution owner는 하나만 둔다.
 
 ## 조립 순서
 
@@ -113,13 +124,15 @@ FastMCP의 ProxyProvider/mount/composition으로 충분하면 자체 gateway를 
    - DBOS spike
    - Restate spike
    - 동일 crash/idempotency/HITL acceptance
-2. **Tool seam**
-   - winner 위에 stable FastMCP gateway 하나만 추가
-   - 실제 upstream MCP 2개 이상 proxy/mount
-   - tool discovery/recovery 확인
-3. **Model gateway**
-   - local/OpenAI-compatible stub을 LiteLLM Proxy로 교체
-   - routing/cost/error normalization 확인
+2. **Gateway seam**
+   - LiteLLM Proxy를 먼저 model gateway로 연결
+   - 같은 process/service의 fixed MCP Gateway endpoint에 upstream MCP 2개 이상 연결
+   - tool namespacing/discovery/auth/recovery 확인
+   - 초기 registry는 config.yaml로 두어 LiteLLM DB를 강제하지 않음
+3. **Gateway dynamics**
+   - MCP server 추가/변경 후 new run이 새 tool을 발견
+   - config reload/restart가 필요한 범위 확인
+   - 나중에 dynamic registry가 정말 필요할 때만 LiteLLM MCP DB/API mode 비용 측정
 4. **Telemetry**
    - 하나의 OTel provider/exporter 연결
    - duplicate span/privacy 확인
@@ -159,7 +172,7 @@ Spike dependency는 production dependency와 분리한다. 두 finalist를 동�
 - deterministic duplicate-start handling
 - durable user wait/signal
 - external side-effect idempotency/reconciliation seam
-- stable FastMCP gateway를 통한 tool discovery
+- stable LiteLLM MCP Gateway endpoint를 통한 tool discovery
 - privacy-safe OTel propagation
 - durable journal이 저장하는 prompt/tool payload의 위치·retention·backup/encryption 경계 설명 가능
 - application Goal/Work schema와 backend state 분리
@@ -188,7 +201,7 @@ Hard gate를 모두 통과한 후보끼리만 아래 순서로 고른다.
 - failure scenarios passed
 - version-upgrade ceremony
 - license/production constraints
-- tool/MCP compatibility gaps
+- LiteLLM MCP compatibility gaps
 - observability duplication
 - AWS idle footprint
 
@@ -261,7 +274,8 @@ retry multiplication이 생기면 한 failure class당 한 주된 retry owner만
 
 - PydanticAI: MIT
 - DBOS Transact Python: MIT
-- FastMCP: Apache-2.0
+- LiteLLM core: MIT 범위 + enterprise 디렉터리 별도
+- FastMCP fallback: Apache-2.0
 - Restate Python SDK: MIT
 - Restate runtime: BSL 1.1; 자체 production 사용은 허용되지만 Public Restate Platform Service 제한을 유지
 - DBOS Conductor: self-hosted production은 별도 proprietary license

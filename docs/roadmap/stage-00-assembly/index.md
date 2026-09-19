@@ -13,8 +13,7 @@
 
 공통 조각:
 - Agent layer: PydanticAI
-- Tool aggregation candidate: FastMCP stable gateway
-- Model gateway: LiteLLM Proxy
+- Model + MCP gateway: LiteLLM Proxy의 두 public surfaces를 한 service로 사용
 - Telemetry contract: OpenTelemetry
 - Code/evaluation rail: GitHub + Actions
 - 기존 All Tomorrow: Goal/Work 의미, source ownership, metacognition, authority, worker adapters
@@ -25,6 +24,7 @@ Durable backend는 Stage 0에서 둘을 같은 acceptance로 경쟁시킨다.
 - **Restate**: PydanticAI integration, single-binary self-host, durable state/RPC/signals/flow-control까지 넓은 substrate
 
 후순위 비교:
+- FastMCP: LiteLLM MCP Gateway가 실제 요구를 못 닫을 때만 MCP aggregation fallback. background task/Docket 기능은 사용하지 않음
 - Temporal: PydanticAI native 지원, 가장 성숙하지만 초기 운영 중량이 큼
 - Hatchet: 100% MIT, Postgres/embedded/self-host와 UI가 강함. PydanticAI per-model/tool durability에는 custom backend 또는 다른 glue가 필요
 - Prefect: PydanticAI native 지원 + Apache 2.0 self-host, 그러나 All Tomorrow 초기 요구보다 workflow platform 면적이 넓을 수 있음
