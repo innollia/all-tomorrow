@@ -50,174 +50,78 @@ Gate A에서는 새 추상화를 많이 만드는 게 아니라 **현재 구조�
 
 ## 1. Architecture Correction Before More Surface Area
 
-Web 기능과 application 등록을 크게 늘리기 전에 아래 모델을 먼저 확정한다.
+Web 기능과 application 등록을 크게 늘리기 전에 **책임 경계만 바로잡는다.** 새 개념마다 class/table/service를 만드는 작업은 하지 않는다.
 
-### 1.1 Goal
+### 1.1 Goal / Work / Run
 
-장기 목표를 표현하는 durable entity.
+- **Goal**: 여러 실행을 넘어 유지되는 사용자 의도와 성공 조건
+- **WorkItem**: 실제 수행·대기·재시도되는 durable 작업
+- **Run**: WorkItem을 특정 pipeline version으로 실행한 한 시도
 
-최소 의미:
+Run이 실패해도 Work/Goal이 자동 terminal이 되지 않는다. recoverable resource 문제면 wait/failover/replan 대상이 될 수 있다.
 
-- goal id
-- project scope 또는 personal scope
-- title / intent
-- status
-- success criteria
-- provenance / created_by
-- optional parent goal
+기존 `tasks`는 title/status/priority보다 더 많은 durable Work 의미를 담을 수 있도록 보강하되, 이름 변경이나 대규모 재작성은 필수가 아니다.
 
-Goal은 pipeline run이 아니다. 하나의 Goal은 여러 WorkItem과 여러 run을 낳을 수 있다.
+### 1.2 Trigger and identity
 
-장기 프로젝트의 dependency graph는 WorkItem 관계로 표현한다. 이 요구 때문에 현재 Pipeline runtime을 곧바로 범용 DAG/orchestration engine으로 재작성하지 않는다. Pipeline 내부 DAG가 실제 recipe 요구로 별도 증명되기 전에는 sequential/limited-branch runtime을 유지할 수 있다.
+Work origin은 user request뿐 아니라 schedule, external event, watcher, system proposal까지 확장 가능하게 둔다.
 
-### 1.2 WorkItem
+`work_id`, `run_id`, `trace_id`의 역할을 섞지 않는다.
 
-실제 수행해야 하는 durable 단위.
+- work_id: 장기 작업 identity
+- run_id: 실행 시도
+- trace_id: 한 실행 흐름의 trace
 
-최소 의미:
+현재 `runs.trace_id UNIQUE`를 Work identity 대신 사용하지 않는다.
 
-- work id
-- optional goal id
-- project id
-- origin: user / schedule / watcher / event / system proposal
-- status
-- priority
-- task description
-- acceptance criteria
-- dependencies
-- not-before / deadline where applicable
-- budget/policy refs
-- current blocking reason
-- resulting artifact/event refs
+### 1.3 Project coordination context
 
-기존 `tasks` 모델은 이 요구를 수용할 수 있도록 재검토한다. 이름을 반드시 바꿀 필요는 없지만 단순 `title/status/priority` 행으로 끝내지 않는다.
+handover gap을 줄이기 위해 중앙은 cross-system coordination에 필요한 **목표·제약·결정 ref·열린 Work·관련 결과/lesson ref**를 유지한다.
 
-### 1.3 Run
+Git/Eve/Manager/Discord가 이미 소유하는 domain fact를 새 중앙 정본으로 복제하지 않는다.
 
-Run은 하나의 WorkItem을 특정 pipeline version으로 실행한 시도다.
+Worker에는 raw Request 하나만 던지지 않고 Work task, acceptance criteria, active constraints, project/source refs, 필요한 context/artifact refs를 조립해 전달한다.
 
-- 같은 WorkItem에 여러 run이 붙을 수 있다.
-- retry, resume, worker 교체 때문에 run history가 생겨도 WorkItem identity는 유지한다.
-- 하나의 Run이 FAILED여도 WorkItem/Goal이 자동 terminal이 되지 않는다.
-- resource unavailable/quota/capacity 같은 recoverable 원인이면 Observation을 남기고 Work를 replan/fallback/wait 대상으로 돌릴 수 있다.
-- 사용자 질문은 run을 멈출 수 있지만 상위 WorkItem의 목적을 잃지 않는다.
+현재 `coding.yaml`의 `task: ${request.message}`는 초기 slice일 뿐 최종 execution input contract가 아니다.
 
-### 1.4 Trigger
+### 1.4 Plan and replanning
 
-사용자 메시지만 ingress로 간주하지 않는다.
+Goal과 Plan을 분리한다.
 
-최소 origin model:
+- Goal은 비교적 안정적
+- Plan은 현재 context/policy/resource 상태에서 Goal을 달성하기 위한 Work 구성
+- 환경이 바뀌면 Plan을 새 version으로 바꿀 수 있음
+- 성공한 Work/Artifact는 가능한 한 보존
 
-- user request
-- schedule
-- external event
-- watcher condition
-- system-generated proposal
+별도 `PlanRevision` entity는 요구하지 않는다. versioned Plan data면 충분할 수 있다.
 
-1차에서는 모든 trigger type을 실제 구현할 필요가 없다. 다만 2차에서 schema를 갈아엎지 않도록 contract와 ownership을 먼저 잡는다.
+### 1.5 Generic state and policy seam
 
-### 1.5 Correlation Identity
+quota/rate-limit/resource-unavailable 같은 변화는 provider 이름별 pipeline 분기가 아니라 **generic 의미**로 위쪽에 전달한다.
 
-Work identity와 execution trace를 같은 것으로 쓰지 않는다.
+1차에서는 기존 primitive를 우선 재사용한다.
 
-- `work_id`: 여러 실행 시도와 시간을 가로질러 유지되는 작업 identity
-- `run_id`: 특정 pipeline execution attempt
-- `trace_id`: 한 실행 흐름의 distributed trace
-- 필요 시 parent/causation reference로 여러 run과 child work를 연결
+- observation → Event + metadata
+- resource state → registry metadata/state
+- policy → versioned config/ref
 
-현재 `runs.trace_id UNIQUE` 제약은 "trace 하나 = run 하나"에 가깝다. 이것을 Work identity 대신 사용하지 않는다. multi-run Work를 구현할 때 correlation 규칙과 schema를 먼저 확정한다.
+정확한 quota를 알 수 없으면 unknown/estimated + freshness 정도면 충분하다.
 
-### 1.6 Project Coordination Context
+### 1.6 Planner / Execution Resolution / Pipeline
 
-원문의 "전체 과정을 본 사용자와 handover 문서만 가진 worker 사이의 격차"를 직접 해결하는 층이다.
+- **Planner**: 어떤 Work가 필요한지 결정
+- **Execution Resolution**: 그 Work를 어떤 concrete worker/tool/resource로 실행할지 결정
+- **Pipeline**: 선택된 Work를 수행하는 versioned recipe
 
-중앙은 raw chat 전체를 새 정본으로 복제하는 대신, **중앙이 실제로 소유해야 하는 cross-system coordination state**와 외부 owner를 가리키는 provenance/source reference를 유지한다. 외부 domain fact를 캐시해야 한다면 owner/version/freshness가 있는 projection으로 취급한다.
+동등 resource failover는 Execution Resolution에서 처리할 수 있다. 범위·품질·시간·작업구조·사용자 action이 달라져야 하면 Planner가 Plan을 바꾼다.
 
-최소 포함 후보:
+Planner 구현은 rule-based/LLM/hybrid 중 무엇이든 가능하고, 출력은 permission/budget/acceptance 검증 뒤에만 Work로 반영한다.
 
-- current project objective
-- active constraints/invariants
-- current architecture/decision refs
-- open Goals/WorkItems
-- important source refs
-- recent relevant outcomes
-- accepted/relevant lesson refs
-- unresolved questions/risks
+### 1.7 Artifact
 
-실행 시에는 Request 하나만 worker에 던지지 않고 **bounded context pack**을 조립한다. context pack은 중앙 projection + source-owner adapter 조회 + 관련 lesson/artifact refs에서 만들며, 어떤 근거를 사용했는지 추적 가능해야 한다.
+Artifact는 장기 작업 결과의 metadata identity를 가진다.
 
-Worker 실행 입력은 최소한 다음을 구분할 수 있어야 한다.
-
-- original request/message ref
-- WorkItem task
-- acceptance criteria
-- active constraints
-- project/source/workspace refs
-- selected context pack / evidence refs
-- artifact inputs
-- permission/budget
-- expected result form
-
-현재 `pipelines/coding.yaml`의 `task: ${request.message}`는 초기 slice로 유지할 수 있지만 최종 execution input contract로 보지 않는다. 이미 Worker adapter가 지원하는 constraints/acceptance criteria를 Work/Context 층에서 실제로 공급하도록 연결한다.
-
-context pack에는 크기/비용 budget을 두고, 모든 history를 통째로 prompt에 넣는 방식으로 handover 문제를 덮지 않는다.
-
-Project context는 Git 코드, Eve state, Manager personal facts의 복제 정본이 아니다. 그 값들이 필요하면 source reference를 통해 읽는다.
-
-### 1.7 Plan
-
-Goal과 Plan을 같은 것으로 취급하지 않는다.
-
-- **Goal**: 비교적 안정적인 사용자 의도와 성공 조건
-- **Plan**: 현재 state/policy/resource 조건에서 Goal을 달성하기 위한 Work 구성
-
-Plan은 version을 가질 수 있고 이전 version을 가리킬 수 있다. 이것만으로 충분하면 별도 `PlanRevision` entity를 만들지 않는다.
-
-resource가 막혔을 때 이미 성공한 Work/Artifact는 보존하고 남은 부분만 다시 계산한다.
-
-### 1.8 Observation / Resource State / Policy — 최소 표현
-
-이 세 가지는 **개념적 역할**이지 반드시 세 개의 새 subsystem이라는 뜻이 아니다.
-
-1차에서는 가능한 한 기존 구조를 재사용한다.
-
-- Observation: Event type + generic metadata로 표현 가능
-- Resource state: registry metadata/state로 표현 가능
-- Policy: versioned config/blob 또는 reference로 표현 가능
-
-예를 들어 서로 다른 provider의 quota error는 adapter가 공통 의미인 `capacity_exhausted` 같은 observation으로 정규화하되 raw detail/ref도 남긴다.
-
-정확한 quota를 알 수 없는 경우 `unknown/estimated`와 freshness 정도만 표현하면 충분하다. 모든 provider를 완벽한 공통 schema로 만들지 않는다.
-
-### 1.9 Planner / Execution Resolution Boundary
-
-Planner는 Goal, 현재 Work 상태, context, policy, resource 상태를 보고 **무슨 Work가 필요한지** 정한다.
-
-Execution Resolution은 Work가 요구하는 capability/constraints를 **어떤 concrete worker/tool/resource로 실행할지** 정한다.
-
-- 동등한 resource로의 단순 failover는 Execution Resolution
-- 범위·품질·시간·작업구조·사용자 action이 달라지는 변경은 Planner
-- Pipeline은 선택된 Work를 수행하는 recipe
-
-Planner 구현은 rule-based, LLM, hybrid 중 무엇이든 가능하며 특정 모델 prompt를 contract로 만들지 않는다.
-
-Planner 출력은 바로 실행하지 않고 기존 contract/policy/permission/budget 검증을 통과한 뒤 Work로 materialize한다.
-
-### 1.10 Artifact
-
-Artifact는 문자열 URL 목록을 넘어 장기 작업 산출물의 metadata identity가 필요하다.
-
-최소 의미:
-
-- artifact id
-- producing work/run/event
-- media/type
-- source owner 또는 storage reference
-- version/hash where available
-- created_at
-- metadata
-
-대용량 bytes 자체를 PostgreSQL에 넣는다는 뜻이 아니다.
+최소한 producing work/run, type, source/storage ref, version/hash where available, provenance를 추적할 수 있으면 된다. 대용량 bytes 자체를 PostgreSQL에 넣는다는 뜻은 아니다.
 
 ## 2. Worker / Executor / Resource Boundary
 
