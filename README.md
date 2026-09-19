@@ -116,6 +116,7 @@ Pipeline은 장기 목표와 전체 자율성을 소유하는 거대한 만능 �
 - 외부 글, repository, 문서에서 개선 아이디어를 얻는 흐름도 특정 사이트 전용 pipeline이 아니라 observation → research → proposal → sandbox/evaluation의 일반 lifecycle을 사용한다.
 - provider 고유 protocol, SDK, authentication 형식 같은 불가피한 특수성은 adapter 경계에 가둔다. 특수 adapter가 존재하는 것과 orchestration을 하드코딩하는 것은 구분한다.
 - 새로운 유형 하나를 지원하기 위해 core planner/pipeline 코드를 계속 수정해야 한다면 구조적 실패 신호로 본다.
+- 범용성이 "아무것도 코드에 고정하지 않는다"는 뜻은 아니다. `SUCCESS/FAILED/NEED_USER`, provenance 요구, permission boundary, adapter protocol 같은 **안정적인 control-plane primitive와 safety invariant**는 코드 계약으로 고정할 수 있다. 하드코딩을 피해야 하는 것은 provider/project 이름, quota threshold, research source, fallback 순서처럼 환경과 정책에 따라 바뀌는 domain decision이다.
 
 ## Completion Stages
 
