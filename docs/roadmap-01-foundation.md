@@ -11,6 +11,20 @@
 
 1차가 끝나면 시스템은 아직 자율 연구원이나 자기개선 시스템은 아니지만, 이후 2차·3차 기능이 core 재작성 없이 올라갈 수 있는 중앙 기반이어야 한다.
 
+## Immediate Next Work
+
+이 문서 개편 직후에는 Web 기능 추가나 watcher 구현으로 가지 않는다.
+
+Gate A의 첫 작업 순서:
+
+1. 현재 `Project`, `tasks`, `runs`, `events`, `WorkerRequest`, `projects/catalog.yaml`의 참조 지점을 전수 검사한다.
+2. Goal/WorkItem/ProjectSource/Executor/Artifact의 **최소 contract**와 ownership만 먼저 설계한다. 미래 provider 세부를 미리 다 모델링하지 않는다.
+3. Work/Run/Trace correlation과 event retention migration을 설계한다.
+4. logical project source ↔ executor workspace mapping을 설계한다.
+5. project context projection/context-pack contract를 설계한다.
+6. 기존 105개 수준의 회귀 테스트가 깨지는 지점을 확인하고 필요한 migration/unit test를 먼저 추가한 뒤 구현한다.
+7. Gate A가 닫히기 전에는 기존 thin task/run 모델 위에 production Web 기능을 더 쌓지 않는다.
+
 ## 0. Preserve Existing Good Work
 
 다음은 재작성 대상이 아니라 유지·확장 대상이다.
@@ -256,7 +270,8 @@ Discord가 첫 edge일 뿐, 계약은 Web/CLI/ChatGPT에도 재사용 가능해�
 1차 Web exit criteria:
 
 - authentication
-- submit request
+- Manager/application chat 또는 generic work request를 제출할 수 있는 ingress
+- 사용자/프로젝트 context를 owner-aware 방식으로 조립한 질의 경로
 - resolve/create work
 - run status
 - pending question 조회
