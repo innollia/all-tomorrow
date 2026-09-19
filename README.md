@@ -110,7 +110,8 @@ Pipeline은 장기 목표와 전체 자율성을 소유하는 거대한 만능 �
 - 새 provider, model, tool, executor, project가 추가될 때 generic orchestration core나 기존 pipeline에 서비스 이름별 조건문을 추가하는 것을 기본 해법으로 삼지 않는다.
 - 새로운 종류는 가능한 한 **capability + metadata + adapter + policy + resource state**로 등록되어 기존 planner와 execution machinery에 참여해야 한다.
 - quota 고갈, rate limit, 일시 장애, credential 부재, 가격·품질 변화 같은 현실 변화는 provider 전용 pipeline 분기가 아니라 **state/observation**으로 들어와 planner가 Plan을 revision하는 입력이 된다.
-- 작업 축소, 대체 자원 사용, 병렬성 감소, 연기, 분할, 사용자에게 추가 자원 요청 같은 대응은 하나의 서비스에 박힌 예외처리가 아니라 policy가 허용하는 일반적인 replanning 선택지다.
+- 동일 capability·품질·정책을 만족하는 단순 자원 교체는 execution resolver의 failover로 처리할 수 있다. 범위·품질·시간·작업구조·사용자 입력이 달라지는 경우에 Planner/Replanner가 Plan을 revision한다.
+- 작업 축소, 병렬성 감소, 연기, 분할, 사용자에게 추가 자원 요청 같은 **계획 의미의 변경**은 하나의 서비스에 박힌 예외처리가 아니라 policy가 허용하는 일반적인 replanning 선택지다.
 - 가입, API key 발급, 결제 승인처럼 사용자가 직접 해야 하는 필수 단계가 생기면 generic `NEED_USER` lifecycle로 전환한다.
 - 외부 글, repository, 문서에서 개선 아이디어를 얻는 흐름도 특정 사이트 전용 pipeline이 아니라 observation → research → proposal → sandbox/evaluation의 일반 lifecycle을 사용한다.
 - provider 고유 protocol, SDK, authentication 형식 같은 불가피한 특수성은 adapter 경계에 가둔다. 특수 adapter가 존재하는 것과 orchestration을 하드코딩하는 것은 구분한다.
