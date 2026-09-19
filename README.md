@@ -117,6 +117,7 @@ Pipeline은 장기 목표와 전체 자율성을 소유하는 거대한 만능 �
 - provider 고유 protocol, SDK, authentication 형식 같은 불가피한 특수성은 adapter 경계에 가둔다. 특수 adapter가 존재하는 것과 orchestration을 하드코딩하는 것은 구분한다.
 - 새로운 유형 하나를 지원하기 위해 core planner/pipeline 코드를 계속 수정해야 한다면 구조적 실패 신호로 본다.
 - 범용성이 "아무것도 코드에 고정하지 않는다"는 뜻은 아니다. `SUCCESS/FAILED/NEED_USER`, provenance 요구, permission boundary, adapter protocol 같은 **안정적인 control-plane primitive와 safety invariant**는 코드 계약으로 고정할 수 있다. 하드코딩을 피해야 하는 것은 provider/project 이름, quota threshold, research source, fallback 순서처럼 환경과 정책에 따라 바뀌는 domain decision이다.
+- **개념적 경계 하나마다 새 class/table/service를 만들지 않는다.** 기존 Event metadata, registry metadata, versioned config, Work state로 충분히 표현되면 먼저 그것을 재사용한다. 별도 영속 엔티티는 실제 조회·동시성·수명주기 요구가 증명될 때 추가한다.
 
 ## Completion Stages
 
