@@ -132,7 +132,7 @@ Optimizer가 provider별 분기문을 생성하는 구조는 피한다. 새로�
 
 ## 6. Continuous External Discovery
 
-2차 watcher를 발전시킨다.
+2차 메타인지 계층의 외부 탐색 능력을 발전시킨다.
 
 - 새로운 AI service/model/tool
 - All Tomorrow와 유사한 control-plane/orchestration architecture 글
@@ -142,7 +142,7 @@ Optimizer가 provider별 분기문을 생성하는 구조는 피한다. 새로�
 - asset sources
 - operational techniques
 
-Research source를 미리 고정 목록으로 제한하지 않는다. 시스템 observation이나 improvement question에서 검색어와 탐색 범위를 만들 수 있어야 한다.
+Research source와 조사 주제를 미리 고정하지 않는다. 메타인지 계층이 현재 시스템에서 발견한 문제나 가능성에서 스스로 조사 질문과 탐색 범위를 만들 수 있어야 한다.
 
 발견 즉시 adoption하지 않고 candidate/experiment/evaluation을 거친다.
 
@@ -198,7 +198,7 @@ vector DB는 retrieval implementation 중 하나일 뿐 지식 정본 자체가 
 - 같은 provider-specific branch가 여러 pipeline에 복제됨
 - 새 integration마다 core code 수정이 반복됨
 
-이 관찰은 개선 proposal을 만들 수 있지만 곧바로 규칙을 추가하지 않는다. 특히 "하드코딩이 늘고 있음" 자체를 meta-observation으로 취급해 abstraction 개선 후보를 만들 수 있어야 한다.
+이 관찰은 개선 proposal이나 새 Work를 만들 수 있지만 곧바로 규칙을 추가하지 않는다. 메타인지 계층 자체도 여러 observer가 병렬로 동작하며 서로 다른 관찰을 중앙 state에 남길 수 있다.
 
 ## 9. 3차 Acceptance Scenarios
 
