@@ -343,18 +343,21 @@ Manager/Web에서 "Eve 프로젝트의 이 문제를 고쳐" 같은 요청 → p
 
 Web에서 만든 Work/질문/결과를 Discord 또는 실제 연결 가능한 다른 client가 같은 중앙 identity로 조회·이어받음. 두 client가 별도 task/history 섬을 만들지 않음. ChatGPT/CLI adapter는 지원 표면이 검증되는 대로 같은 ingress contract를 사용함.
 
-### K. Genericity and adaptation suite
+### K. Metacognition seam
 
-아래를 하나의 묶음으로 검증한다.
+테스트는 원인을 미리 알려주지 않는다.
 
-- **새 resource**: fake provider/resource를 추가해도 기존 pipeline/planner core에 이름별 branch를 추가하지 않고 adapter + metadata/capability 등록으로 후보가 됨
-- **resource loss**: quota/health 문제에서 동등 resource가 있으면 safe failover, 없으면 Goal을 유지한 채 plan revision/wait/NEED_USER로 이동
-- **raw error normalization**: provider마다 다른 quota error가 generic observation으로 정규화되고 pipeline YAML에는 provider 이름/error string 조건문이 없음
-- **selection policy**: 동일 후보 집합에서 quality 우선과 free/cost 우선 policy를 바꿔도 Registry core를 수정하지 않음
-- **unknown quota**: 정확한 remaining quota가 없어도 unknown/estimated 상태와 실제 실패 observation으로 동작
-- **planner validation**: planner가 잘못된 resource/budget/acceptance 변경을 제안하면 Work 생성 전에 거부됨
-- **mutation safety**: side effect 여부가 불명확한 timeout은 다른 resource로 즉시 중복 실행하지 않고 reconcile/idempotency 확인
-- **no-resource case**: 현재 실행 resource가 0개여도 Run 실패를 Goal 실패로 확정하지 않고 wait/resource acquisition/replan/NEED_USER 후보로 올림
+Work가 반복해서 기대한 결과를 내지 못하거나 진행이 멈추는 fixture를 만든다. Work layer는 있는 그대로 Run/Event를 남긴다.
+
+별도 observer가 이를 읽어:
+
+- "정상 진행이 아니다"라고 판단하고
+- 추가 확인이 필요하다는 새 Work/proposal을 만들며
+- 원래 Goal을 잃지 않는지
+
+를 검증한다.
+
+fixture의 실제 원인이 resource, tool, input, environment 중 무엇인지는 observer에게 사전 분류값으로 주지 않는다.
 
 
 ## 12. Explicitly Not Required for 1차
