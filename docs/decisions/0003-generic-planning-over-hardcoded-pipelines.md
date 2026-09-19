@@ -84,6 +84,8 @@ provider-specific raw 상태를 generic semantic layer로 정규화한다.
 
 Planner가 provider raw error string이나 서비스 이름으로 직접 분기하지 않는다.
 
+`NodeStatus`/`WorkerStatus` 같은 execution lifecycle enum은 작고 안정적으로 유지한다. provider별 quota/auth/capacity 상태를 status enum에 계속 추가하는 대신 Observation/ResourceState로 분리한다.
+
 ### 4. 새로운 종류는 data + adapter + capability + policy로 참여한다
 
 새 provider/tool/executor/model을 지원하기 위한 기본 extension path:
