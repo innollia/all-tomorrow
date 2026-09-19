@@ -5,73 +5,41 @@
 - 상태: **개발중**
 - 지금 시작 가능: **예**
 - 선행조건: 없음
-- 병렬 제한: protected promotion activation은 03-evaluation-self-improvement 완료 필요
 
-## Goal
+이 파일은 구현 상세가 아니라 **04 작업의 상태 인덱스**다.
 
-Researcher를 항상 켜진 중앙 runtime에서 돌리되, 1차에 분산 workspace 문제를 과설계하지 않는다.
+## Packet Status
 
-## Read with
+| 순서 | 작업 | 상태 | 지금 시작 가능 | 선행조건 | 읽을 파일 |
+|---:|---|---|---:|---|---|
+| 04A | LiteLLM Gateway | 시작안했음 | 예 | 없음 | [04a-litellm-gateway.md](04-runtime-and-tools/04a-litellm-gateway.md) |
+| 04B | Codex Worker | 시작안했음 | 예 | 없음 | [04b-codex-worker.md](04-runtime-and-tools/04b-codex-worker.md) |
+| 04C | Laptop Workspace Resolver | 시작안했음 | 예 | 없음 | [04c-laptop-workspace.md](04-runtime-and-tools/04c-laptop-workspace.md) |
+| 04D | AWS Always-On Runtime | 선행작업 대기 | 아니오 | 01A~01C + 04A | [04d-aws-runtime.md](04-runtime-and-tools/04d-aws-runtime.md) |
+| 04E | Laptop Approval Authority | 선행작업 대기 | 아니오 | Stage 1.3 | [04e-approval-authority.md](04-runtime-and-tools/04e-approval-authority.md) |
 
-- ../../worker-adapters.md
-- approval 관련 변경 시 ../../decisions/0004-self-modification-and-approval-boundary.md
+## 현재 병렬 착수 가능
 
-## AWS Role
+- 04A LiteLLM
+- 04B Codex
+- 04C Laptop Workspace
 
-첫 always-on central runtime.
+세 packet은 서로 독립적으로 먼저 개발 가능.
 
-초기 책임:
+04D는 durable queue가 생긴 뒤,
+04E는 self-improvement lifecycle이 생긴 뒤 시작.
 
-- PostgreSQL / central state
-- researcher trigger
-- model/API work
-- background research
-- Goal/Work queue
-- reports
+## 이미 있는 기반
 
-## Laptop Role
+- AntigravityWorker
+- OpenCodeWorker
+- WorkerService / WorkerAdapter
+- subprocess safety helper
+- ProjectRegistry
+- ModelRoute / ModelRouter
 
-1차 repo mutation의 주 executor.
+기존 기반을 재사용하고 새 framework를 만들지 않는다.
 
-- logical source → laptop workspace mapping
-- local checkout을 실제 cwd로 사용
-- multi-host workspace synchronization은 구현하지 않음
-- workspace_resolver seam만 유지
+## Stage 1.4 완료조건
 
-노트북은 Approval Authority host이기도 하다.
-
-AWS 본체는 Approval Authority의 secret/signing authority/code-data write 권한을 갖지 않는다.
-
-## Model Gateway
-
-LiteLLM을 model/provider gateway 우선 후보로 둔다.
-
-All Tomorrow가 Goal/Work orchestration authority를 유지하고, LiteLLM은 model/provider 호출과 routing/budget telemetry 아래층에 둔다.
-
-## Worker Surface
-
-현재 기반:
-
-- Antigravity worker
-- OpenCode worker
-
-추가 대상:
-
-- Codex non-interactive worker/job execution
-
-provider 고유 protocol은 adapter/gateway 경계에 둔다.
-
-## Deferred
-
-- AWS/laptop/Sol Pi checkout sync
-- branch/dirty-state 자동 조정
-- 다중 executor workspace 분기
-- offline host repository reconciliation
-
-## Done When
-
-1. LiteLLM을 통한 provider/model 호출 seam 검증
-2. Antigravity/OpenCode 기존 adapter 유지
-3. Codex worker contract와 실제 실행 검증
-4. laptop logical-source workspace resolution 동작
-5. AWS와 laptop 역할이 credential/authority 관점에서 분리
+04A~04E가 모두 필요한 시점에 완료되고, Stage 1 acceptance에서 AWS/laptop authority 경계가 실제로 검증되면 개발완료.
