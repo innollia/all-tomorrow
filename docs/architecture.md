@@ -6,56 +6,37 @@
 
 ## 1. Target System Shape
 
-All Tomorrow의 중앙 authority는 모든 실행과 모든 domain fact를 직접 소유하는 monolith가 아니다.
+All Tomorrow의 중앙 authority는 직렬 workflow 하나가 아니다.
 
 ```text
-Discord / Web / CLI / ChatGPT / schedules / watchers / external events
+Discord / Web / CLI / schedules / watchers / external events
                               │
                               ▼
                          Edge / Ingress
-                   local reply or escalation
                               │
                               ▼
-                    All Tomorrow Authority
-        ┌────────────────────────────────────────────┐
-        │ project / Goal / Plan / Work / Trigger     │
-        │ policy / budget / permission               │
-        │ resource state / observations              │
-        │ pipeline version / Run / Question          │
-        │ project coordination state / provenance    │
-        │ event / artifact / lesson / proposal meta  │
-        └────────────────────────────────────────────┘
-                              │
-                              ▼
-                      Planner / Replanner
-         Goal + current state + policy + observations
-                              │
-                     Plan / Work revision
-                              │
-                              ▼
-                     Execution Resolution
-             capability → worker/agent → executor/host
-                         → provider resource
-                              │
-                              ▼
-                   Versioned Pipeline Recipe
-                              │
-             ┌────────────────┼────────────────┐
-             ▼                ▼                ▼
-          workers            tools          adapters
-      coding/analysis     MCP/native       Eve/Manager/
-                                           providers/etc.
-             │                │                │
-             └────────────────┼────────────────┘
-                              ▼
-              results / artifacts / observations
-                              │
-                     ┌────────┴────────┐
-                     ▼                 ▼
-               state/events       Replanner input
+                    shared central state
+        project / Goal / Work / Run / Question
+        events / artifacts / context / registry
+                 ▲                     ▲
+                 │                     │
+        ┌────────┴────────┐   ┌────────┴──────────┐
+        │   work layer    │   │ metacognition    │
+        │                 │   │      layer       │
+        │ execute Work    │   │ observe system   │
+        │ choose/use tool │   │ detect friction  │
+        │ pipeline/run    │   │ investigate why  │
+        │ produce result  │   │ create proposals │
+        └────────┬────────┘   └────────┬──────────┘
+                 │                     │
+                 └──────────┬──────────┘
+                            ▼
+                     Goal / Work changes
 ```
 
-중앙집권의 의미는 **하나의 authority에서 목표·작업·라우팅·추적·질문·결과를 조정할 수 있다**는 뜻이다. 모든 데이터를 한 DB로 옮긴다는 뜻이 아니다.
+여러 Work, observer, research, evaluation 흐름은 동시에 존재할 수 있다. 메타인지 계층은 모든 작업 앞을 가로막는 중앙 planner가 아니라 **옆에서 전체를 관찰하고 필요할 때 개입하는 병렬 계층**이다.
+
+중앙집권의 의미는 하나의 shared authority/state를 통해 서로 다른 흐름이 같은 목표·작업·기록을 보고 영향을 줄 수 있다는 뜻이다.
 
 ## 2. Core Layering
 
@@ -73,45 +54,43 @@ Discord / Web / CLI / ChatGPT / schedules / watchers / external events
 
 현재 Discord edge policy와 Web API는 이 층의 초기 구현이다.
 
-### 2.2 Goal, Plan and Work
+### 2.2 Goal and Work
 
-장기 목적과 durable work는 pipeline보다 위에 둔다.
+- **Goal**: 여러 작업과 시간대를 넘어 유지되는 목적과 성공 조건
+- **WorkItem**: 실제 수행·대기·재시도되는 durable 작업
+- **Run**: WorkItem의 한 실행 시도
 
-- **Goal**: 여러 plan, work, run에 걸쳐 살아남는 목적과 acceptance criteria
-- **Plan**: 현재 state/policy/resource 조건에서 Goal을 달성하기 위한 versioned work graph
-- **Plan revision**: 별도 entity가 필수라는 뜻이 아니라, observation 때문에 Plan의 새 version이 만들어지는 행위
-- **WorkItem**: 실제 수행·추적·대기·재시도되는 durable 작업
-- **Run**: WorkItem을 특정 pipeline version으로 실행한 한 시도
+Run failure와 Goal failure를 같은 것으로 취급하지 않는다. 작업 중 생긴 사건은 중앙 state/event에 남고, 다른 작업이나 메타인지 흐름이 이를 참고할 수 있다.
 
-Goal과 Plan을 분리한다. resource 하나가 막혔다고 Goal을 폐기하거나 처음부터 다시 만들지 않는다. 완료된 Work/Artifact를 보존하면서 남은 work만 재계산할 수 있어야 한다.
+Plan이 필요할 때는 Goal을 달성하기 위한 현재 Work 구성을 뜻한다. 별도 거대 planner subsystem을 전제하지 않고 versioned data로 시작할 수 있다.
 
-하나의 WorkItem이 worker 교체, 재시도, NEED_USER, 여러 날의 대기를 거쳐도 Work identity를 잃지 않아야 한다.
+### 2.3 Work Layer
 
-**Run failure != Work failure != Goal failure.** 특정 pipeline run이 실패해도 resource observation이나 retry/replan 가능성이 있으면 WorkItem은 blocked/replan-pending/queued 같은 비종료 상태로 남을 수 있다. Goal은 acceptance criteria 달성이 불가능하거나 사용자가 취소하는 등 별도 결정 전까지 유지된다.
+Work layer는 요청, schedule, 기존 Goal, 다른 Work에서 생긴 후속 작업 등을 실제로 수행한다.
 
-현재 DB의 `tasks`는 이 목표 WorkItem/Plan 모델에 비해 얇으며 1차 완성에서 재검토한다.
+- pipeline 실행
+- worker/tool/executor 선택과 사용
+- artifact 생산
+- 질문/대기/재시도
+- 결과와 사건 기록
 
-### 2.3 Planner / Replanner
+실행 방법을 바꾸기 위해 세상의 문제 종류를 Pipeline에 미리 나열하지 않는다.
 
-Planner는 Goal과 현재 Work/context/policy/resource 상태를 보고 **무슨 Work가 필요한지** 정한다. Pipeline이 이 책임을 대신하지 않는다.
+### 2.4 Metacognition Layer
 
-환경 변화가 Plan의 범위·품질·시간·작업 구조·사용자 action을 바꿔야 할 정도라면 Plan을 새 version으로 만든다. 같은 capability와 policy를 만족하는 동등 resource로의 단순 failover는 Execution Resolution이 처리한다.
+Metacognition layer는 work layer와 **병렬로** 중앙 상태를 관찰한다.
 
-Planner는 rule-based, LLM, hybrid 중 무엇이든 가능하며 특정 모델 prompt나 provider 이름을 architecture contract로 만들지 않는다.
+역할은 "정해진 문제를 분류해 정해진 대응을 고르는 것"이 아니라:
 
-Planner output은 바로 실행하지 않는다. permission, hard budget, dependency, acceptance criteria 같은 기존 guard를 통과한 뒤 Work로 materialize한다.
+- Goal과 실제 진행의 차이를 발견
+- 반복 실패, 정체, 낭비, 모순, 새 가능성을 문제로 인식
+- 필요하면 원인을 더 조사
+- 외부 자료나 시스템 자체의 기록을 비교
+- 기존 Work를 바꾸거나 새 Work/조사/개선 proposal을 생성
 
-### 2.4 Execution Resolution
+여러 observer/agent가 동시에 존재할 수 있으며 하나의 global serial planner를 통과할 필요가 없다.
 
-Execution Resolution은 Work가 요구하는 capability/constraints를 현재 registry/resource state의 concrete pipeline/worker/tool/executor/provider resource에 늦게 매핑한다.
-
-Capability는 닫힌 provider enum이 아니라 확장 가능한 의미다. 최소한 description, 필요한 permission/side-effect 성격, input/output 의미 정도를 metadata로 설명할 수 있으면 된다.
-
-가능하면 Plan은 provider 이름보다 capability, quality, privacy, budget, deadline 같은 constraint를 표현한다.
-
-Registry는 후보와 state를 제공한다. selection/ranking은 replaceable policy여야 하며 현재 코드의 quality/cost/latency 고정 sort는 초기 구현일 뿐이다.
-
-Transparent failover는 retry-safe한 경우에만 허용한다. mutation side effect가 불명확하면 다른 resource로 즉시 재실행하지 않고 idempotency/read-back/reconcile을 먼저 사용한다.
+메타인지가 만든 변경도 permission, budget, provenance, evaluation 같은 기존 guard를 우회하지 않는다.
 
 ### 2.5 Project Context Assembly
 
@@ -151,11 +130,11 @@ Pipeline은 **하나의 WorkItem을 실행하는 versioned recipe**다.
 - cancellation
 - event emission
 
-Pipeline 자체가 Goal manager, planner/replanner, scheduler, resource pool, long-term memory, self-improvement controller를 모두 먹지 않는다.
+Pipeline 자체가 Goal manager, scheduler, long-term memory, metacognition controller를 모두 먹지 않는다.
 
-Pipeline YAML은 provider/project/failure 이름별 의사결정 표가 아니다. 특정 capability의 실행 recipe가 정말 달라질 때만 별도 pipeline을 만들고, quota/resource/user-input 같은 cross-cutting 판단은 Planner/Policy/Observation 계층에서 처리한다.
+Pipeline YAML은 provider/project/problem별 대응표가 아니다. Pipeline은 Work를 수행하고 결과를 남긴다. 그 결과가 더 큰 문제인지, 무엇을 바꿔야 하는지는 작업 밖의 중앙 흐름이 판단할 수 있다.
 
-현재 `capability.select` node와 `allow_policy_relaxation`, `require_user_selection` 같은 pipeline-local selection flag는 초기 slice다. 최종 구조에서는 node가 generic Execution Resolution service를 호출할 수는 있지만 selection/degradation/user-interruption policy 자체를 pipeline config가 소유하지 않는다.
+현재 `capability.select`의 구체 선택 정책은 초기 slice이며 최종 architecture invariant가 아니다.
 
 ### 2.7 Execution
 
@@ -174,9 +153,9 @@ Project source identity와 executor-local workspace path도 분리한다. `repo:
 ### 2.8 State, Events, Artifacts
 
 - canonical projection과 append-only event를 분리한다.
-- quota/rate-limit/auth/capacity 같은 환경 변화는 provider raw error가 아니라 generic 의미를 가진 Event/metadata로 위쪽에 전달한다.
-- `NodeStatus`/`WorkerStatus`는 execution lifecycle의 작은 primitive로 유지하고 provider별 상태를 계속 추가하지 않는다.
-- resource state는 registry metadata로 시작할 수 있으며 정확한 quota가 없으면 unknown/estimated + freshness 정도면 충분하다.
+- Work가 성공·실패·대기하거나 외부 상태가 달라지면 그 사실과 provenance를 중앙에 남긴다.
+- Event는 메타인지 계층이 시스템 전체를 관찰하는 주요 입력 중 하나다.
+- provider/tool 고유 detail은 adapter가 보존할 수 있지만 중앙 판단이 특정 raw error 문자열에 종속되지 않게 한다.
 - Artifact는 중앙에서 추적할 metadata identity를 가지며 bytes는 외부 storage owner에 둘 수 있다.
 
 ### 2.9 Knowledge and Improvement
@@ -231,17 +210,17 @@ promotion or rejection
 ## 4. Core Invariants
 
 1. Original Vision이 파생 설계보다 우선한다.
-2. Control Plane은 목적이 아니라 수단이다.
-3. provider/tool/project/failure 이름별 branch보다 generic capability + metadata + adapter + policy를 우선한다.
-4. Planner는 planning/replanning을, Pipeline은 bounded execution recipe를 소유한다.
-5. Goal은 비교적 안정적이고 Plan은 환경에 따라 revision될 수 있다.
-6. provider-specific protocol/auth/error 해석은 adapter 경계에 가둔다.
-7. clients/models/planners/workers/executors/providers/pipelines는 교체 가능해야 하며 Goal/Work/history/provenance/user control은 살아남아야 한다.
+2. Control Plane은 목적이 아니라 shared authority/state다.
+3. Work layer와 Metacognition layer는 직렬 단계가 아니라 병렬 계층이다.
+4. Pipeline은 bounded execution recipe이며 문제→대응 지식베이스가 아니다.
+5. 시스템은 문제 종류와 해결책을 사전에 전부 열거하지 않는다.
+6. provider/tool/project 고유 특수성은 가능한 한 adapter와 metadata 경계에 가둔다.
+7. clients/models/workers/executors/providers/pipelines는 교체 가능하며 Goal/Work/history/provenance/user control은 살아남아야 한다.
 8. central authority는 모든 domain fact나 실행 위치를 중앙이 소유한다는 뜻이 아니다.
-9. 필수 정보가 없으면 추정하지 않고 NEED_USER를 사용하며 background work는 user-interactive work에 양보한다.
-10. self-improvement는 provenance, evaluation, rollback 없이 production을 수정하지 않는다.
+9. 필수 정보가 없으면 NEED_USER를 사용하며 background work는 user-interactive work에 양보한다.
+10. metacognition/self-improvement도 permission, provenance, evaluation, rollback 경계를 우회하지 않는다.
 
-Architecture의 명사는 곧바로 새 class/table/service를 뜻하지 않는다. Event, registry metadata, versioned config 같은 기존 primitive로 충분하면 먼저 재사용한다.
+Architecture의 명사는 곧바로 새 class/table/service를 뜻하지 않는다. 기존 Event, registry metadata, Work, config로 충분하면 먼저 재사용한다.
 
 ## 5. Current Contracts
 
