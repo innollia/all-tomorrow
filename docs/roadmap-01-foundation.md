@@ -7,7 +7,9 @@
 
 1차 완성은 "pipeline 몇 개가 실행된다"가 아니다.
 
-사용자가 어느 기기에서든 중앙에 들어와 요청을 보내면, 그 요청이 적절한 Goal과 durable Work에 연결되고, **generic planner가 현재 context·policy·resource state를 보고 Plan/Work를 구성**하며, 필요한 pipeline/worker/tool로 실행되어야 한다. 실행 중 조건이 바뀌면 Goal을 잃지 않고 Plan을 revision할 수 있고, 사용자 정보가 필요하면 즉시 멈추고 질문하며, 서버 재시작 뒤에도 같은 work/run을 재개하고 결과·산출물·provenance를 다시 확인할 수 있어야 한다.
+사용자가 어느 기기에서든 중앙에 들어와 요청을 보내면, 그 요청이 적절한 Goal과 durable Work에 연결되고, Planner / Execution Resolution / Pipeline의 책임이 분리된 채 실행되어야 한다. 사용자 정보가 필요하면 즉시 멈추고 질문하며, 서버 재시작 뒤에도 같은 Work/Run을 재개하고 결과·산출물·provenance를 다시 확인할 수 있어야 한다.
+
+1차에서는 **resource 변화 → generic state/event → safe failover 또는 Plan revision** 경계를 fixture 수준에서 검증하면 충분하다. 실제 provider quota를 지속 추적하고 background에서 작업 규모를 자동 조절하거나 새 무료 API를 발견·획득하는 운영은 2차 범위다.
 
 1차가 끝나면 시스템은 아직 자율 연구원이나 자기개선 시스템은 아니지만, 이후 2차·3차 기능이 core 재작성 없이 올라갈 수 있는 중앙 기반이어야 한다.
 
