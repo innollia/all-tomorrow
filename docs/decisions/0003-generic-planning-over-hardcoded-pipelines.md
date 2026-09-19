@@ -93,14 +93,20 @@ Planner가 provider raw error string이나 서비스 이름으로 직접 분기�
 ```text
 descriptor / metadata
 + capability
-+ adapter
++ adapter or adapter profile
 + ResourceState
 + policy/evaluation data
 → generic registry
 → Planner candidate set
 ```
 
-새 종류 하나를 지원할 때마다 orchestration core와 기존 pipeline을 수정해야 한다면 abstraction failure signal로 본다.
+integration mode:
+
+1. 기존 protocol/profile로 연결 가능 → metadata/config만 추가
+2. generic schema-driven adapter로 연결 가능 → schema/config 추가
+3. custom protocol 필요 → provider-specific adapter artifact를 별도 Work/Proposal로 구현·검증
+
+세 번째 경우의 provider-specific 코드는 허용되지만 adapter 경계에만 둔다. 새 종류 하나를 지원할 때마다 orchestration core와 기존 pipeline을 수정해야 한다면 abstraction failure signal로 본다.
 
 ### 5. Provider-specific logic는 adapter 경계에 가둔다
 
