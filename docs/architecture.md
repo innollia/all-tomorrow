@@ -17,31 +17,42 @@ Discord / Web / CLI / ChatGPT / schedules / watchers / external events
                               │
                               ▼
                     All Tomorrow Authority
-        ┌──────────────────────────────────────────┐
-        │ project / goal / work / trigger          │
-        │ permission / budget / orchestration      │
-        │ pipeline version / run / question        │
-        │ project context projection / provenance │
-        │ event / artifact metadata                │
-        │ lesson / evaluation / proposal metadata  │
-        └──────────────────────────────────────────┘
+        ┌────────────────────────────────────────────┐
+        │ project / Goal / Plan / Work / Trigger     │
+        │ policy / budget / permission               │
+        │ resource state / observations              │
+        │ pipeline version / Run / Question          │
+        │ project coordination state / provenance    │
+        │ event / artifact / lesson / proposal meta  │
+        └────────────────────────────────────────────┘
+                              │
+                              ▼
+                      Planner / Replanner
+         Goal + current state + policy + observations
+                              │
+                     Plan / Work revision
                               │
                               ▼
                      Execution Resolution
-            capability → worker/agent → executor/host
+             capability → worker/agent → executor/host
                          → provider resource
+                              │
+                              ▼
+                   Versioned Pipeline Recipe
                               │
              ┌────────────────┼────────────────┐
              ▼                ▼                ▼
           workers            tools          adapters
       coding/analysis     MCP/native       Eve/Manager/
-                                           Discord/etc.
+                                           providers/etc.
              │                │                │
              └────────────────┼────────────────┘
                               ▼
-                    source-owned systems
-              Git / Notion / Discord / DB /
-                object storage / providers
+              results / artifacts / observations
+                              │
+                     ┌────────┴────────┐
+                     ▼                 ▼
+               state/events       Replanner input
 ```
 
 중앙집권의 의미는 **하나의 authority에서 목표·작업·라우팅·추적·질문·결과를 조정할 수 있다**는 뜻이다. 모든 데이터를 한 DB로 옮긴다는 뜻이 아니다.
@@ -62,21 +73,55 @@ Discord / Web / CLI / ChatGPT / schedules / watchers / external events
 
 현재 Discord edge policy와 Web API는 이 층의 초기 구현이다.
 
-### 2.2 Goal and Work
+### 2.2 Goal, Plan and Work
 
 장기 목적과 durable work는 pipeline보다 위에 둔다.
 
-- Goal: 여러 work와 여러 run에 걸쳐 살아남는 목적
-- WorkItem: 실제 수행·추적·대기·재시도되는 durable 작업
-- Run: WorkItem을 특정 pipeline version으로 실행한 한 시도
+- **Goal**: 여러 plan, work, run에 걸쳐 살아남는 목적과 acceptance criteria
+- **Plan**: 현재 state/policy/resource 조건에서 Goal을 달성하기 위한 versioned work graph
+- **PlanRevision**: observation 때문에 기존 Plan을 유지·변경·축소·연기한 새 version과 rationale
+- **WorkItem**: 실제 수행·추적·대기·재시도되는 durable 작업
+- **Run**: WorkItem을 특정 pipeline version으로 실행한 한 시도
+
+Goal과 Plan을 분리한다. resource 하나가 막혔다고 Goal을 폐기하거나 처음부터 다시 만들지 않는다. 완료된 Work/Artifact를 보존하면서 남은 work만 재계산할 수 있어야 한다.
 
 하나의 WorkItem이 worker 교체, 재시도, NEED_USER, 여러 날의 대기를 거쳐도 Work identity를 잃지 않아야 한다.
 
-현재 DB의 `tasks`는 이 목표 WorkItem 모델에 비해 얇으며 1차 완성에서 재검토한다.
+현재 DB의 `tasks`는 이 목표 WorkItem/Plan 모델에 비해 얇으며 1차 완성에서 재검토한다.
 
-### 2.3 Orchestration
+### 2.3 Planner / Replanner
 
-오케스트레이션은 다음을 분리해 판단할 수 있어야 한다.
+Planner가 장기적인 "어떻게 할 것인가"를 소유한다. Pipeline이 이 책임을 대신하지 않는다.
+
+입력:
+
+- Goal / acceptance criteria
+- current Plan and Work state
+- project coordination context
+- capability/resource snapshot
+- budget / permission / policy
+- recent observations
+- reusable artifact/lesson refs
+
+출력:
+
+- Plan or PlanRevision
+- create/keep/cancel/defer WorkItem decisions
+- capability/resource constraints
+- user input requirement
+- rationale/provenance
+
+Planner 구현은 rule-based, LLM, hybrid 등으로 교체 가능해야 한다. 특정 모델 prompt나 특정 provider 이름이 architecture contract가 아니다.
+
+Replanner는 quota, rate limit, resource health, cost, quality, deadline, user input 같은 현실 변화가 들어왔을 때 Goal을 기준으로 남은 Plan을 다시 계산한다. policy에 따라 fallback, scope/quality degradation, concurrency reduction, defer, split, wait, NEED_USER 등을 선택할 수 있다.
+
+Goal/acceptance criteria를 조용히 낮추는 것은 replanning이 아니다. 사용자 의도를 바꿀 정도의 축소는 명시된 policy가 없으면 NEED_USER로 간다.
+
+### 2.4 Execution Resolution
+
+Execution Resolution은 Planner가 요구한 capability와 constraints를 현재 registry/resource state에 매핑한다.
+
+분리해서 다룬다.
 
 - project
 - capability
@@ -86,11 +131,13 @@ Discord / Web / CLI / ChatGPT / schedules / watchers / external events
 - provider resource/account reference
 - budget
 - permission/risk
-- pipeline
+- pipeline recipe
 
 초기 구현은 capability → CLI worker 선택만 수행한다. 이를 최종 형태로 오인하지 않는다.
 
-### 2.4 Project Context Assembly
+Registry는 후보와 state를 제공하고, 장기 Plan 결정 자체를 소유하지 않는다.
+
+### 2.5 Project Context Assembly
 
 중앙집권의 핵심 문제는 모든 채팅 로그를 한곳에 복제하는 것이 아니라, 새 client/worker가 프로젝트의 현재 상태를 다시 잃지 않게 하는 것이다.
 
@@ -112,7 +159,7 @@ Worker 실행 입력은 raw RequestEnvelope 자체가 아니라 WorkItem의 task
 
 context pack 자체는 근거 없는 새 정본이 아니며 provenance/source refs를 보존한다. size/cost budget을 적용하고 raw chat history를 거대한 handover 파일 하나로 대체하는 구조를 만들지 않는다.
 
-### 2.5 Pipeline
+### 2.6 Pipeline
 
 Pipeline은 **하나의 WorkItem을 실행하는 versioned recipe**다.
 
@@ -128,9 +175,11 @@ Pipeline은 **하나의 WorkItem을 실행하는 versioned recipe**다.
 - cancellation
 - event emission
 
-Pipeline 자체가 Goal manager, scheduler, resource pool, long-term memory, self-improvement controller를 모두 먹지 않는다.
+Pipeline 자체가 Goal manager, planner/replanner, scheduler, resource pool, long-term memory, self-improvement controller를 모두 먹지 않는다.
 
-### 2.6 Execution
+Pipeline YAML은 provider/project/failure 이름별 의사결정 표가 아니다. 특정 capability의 실행 recipe가 정말 달라질 때만 별도 pipeline을 만들고, quota/resource/user-input 같은 cross-cutting 판단은 Planner/Policy/Observation 계층에서 처리한다.
+
+### 2.7 Execution
 
 실행 capability와 실행 위치/자원을 분리한다.
 
@@ -140,16 +189,22 @@ Pipeline 자체가 Goal manager, scheduler, resource pool, long-term memory, sel
 
 현재 AntigravityWorker/OpenCodeWorker는 로컬 CLI worker+executor가 한 adapter 안에 붙어 있는 초기 구현으로 본다. 1차 완성에서 미래 분리를 막지 않는 contract seam을 만든다.
 
+Provider-specific protocol, SDK, authentication, raw error parsing은 adapter/resource boundary에 가둔다. 예를 들어 서로 다른 provider의 quota error 문구는 adapter가 generic `capacity_exhausted` 계열 observation으로 정규화하고 원문 detail/ref를 함께 남길 수 있어야 한다. Planner가 provider raw error string을 직접 분기하지 않는다.
+
 Project source identity와 executor-local workspace path도 분리한다. `repo:C:/projects/...` 같은 경로는 특정 host의 checkout 위치일 뿐 cross-system project identity가 아니다. logical repository/source ref를 executor가 자신의 workspace mapping으로 실제 cwd에 해석한다.
 
-### 2.7 State, Events, Artifacts
+### 2.8 State, Observations, Events, Artifacts
 
 - canonical projection과 append-only event를 분리한다.
+- **Observation**은 Planner/Replanner가 현재 세계 상태 변화를 해석하기 위한 입력이다.
+- Observation은 provider-specific detail을 보존하되 generic semantic category와 resource/work refs를 가져야 한다.
+- ResourceState는 availability, capacity/quota, rate-limit, health, cost/quality class, reset/expiry 같은 현재 상태를 표현할 수 있다.
+- Policy는 허용된 degradation/fallback/budget/approval boundary를 표현한다.
 - event는 수정 이력이 아니라 provenance/history다.
 - Artifact는 bytes 자체가 아니라 중앙에서 추적할 metadata identity를 가진다.
 - 대용량 bytes는 source/object storage owner에 둘 수 있다.
 
-### 2.8 Knowledge and Improvement
+### 2.9 Knowledge and Improvement
 
 Lesson/Evaluation/Proposal은 중앙 orchestration 지식의 lifecycle이다.
 
@@ -202,14 +257,19 @@ promotion or rejection
 
 1. Original Vision이 파생 설계보다 우선한다.
 2. Control Plane은 최종 목적을 위한 수단이다.
-3. Clients, models, workers, executors, tools, providers, pipelines는 교체 가능하다.
-4. Goal/Work history, accumulated knowledge, provenance, user control은 교체에서 살아남는다.
-5. Central authority does not imply central execution or central ownership of domain facts.
-6. No new knowledge island.
-7. Ask rather than hallucinate ownership, target, permission or required input.
-8. Preserve provenance.
-9. Background work yields to interactive user work at safe boundaries.
-10. Evaluation precedes production self-improvement promotion.
+3. **Generality over case-by-case hardcoding** — 새 provider/tool/project/failure를 지원할 때 generic core/pipeline의 이름별 branch 추가를 기본 해법으로 삼지 않는다.
+4. **Planner owns planning/replanning; Pipeline owns bounded execution recipe.**
+5. **Goal is stable, Plan is revisable.** resource/state 변화는 Goal 폐기보다 PlanRevision의 입력이 된다.
+6. Clients, models, planners, workers, executors, tools, providers, pipelines는 교체 가능하다.
+7. 새 종류는 가능한 한 capability + metadata + adapter + resource state + policy로 시스템에 참여한다.
+8. provider-specific protocol/error/auth 특수성은 adapter 경계에 가둔다.
+9. Goal/Plan/Work history, accumulated knowledge, provenance, user control은 교체에서 살아남는다.
+10. Central authority does not imply central execution or central ownership of domain facts.
+11. No new knowledge island.
+12. Ask rather than hallucinate ownership, target, permission or required input.
+13. Preserve provenance.
+14. Background work yields to interactive user work at safe boundaries.
+15. Evaluation precedes production self-improvement promotion.
 
 ## 5. Current Contracts
 
@@ -297,6 +357,72 @@ metadata
 
 Event는 append-only다.
 
+### Target Planning Contracts — 1차에서 추가할 경계
+
+아래는 아직 현재 구현 contract로 간주하지 않는다. 1차 Gate A의 목표 계약이다.
+
+#### Plan / PlanRevision
+
+```text
+plan_id
+version
+goal_id
+status
+work_refs / dependency refs
+assumption refs
+policy_ref
+resource_snapshot_ref
+rationale
+created_from_observation_refs
+supersedes_version
+created_at
+```
+
+#### Observation
+
+```text
+observation_id
+type / semantic category
+occurred_at
+source_ref
+project_id / goal_id / work_id / run_id
+resource_ref
+severity
+details_ref / metadata
+```
+
+#### ResourceState
+
+```text
+resource_id
+capabilities
+availability
+capacity/quota state
+rate-limit state
+health
+cost class
+quality/evaluation refs
+credential_ref
+updated_at / freshness
+```
+
+#### PolicyRef
+
+Policy 내용은 versioned data로 관리할 수 있으며 Plan과 Work가 어떤 정책 하에서 만들어졌는지 참조 가능해야 한다.
+
+예:
+
+```text
+budget / free-only constraint
+quality floor
+deadline / priority
+privacy / risk
+fallback/degradation permission
+user approval requirements
+```
+
+이 계약의 목적은 세상의 모든 provider 필드를 사전에 하나의 거대한 schema로 통일하는 것이 아니다. Planner가 공통 의미를 읽을 수 있는 최소 semantic layer와 provider-specific detail ref를 분리하는 것이다.
+
 ## 6. Edge Escalation
 
 Edge는 local 처리와 중앙 escalation을 구분한다.
@@ -328,8 +454,12 @@ needs_canonical_mutation
 
 ```text
 goals
+plans / plan_revisions
 work_items or expanded tasks
 work_dependencies
+observations
+policy versions / refs
+resource state snapshots
 triggers
 artifacts
 executors
@@ -399,7 +529,9 @@ Redis는 요구가 증명되기 전 필수가 아니다.
 
 아직 목표 구조로 간주하지 않는 것:
 
-- Goal/Work graph
+- Goal/Plan/Work graph
+- Planner/Replanner contract와 durable PlanRevision
+- normalized Observation/ResourceState/Policy lifecycle
 - durable trigger engine
 - production scheduler leases
 - executor/provider resource pool
