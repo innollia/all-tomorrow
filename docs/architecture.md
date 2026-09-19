@@ -591,6 +591,7 @@ Redis는 요구가 증명되기 전 필수가 아니다.
 ## 9. Security and Mutation
 
 - credential 값은 contract/event/log/artifact metadata에 기록하지 않는다.
+- credential이 필요한 NEED_USER는 raw secret paste를 요구하지 않고 external secret-registration action + opaque credential_ref/confirmation을 요구한다.
 - adapter/executor는 opaque credential/resource reference만 받는다.
 - Planner가 만든 Plan/PlanRevision candidate는 schema/policy/permission/budget validation 없이 실행하지 않는다.
 - canonical write와 high-risk tool은 중앙 policy 확인이 필요하다.
