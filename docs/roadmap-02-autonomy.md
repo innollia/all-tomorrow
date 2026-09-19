@@ -109,6 +109,7 @@ pgvector/RAG는 실제 recall 문제가 확인될 때 추가한다.
 
 - AI tool/service 변화
 - game development 자료
+- 접근 가능한 장문 문서·도서·reference material
 - engine/plugin/library 변화
 - asset sources
 - community practices
@@ -138,7 +139,8 @@ discovered
 → bounded experiment
 → captured artifacts/metrics
 → evaluated
-→ available / rejected / watch
+→ candidate_available / rejected / watch
+→ promotion policy가 허용하면 실제 router/registry binding
 ```
 
 필수:
@@ -212,6 +214,14 @@ credential secret 값은 외부 secret owner에 두고 중앙은 opaque ref와 u
 ### F. Cross-project reuse
 
 새 프로젝트 시작 → 과거 accepted lesson 후보 자동 선택 → 적용 → 결과가 reuse evidence로 다시 기록.
+
+### G. Image-service router flow
+
+새 이미지 AI 서비스 발견 → background bounded test 여러 건 → 결과/비용/제약 artifact와 metric 기록 → usable candidate 판정 → 명시된 promotion policy를 통과하면 이미지 생성 router/registry에서 선택 가능한 provider로 추가. 이 연결을 위해 core 코드를 서비스별로 다시 뜯지 않음.
+
+### H. Free asset collection
+
+game-development watcher가 재사용 가능한 무료 asset 후보 발견 → source/license/provenance와 함께 artifact catalog에 등록 → 프로젝트 요구와 맞을 때 검색 가능. 출처·사용 조건을 모르는 파일을 "무료"로 단정해 축적하지 않음.
 
 ## 10. Explicitly Not Required for 2차
 
