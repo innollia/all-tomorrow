@@ -250,6 +250,9 @@ Discord가 첫 edge일 뿐, 계약은 Web/CLI/ChatGPT에도 재사용 가능해�
 - 현재 사용 가능한 AWS 자원을 우선 조사하되 특정 provider에 contract를 고정하지 않는다.
 - HTTPS/TLS
 - authenticated Web access
+- 현재 `web.py`의 단순 SHA-256 password digest를 원격 노출 전 production-appropriate password KDF 또는 외부 auth로 교체
+- login brute-force/rate-limit 또는 동등한 방어
+- session expiry/secret rotation과 secure cookie 검증
 - internal edge authentication
 - persistent PostgreSQL
 - process/service restart policy
@@ -301,7 +304,7 @@ Discord가 첫 edge일 뿐, 계약은 Web/CLI/ChatGPT에도 재사용 가능해�
 1차 항목을 동시에 벌리지 않는다.
 
 1. **Gate A — contracts and schema correction**  
-   Goal/Work/Trigger/Artifact identity, Work/Run/Trace correlation, project coordination context, source ownership, Worker/Executor/Resource seam을 확정하고 migration 계획을 만든다.
+   Goal/Work/Trigger/Artifact identity, Work/Run/Trace correlation, project coordination context, registry owner와 canonical/source owner 구분, Worker/Executor/Resource seam을 확정하고 migration 계획을 만든다.
 
 2. **Gate B — durable execution**  
    live PostgreSQL, transactional event/run state, durable scheduling, crash recovery, NEED_USER restart-resume를 통과한다.
