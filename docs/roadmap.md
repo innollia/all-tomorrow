@@ -137,6 +137,14 @@
 - in-memory WorkQueue를 최종 scheduler로 간주하지 않는다.
 - Deferred라는 이유로 autonomy/self-improvement의 **아키텍처 요구사항**까지 미루지 않는다.
 
+## Roadmap Maintenance
+
+- README의 Original Vision 원문은 요약문으로 대체하지 않는다.
+- Derived Final Goals를 추가·병합·삭제하면 Original Vision Coverage 표와 completion-stage acceptance를 같은 변경에서 함께 갱신한다.
+- stage 이동은 "나중에 하자"라는 이유만으로 원문 요구를 삭제하는 행위가 아니다. 어느 stage에서 닫히는지 포인터가 남아야 한다.
+- 새 기능 제안이 최종 목적과 직접 연결되지 않으면 기본적으로 backlog 후보이며 core architecture에 즉시 넣지 않는다.
+- 실제 구현이 문서와 달라졌으면 완료했다고 쓰기 전에 Current Position/Architecture/해당 stage 문서를 갱신한다.
+
 ## Architecture Decisions
 
 - [ADR 0001 — Separate Control Plane Repository](decisions/0001-control-plane-boundary.md)
