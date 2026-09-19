@@ -88,6 +88,8 @@ Planner가 provider raw error string이나 서비스 이름으로 직접 분기�
 
 ### 4. 새로운 종류는 data + adapter + capability + policy로 참여한다
 
+Capability 자체도 닫힌 enum으로 두지 않는다. capability id에는 description과 최소 input/output/side-effect/permission metadata를 연결할 수 있어야 하며 Worker/Tool/Pipeline/Resource는 그 descriptor를 참조한다.
+
 새 provider/tool/executor/model을 지원하기 위한 기본 extension path:
 
 ```text
