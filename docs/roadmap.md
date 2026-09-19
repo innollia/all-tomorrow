@@ -16,6 +16,10 @@
 
 ## Completion Model
 
+1차/2차/3차는 날짜나 단순 버전 번호가 아니라 **capability milestone**이다. 파일이 생겼거나 mock test가 통과했다는 이유만으로 다음 단계 완료로 올리지 않고, 각 문서의 end-to-end acceptance scenario가 실제 운영 조건에서 통과해야 한다.
+
+후속 단계의 schema/interface prototype은 앞 단계에서 만들 수 있지만, 앞 단계의 durability/ownership invariant를 건너뛰고 production 기능부터 활성화하지 않는다.
+
 ### 1차 완성 — Durable Central Core
 
 문서: [roadmap-01-foundation.md](roadmap-01-foundation.md)
