@@ -64,7 +64,7 @@
 | 스케줄/요청 없이 background work 지속 | 2차 | durable trigger + background scheduler |
 | 커뮤니티·도서·자료를 조사해 지식 축적 | 2차 | research watcher + evidence/artifact + lesson candidate |
 | 지금 안 쓰는 유용한 정보를 aside로 분류 | 2차 | research classification / backlog knowledge |
-| 새 이미지 AI를 몰래 몇 번 시험하고 usable 후보로 만들기 | 2차 | bounded service experiment + artifacts/metrics + router candidate |
+| 새 이미지 AI를 background에서 몇 번 시험하고 router에 편입 | 2차→3차 | 2차 bounded experiment + promotion policy로 router binding, 3차 measured self-improvement와 자동 최적화 |
 | 무료 게임 asset 수집 | 2차 | watcher → artifact catalog with source/provenance |
 | 학교 프린트 스캔·저장·실행항목 생성 | 2차 | school material end-to-end artifact/extraction/owner/work flow |
 | 하교시간에 오늘 report와 할 일 선제 전달 | 2차 | scheduled owner-aware daily brief |
