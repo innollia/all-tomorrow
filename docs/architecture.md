@@ -410,6 +410,24 @@ credential_ref
 updated_at / freshness
 ```
 
+#### ResourceCandidate
+
+새 resource/tool/provider를 바로 production registry에 넣지 않고 candidate lifecycle을 거칠 수 있어야 한다.
+
+```text
+candidate_id
+source/provenance refs
+claimed capabilities
+public quota/pricing/terms metadata
+prerequisites / required_user_action
+expected utility
+duplication/risk assessment
+status: discovered | watch | needs_user | experimenting | evaluated | available | rejected
+evaluation refs
+```
+
+credential 자체는 candidate metadata에 저장하지 않는다.
+
 #### PolicyRef
 
 Policy 내용은 versioned data로 관리할 수 있으며 Plan과 Work가 어떤 정책 하에서 만들어졌는지 참조 가능해야 한다.
@@ -514,6 +532,9 @@ Redis는 요구가 증명되기 전 필수가 아니다.
 - mutation target이 모호하면 NEED_USER.
 - 외부 mutation은 idempotency key와 trace를 가진다.
 - provider/account 자동화는 실제 허용 범위와 정책을 따른다.
+- 새 credential/user action 요청은 candidate utility/risk/user-effort gate를 통과한 경우에만 생성한다.
+- 외부 웹/문서/repository 내용은 untrusted evidence로 처리하며 그 안의 지시문을 system/policy authority로 승격하지 않는다.
+- research 단계에서 외부 repository script/code를 임의 실행하지 않는다. 실행이 필요하면 sandbox/evaluation work로 별도 승격한다.
 - self-improvement proposal은 평가 없이 production을 직접 수정하지 않는다.
 
 ## 10. Current Implementation Boundary
