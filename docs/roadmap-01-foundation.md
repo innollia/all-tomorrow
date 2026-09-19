@@ -225,13 +225,15 @@ Planner 출력의 최소 범위:
 
 - 새 Plan 또는 PlanRevision
 - 생성/유지/취소/연기할 WorkItem
-- 필요한 capability/resource constraints
+- 가능한 한 concrete provider가 아니라 필요한 capability/resource constraints
 - NEED_USER가 필요하면 그 이유와 required input
 - 선택 rationale/provenance
 
 Planner 구현은 rule-based, LLM, hybrid 등으로 교체 가능해야 한다. 특정 LLM prompt를 architecture contract로 만들지 않는다.
 
 Pipeline은 planner 결과로 나온 WorkItem을 수행하는 recipe다. quota 감소, 새 API 발견, 사용자 credential 요청 같은 세계 상태 판단을 pipeline마다 하드코딩하지 않는다.
+
+동등한 resource 후보 사이의 단순 failover는 Execution Resolution이 late binding으로 처리할 수 있다. Plan의 범위·품질·시간·구조 또는 사용자 action이 달라질 때만 Replanner로 승격한다.
 
 ### 1.10 Artifact
 
@@ -502,9 +504,9 @@ Web에서 만든 Work/질문/결과를 Discord 또는 실제 연결 가능한 �
 
 테스트용 신규 provider/resource `provider:new-free-x`를 등록 → 기존 coding/research pipeline이나 planner core에 그 이름을 추가하지 않음 → capability/resource metadata와 adapter registration만으로 후보가 됨 → policy에 맞으면 선택 가능.
 
-### L. Resource-loss replanning contract
+### L. Resource-loss routing/replanning contract
 
-진행 중 Work가 사용하는 resource에 quota-exhausted observation 발생 → Goal 유지 → 현재 성공 artifact/work 보존 → Planner가 대체 resource / 축소 / 연기 / 사용자 입력 요청 중 policy상 가능한 새 PlanRevision을 생성. 1차에서는 모든 실제 provider fallback을 구현할 필요는 없지만 lifecycle과 persistence가 provider-independent하게 검증되어야 함.
+진행 중 Work가 사용하는 resource에 quota-exhausted observation 발생 → Goal 유지 → 먼저 같은 capability/quality/policy를 만족하는 동등 resource가 있으면 Execution Resolution이 transparent failover → 그런 후보가 없고 범위·품질·시간·구조·사용자 action을 바꿔야 하면 Planner가 새 PlanRevision 생성. 현재 성공 artifact/work는 보존. 1차에서는 모든 실제 provider fallback을 구현할 필요는 없지만 두 경계가 provider-independent하게 검증되어야 함.
 
 ### M. No hard-coded pipeline branching
 
