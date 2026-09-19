@@ -162,7 +162,7 @@ discovered
 → registry/resource-pool candidate
 ```
 
-사용자에게 API key가 필요하다고 요청할 수 있지만, 발견된 모든 후보에 요청하지 않는다. 현재 capability shortage, 예상 utility, 중복, risk/terms, user effort를 먼저 평가하고 의미 있는 candidate만 NEED_USER로 승격한다. secret 값은 chat/event/lesson에 복사하지 않는다.
+사용자에게 API key가 필요하다고 요청할 수 있지만, 발견된 모든 후보에 요청하지 않는다. 현재 capability shortage, 예상 utility, 중복, risk/terms, user effort를 먼저 평가하고 의미 있는 candidate만 NEED_USER로 승격한다. NEED_USER는 raw key paste가 아니라 external secret owner에 등록하도록 안내하고 `credential_ref`/완료 확인만 받는다. secret 값은 chat/event/lesson에 복사하지 않는다.
 
 ### 8. 외부 지식에서 시스템 개선까지도 generic lifecycle을 사용한다
 
