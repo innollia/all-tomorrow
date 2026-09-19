@@ -2,7 +2,7 @@
 
 조사일: 2026-09-18
 
-> 이 문서는 당시 조사 결과의 historical inventory다. 여기의 `V1`/Phase 표현은 2026-09-18 초기 계획 용어이며, 현재 completion-stage 계획과 우선순위는 `docs/roadmap.md` 및 1차/2차/3차 문서를 따른다.
+> 이 문서는 당시 조사 결과의 historical inventory다. 본문에 남아 있던 과거 단계 용어는 현재 completion-stage 체계와 섞이지 않도록 정리했으며, 현재 계획과 우선순위는 `docs/roadmap.md` 및 1차/2차/3차 문서를 따른다.
 
 ## 조사 범위와 한계
 
