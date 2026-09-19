@@ -21,7 +21,8 @@ Discord / Web / CLI / ChatGPT / schedules / watchers / external events
         │ project / goal / work / trigger          │
         │ permission / budget / orchestration      │
         │ pipeline version / run / question        │
-        │ event / artifact metadata / provenance   │
+        │ project context projection / provenance │
+        │ event / artifact metadata                │
         │ lesson / evaluation / proposal metadata  │
         └──────────────────────────────────────────┘
                               │
@@ -89,7 +90,25 @@ Discord / Web / CLI / ChatGPT / schedules / watchers / external events
 
 초기 구현은 capability → CLI worker 선택만 수행한다. 이를 최종 형태로 오인하지 않는다.
 
-### 2.4 Pipeline
+### 2.4 Project Context Assembly
+
+중앙집권의 핵심 문제는 모든 채팅 로그를 한곳에 복제하는 것이 아니라, 새 client/worker가 프로젝트의 현재 상태를 다시 잃지 않게 하는 것이다.
+
+중앙은 cross-system coordination projection을 유지할 수 있다.
+
+예:
+
+- current objective
+- active constraints
+- decision/source refs
+- open Goal/Work
+- relevant outcome/artifact/lesson refs
+
+실행 전 context assembler는 이 projection과 source-owned adapter 조회를 결합해 bounded context pack을 만든다.
+
+context pack 자체는 근거 없는 새 정본이 아니며 provenance/source refs를 보존한다. raw chat history를 거대한 handover 파일 하나로 대체하는 구조를 만들지 않는다.
+
+### 2.5 Pipeline
 
 Pipeline은 **하나의 WorkItem을 실행하는 versioned recipe**다.
 
@@ -107,7 +126,7 @@ Pipeline은 **하나의 WorkItem을 실행하는 versioned recipe**다.
 
 Pipeline 자체가 Goal manager, scheduler, resource pool, long-term memory, self-improvement controller를 모두 먹지 않는다.
 
-### 2.5 Execution
+### 2.6 Execution
 
 실행 capability와 실행 위치/자원을 분리한다.
 
@@ -117,14 +136,14 @@ Pipeline 자체가 Goal manager, scheduler, resource pool, long-term memory, sel
 
 현재 AntigravityWorker/OpenCodeWorker는 로컬 CLI worker+executor가 한 adapter 안에 붙어 있는 초기 구현으로 본다. 1차 완성에서 미래 분리를 막지 않는 contract seam을 만든다.
 
-### 2.6 State, Events, Artifacts
+### 2.7 State, Events, Artifacts
 
 - canonical projection과 append-only event를 분리한다.
 - event는 수정 이력이 아니라 provenance/history다.
 - Artifact는 bytes 자체가 아니라 중앙에서 추적할 metadata identity를 가진다.
 - 대용량 bytes는 source/object storage owner에 둘 수 있다.
 
-### 2.7 Knowledge and Improvement
+### 2.8 Knowledge and Improvement
 
 Lesson/Evaluation/Proposal은 중앙 orchestration 지식의 lifecycle이다.
 
@@ -150,6 +169,7 @@ promotion or rejection
 
 - project registration identity와 중앙 source references
 - Goal/WorkItem/Run의 orchestration state
+- cross-system project coordination projection과 source/decision refs
 - versioned pipeline specifications/records
 - execution event와 trace linkage
 - pending user questions와 resume state
