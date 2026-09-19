@@ -36,7 +36,7 @@ ADR 0002는 Goal/Work를 Pipeline보다 위에 두었지만, "누가 Plan을 만
 
 - Goal은 비교적 안정적인 사용자 의도와 acceptance criteria다.
 - Plan은 현재 state/policy/resource 조건에서 Goal을 달성하기 위한 versioned work graph다.
-- PlanRevision은 observation 때문에 Plan을 변경한 새 version과 rationale다.
+- Plan revision은 observation 때문에 Plan의 새 version이 생기는 행위다. 별도 `PlanRevision` class/table은 요구하지 않는다.
 
 resource 하나가 사라졌다는 이유만으로 Goal을 폐기하지 않는다.
 
@@ -227,10 +227,12 @@ system observation / improvement question
 
 비용:
 
-- Goal과 Work 사이에 Plan/PlanRevision 모델이 추가된다.
-- resource state/observation normalization이 필요하다.
-- Planner/Policy의 결정 provenance와 테스트가 필요하다.
-- adapter가 provider-specific detail을 generic semantic state로 변환해야 한다.
+- Goal과 Work 사이에 versioned Plan 의미가 추가된다.
+- provider-specific 상태를 generic 의미로 정규화하는 seam이 필요하다.
+- Planner/Policy 결정의 provenance와 테스트가 필요하다.
+- 일부 provider는 별도 adapter 구현이 필요하다.
+
+이 결정은 Observation, ResourceState, Policy, ResourceCandidate 각각에 새 table/service를 만들라는 뜻이 아니다. 기존 Event/registry/config로 충분하면 그대로 재사용한다.
 
 ## Guardrails
 
