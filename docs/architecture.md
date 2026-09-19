@@ -93,77 +93,25 @@ Goal과 Plan을 분리한다. resource 하나가 막혔다고 Goal을 폐기하�
 
 ### 2.3 Planner / Replanner
 
-Planner가 장기적인 "어떻게 할 것인가"를 소유한다. Pipeline이 이 책임을 대신하지 않는다.
+Planner는 Goal과 현재 Work/context/policy/resource 상태를 보고 **무슨 Work가 필요한지** 정한다. Pipeline이 이 책임을 대신하지 않는다.
 
-입력:
+환경 변화가 Plan의 범위·품질·시간·작업 구조·사용자 action을 바꿔야 할 정도라면 Plan을 새 version으로 만든다. 같은 capability와 policy를 만족하는 동등 resource로의 단순 failover는 Execution Resolution이 처리한다.
 
-- Goal / acceptance criteria
-- current Plan and Work state
-- project coordination context
-- capability/resource snapshot
-- budget / permission / policy
-- recent observations
-- reusable artifact/lesson refs
+Planner는 rule-based, LLM, hybrid 중 무엇이든 가능하며 특정 모델 prompt나 provider 이름을 architecture contract로 만들지 않는다.
 
-출력:
-
-- Plan or PlanRevision candidate
-- create/keep/cancel/defer WorkItem decisions
-- capability/resource constraints
-- user input requirement
-- rationale/provenance
-
-Planner 출력은 곧바로 실행 권한이 아니다. durable Plan/Work로 materialize하기 전에 최소한 contract/schema, dependency consistency, referenced resource existence, permission/risk policy, hard budget, acceptance-criteria preservation, required user approval을 검증한다.
-
-Planner 구현은 rule-based, LLM, hybrid 등으로 교체 가능해야 한다. 특정 모델 prompt나 특정 provider 이름이 architecture contract가 아니다.
-
-Replanner는 quota, rate limit, resource health, cost, quality, deadline, user input 같은 현실 변화가 들어왔을 때 **계획 의미가 달라져야 하는 경우** Goal을 기준으로 남은 Plan을 다시 계산한다. policy에 따라 scope/quality degradation, concurrency reduction, defer, split, wait, NEED_USER 등을 선택할 수 있다.
-
-같은 capability, quality floor, permission, budget 조건을 만족하는 동등 resource로의 단순 failover는 PlanRevision 없이 Execution Resolution이 처리할 수 있다. 모든 transient failure를 Planner로 끌어올려 불필요한 plan churn을 만들지 않는다.
-
-Goal/acceptance criteria를 조용히 낮추는 것은 replanning이 아니다. 사용자 의도를 바꿀 정도의 축소는 명시된 policy가 없으면 NEED_USER로 간다.
+Planner output은 바로 실행하지 않는다. permission, hard budget, dependency, acceptance criteria 같은 기존 guard를 통과한 뒤 Work로 materialize한다.
 
 ### 2.4 Execution Resolution
 
-Execution Resolution은 Planner가 요구한 **capability와 constraints**를 현재 registry/resource state의 구체 pipeline/worker/tool/executor/provider resource에 늦게 매핑한다.
+Execution Resolution은 Work가 요구하는 capability/constraints를 현재 registry/resource state의 concrete pipeline/worker/tool/executor/provider resource에 늦게 매핑한다.
 
-Capability id는 provider/project 이름을 대신한 또 다른 하드코딩 enum이 아니다. extensible descriptor로 관리한다.
+Capability는 닫힌 provider enum이 아니라 확장 가능한 의미다. 최소한 description, 필요한 permission/side-effect 성격, input/output 의미 정도를 metadata로 설명할 수 있으면 된다.
 
-최소 descriptor 후보:
+가능하면 Plan은 provider 이름보다 capability, quality, privacy, budget, deadline 같은 constraint를 표현한다.
 
-- capability_id
-- human/model-readable description
-- input/output artifact or schema refs
-- side-effect class / retry safety
-- required permissions/risk
-- optional quality/evaluation dimensions
-- version/freshness where semantics can evolve
+Registry는 후보와 state를 제공한다. selection/ranking은 replaceable policy여야 하며 현재 코드의 quality/cost/latency 고정 sort는 초기 구현일 뿐이다.
 
-Worker/Tool/Resource/Pipeline은 capability id를 선언하고 Registry는 존재하지 않는 capability ref를 검증할 수 있어야 한다.
-
-가능하면 Plan은 특정 provider 이름보다 필요한 capability/quality/privacy/budget/deadline constraints를 표현한다. concrete resource pinning이 정말 필요한 경우에만 명시적 resource ref를 둔다.
-
-분리해서 다룬다.
-
-- project
-- capability
-- worker/agent
-- tool
-- executor/host
-- provider resource/account reference
-- budget
-- permission/risk
-- pipeline recipe
-
-Pipeline recipe도 특정 intent if/else로만 찾지 않고 metadata/descriptor를 통해 "어떤 capability/work kind를 수행하며 어떤 input/output/side-effect 특성이 있는가"를 표현할 수 있어야 한다. 현재 `PipelineSpec.trigger`는 초기 metadata seam이며, 장기 Trigger authority와 구분한다.
-
-초기 구현은 capability → CLI worker 선택만 수행한다. 이를 최종 형태로 오인하지 않는다.
-
-Registry는 후보와 state를 제공하고, 장기 Plan 결정 자체를 소유하지 않는다. Execution Resolution은 동등 후보 failover를 담당할 수 있지만 Goal의 범위·품질·시간 구조를 바꾸지 않는다.
-
-Transparent failover는 **retry safety**를 확인한 뒤에만 가능하다. read-only/idempotent 작업, 또는 side effect가 발생하기 전에 확실히 실패한 경우에는 다른 equivalent resource로 재시도할 수 있다. 외부 mutation이 실행되었는지 불명확하면 다른 worker/provider로 무조건 재실행하지 않고 idempotency ledger, external state read-back, reconcile work 또는 NEED_USER를 사용한다.
-
-Selection/ranking strategy는 replaceable policy로 분리 가능해야 한다. 현재 코드의 quality/cost/latency 고정 sort는 초기 구현이며 architecture invariant가 아니다.
+Transparent failover는 retry-safe한 경우에만 허용한다. mutation side effect가 불명확하면 다른 resource로 즉시 재실행하지 않고 idempotency/read-back/reconcile을 먼저 사용한다.
 
 ### 2.5 Project Context Assembly
 
@@ -223,17 +171,13 @@ Provider-specific protocol, SDK, authentication, raw error parsing은 adapter/re
 
 Project source identity와 executor-local workspace path도 분리한다. `repo:C:/projects/...` 같은 경로는 특정 host의 checkout 위치일 뿐 cross-system project identity가 아니다. logical repository/source ref를 executor가 자신의 workspace mapping으로 실제 cwd에 해석한다.
 
-### 2.8 State, Observations, Events, Artifacts
+### 2.8 State, Events, Artifacts
 
 - canonical projection과 append-only event를 분리한다.
-- **Observation**은 Planner/Replanner가 현재 세계 상태 변화를 해석하기 위한 입력이다.
-- Observation은 provider-specific detail을 보존하되 generic semantic category와 resource/work refs를 가져야 한다.
-- `NodeStatus`/`WorkerStatus`는 execution lifecycle의 안정적인 primitive로 유지한다. 새로운 provider/resource condition이 생길 때마다 status enum을 늘리지 않고, quota/rate-limit/auth/capacity 같은 환경 상태는 Observation/ResourceState로 표현한다.
-- ResourceState는 availability, capacity/quota, rate-limit, health, cost/quality class, reset/expiry 같은 현재 상태를 표현할 수 있다. 모든 provider가 정확한 quota telemetry를 제공한다고 가정하지 않고 known / unknown / estimated와 source, observed_at, freshness/confidence를 표현할 수 있어야 한다.
-- Policy는 허용된 degradation/fallback/budget/approval boundary를 표현한다.
-- event는 수정 이력이 아니라 provenance/history다.
-- Artifact는 bytes 자체가 아니라 중앙에서 추적할 metadata identity를 가진다.
-- 대용량 bytes는 source/object storage owner에 둘 수 있다.
+- quota/rate-limit/auth/capacity 같은 환경 변화는 provider raw error가 아니라 generic 의미를 가진 Event/metadata로 위쪽에 전달한다.
+- `NodeStatus`/`WorkerStatus`는 execution lifecycle의 작은 primitive로 유지하고 provider별 상태를 계속 추가하지 않는다.
+- resource state는 registry metadata로 시작할 수 있으며 정확한 quota가 없으면 unknown/estimated + freshness 정도면 충분하다.
+- Artifact는 중앙에서 추적할 metadata identity를 가지며 bytes는 외부 storage owner에 둘 수 있다.
 
 ### 2.9 Knowledge and Improvement
 
@@ -287,48 +231,17 @@ promotion or rejection
 ## 4. Core Invariants
 
 1. Original Vision이 파생 설계보다 우선한다.
-2. Control Plane은 최종 목적을 위한 수단이다.
-3. **Generality over case-by-case hardcoding** — 새 provider/tool/project/failure를 지원할 때 generic core/pipeline의 이름별 branch 추가를 기본 해법으로 삼지 않는다.
-4. **Planner owns planning/replanning; Pipeline owns bounded execution recipe.**
-5. **Goal is stable, Plan is revisable.** resource/state 변화는 Goal 폐기보다 PlanRevision의 입력이 된다.
-6. Clients, models, planners, workers, executors, tools, providers, pipelines는 교체 가능하다.
-7. 새 종류는 가능한 한 capability + metadata + adapter + resource state + policy로 시스템에 참여한다.
-8. provider-specific protocol/error/auth 특수성은 adapter 경계에 가둔다.
-9. Goal/Plan/Work history, accumulated knowledge, provenance, user control은 교체에서 살아남는다.
-10. Central authority does not imply central execution or central ownership of domain facts.
-11. No new knowledge island.
-12. Ask rather than hallucinate ownership, target, permission or required input.
-13. Preserve provenance.
-14. Background work yields to interactive user work at safe boundaries.
-15. Evaluation precedes production self-improvement promotion.
+2. Control Plane은 목적이 아니라 수단이다.
+3. provider/tool/project/failure 이름별 branch보다 generic capability + metadata + adapter + policy를 우선한다.
+4. Planner는 planning/replanning을, Pipeline은 bounded execution recipe를 소유한다.
+5. Goal은 비교적 안정적이고 Plan은 환경에 따라 revision될 수 있다.
+6. provider-specific protocol/auth/error 해석은 adapter 경계에 가둔다.
+7. clients/models/planners/workers/executors/providers/pipelines는 교체 가능해야 하며 Goal/Work/history/provenance/user control은 살아남아야 한다.
+8. central authority는 모든 domain fact나 실행 위치를 중앙이 소유한다는 뜻이 아니다.
+9. 필수 정보가 없으면 추정하지 않고 NEED_USER를 사용하며 background work는 user-interactive work에 양보한다.
+10. self-improvement는 provenance, evaluation, rollback 없이 production을 수정하지 않는다.
 
-### Hardcoding Boundary
-
-코드에 고정해도 되는 것과 환경/정책 데이터로 남겨야 하는 것을 구분한다.
-
-**Stable primitives / invariants — code contract 가능**
-
-- node/run status semantics: SUCCESS, FAILED, NEED_USER 등
-- provenance/trace requirement
-- permission and secret-handling boundary
-- adapter interface
-- Plan/Work/Event/Observation lifecycle invariants
-- transactional/idempotency rules
-
-**Changing domain decisions — generic core에 이름별 하드코딩 금지**
-
-- provider/model/account/project 이름
-- capability 목록을 닫힌 enum으로 고정하고 새 capability마다 core branch 추가
-- quota 숫자와 reset 정책
-- worker/resource ranking 우선순위
-- fallback/degradation 순서
-- research site/URL
-- "이 서비스면 이 pipeline" 같은 case table
-- 특정 provider raw error string
-
-범용성은 모든 것을 문자열 metadata로 바꾸는 것이 아니라 **변화 속도가 다른 책임을 올바른 층에 두는 것**이다.
-
-또한 architecture의 명사는 곧바로 class/table/service를 뜻하지 않는다. Observation은 Event metadata일 수 있고, ResourceState는 registry metadata일 수 있고, Policy는 versioned config일 수 있으며, Plan revision은 같은 Plan의 새 version일 수 있다. 별도 저장 구조는 실제 쿼리·동시성·수명주기 요구가 생길 때만 승격한다.
+Architecture의 명사는 곧바로 새 class/table/service를 뜻하지 않는다. Event, registry metadata, versioned config 같은 기존 primitive로 충분하면 먼저 재사용한다.
 
 ## 5. Current Contracts
 
@@ -415,35 +328,6 @@ metadata
 ```
 
 Event는 append-only다.
-
-### Target Planning Semantics — 1차에서 확보할 경계
-
-아래는 **semantic boundary**다. 각각을 별도 class/table로 만들라는 요구가 아니다.
-
-- Goal: durable intent / acceptance criteria
-- Plan: versioned Work 구성과 rationale
-- Observation: 외부 상태 변화의 generic 의미 + provenance
-- Resource state: 현재 availability/capacity/health/cost/quality의 최소 snapshot
-- Policy: budget, permission, quality floor, fallback/degradation/user-approval 규칙
-- Resource candidate: 새 resource가 production pool에 들어오기 전의 평가 상태
-
-초기 표현은 기존 primitive를 최대한 재사용한다.
-
-```text
-Plan              → versioned JSON/data attached to Goal/Work orchestration
-Observation       → Event type + metadata
-Resource state    → registry metadata/state
-Policy            → versioned config/ref
-Resource candidate→ 2차 discovery/evaluation state; 1차 별도 table 불필요
-```
-
-새로운 영속 엔티티는 다음 중 하나가 실제로 필요할 때만 추가한다.
-
-- 독립적으로 조회해야 함
-- 독립 수명주기가 있음
-- 동시성/transaction boundary가 다름
-- 여러 다른 객체가 안정적으로 참조해야 함
-
 
 ## 6. Edge Escalation
 
