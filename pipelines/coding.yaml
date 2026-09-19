@@ -1,0 +1,23 @@
+id: coding
+version: 1
+status: active
+change_reason: Data-driven coding pipeline with capability selection, cwd clarification boundary, and worker execution
+
+trigger:
+  intent:
+    - coding
+    - repo_edit
+
+steps:
+  - id: select_worker
+    type: capability.select
+    inputs:
+      required_capabilities:
+        - coding
+        - repo_edit
+
+  - id: run_worker
+    type: worker.run
+    inputs:
+      worker_id: ${select_worker.output.worker_id}
+      task: ${request.message}

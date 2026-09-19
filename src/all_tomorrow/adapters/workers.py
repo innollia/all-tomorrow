@@ -499,31 +499,36 @@ async def register_available_workers(
     Returns list of registered worker IDs.
     """
     from all_tomorrow.contracts import Worker
+    from all_tomorrow.registry import WorkerService
+
+    def _register(meta: Worker, adapter: Any) -> None:
+        if isinstance(registry, WorkerService):
+            registry.register_worker(meta, adapter)
+        else:
+            registry.register_worker(meta)
 
     registered = []
 
     if antigravity_argv is not None:
         worker = AntigravityWorker(argv=antigravity_argv, allowed_roots=allowed_roots, **worker_kwargs)
         if await worker.is_available():
-            registry.register_worker(
-                Worker(
-                    worker_id=worker.worker_id,
-                    capabilities=worker.capabilities,
-                    status="available",
-                )
+            meta = Worker(
+                worker_id=worker.worker_id,
+                capabilities=worker.capabilities,
+                status="available",
             )
+            _register(meta, worker)
             registered.append(worker.worker_id)
 
     if opencode_argv_prefix is not None:
         worker = OpenCodeWorker(argv_prefix=opencode_argv_prefix, allowed_roots=allowed_roots, **worker_kwargs)
         if await worker.is_available():
-            registry.register_worker(
-                Worker(
-                    worker_id=worker.worker_id,
-                    capabilities=worker.capabilities,
-                    status="available",
-                )
+            meta = Worker(
+                worker_id=worker.worker_id,
+                capabilities=worker.capabilities,
+                status="available",
             )
+            _register(meta, worker)
             registered.append(worker.worker_id)
 
     return registered

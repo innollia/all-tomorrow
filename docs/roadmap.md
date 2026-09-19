@@ -74,14 +74,22 @@ Redis와 pgvector는 이 phase의 필수 조건이 아니다.
 
 ## Phase 4 — Registry
 
+상태: Worker binding 및 selection/pipeline 실행 slice 구현 완료. Tool live discovery 및 risk metadata 확장은 진행 예정.
+
 - worker/tool/capability metadata
 - health와 availability
 - risk/permission metadata
-- mock worker로 selection tests
+- mock worker 및 fake adapter selection tests
+- `WorkerService`: CapabilityRegistry metadata와 executable WorkerAdapter를 1:1 consistent binding (mismatch/duplicate 거부)
+- Pipeline nodes `capability.select` 및 `worker.run` (`agent.run` alias) 구현
+- Data-driven coding pipeline (`pipelines/coding.yaml`) 및 missing cwd `NEED_USER` resume 지원
+- Event provenance 기록 및 민감정보(prompt, task, secret, payload) 누출 방지
 
 실제 연결 가능한 worker만 등록한다. 이름만 있는 Codex/OpenCode/Antigravity integration은 만들지 않는다.
 
 ## Phase 5 — First real adapters
+
+상태: CLI worker adapter (AntigravityWorker, OpenCodeWorker)의 runtime pipeline dispatch 연동 완료. 외부 시스템 adapter(Eve, Discord, Manager bridge)는 계획 단계.
 
 우선순위:
 

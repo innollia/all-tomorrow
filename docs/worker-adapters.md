@@ -161,11 +161,11 @@ Stdin is set to `DEVNULL`.
 
 ---
 
-## Registry Helper
+## Registry Helper and WorkerService
 
 ```python
 async def register_available_workers(
-    registry: CapabilityRegistry,
+    registry: CapabilityRegistry | WorkerService,
     *,
     antigravity_argv: list[str] | None = None,
     opencode_argv_prefix: list[str] | None = None,
@@ -174,24 +174,23 @@ async def register_available_workers(
 ) -> list[str]:
 ```
 
-Checks executable availability via `shutil.which` and only registers workers whose executables are present on PATH. Returns list of registered worker IDs.
+Checks executable availability via `shutil.which` and registers available workers. When given a `WorkerService`, it atomically binds both metadata in `CapabilityRegistry` and the executable adapter in `WorkerService`. Returns list of registered worker IDs.
 
-### Example
+### WorkerService
 
-```python
-from all_tomorrow.adapters import register_available_workers
-from all_tomorrow.registry import CapabilityRegistry
+`WorkerService` binds `CapabilityRegistry` metadata with executable `WorkerAdapter` instances:
+- Enforces consistency at registration (`worker.worker_id == adapter.worker_id` and `worker.capabilities == adapter.capabilities`).
+- Rejects duplicate registrations.
+- Exposes `select_worker(request)` for metadata selection and `execute(worker_id, request)` for adapter execution.
+- Provides typed public `list_workers()` and `get_worker(worker_id)` access.
 
-registry = CapabilityRegistry()
-registered = await register_available_workers(
-    registry,
-    antigravity_argv=["agy.exe"],
-    opencode_argv_prefix=["npx.cmd", "-y", "opencode-ai", "run"],
-    allowed_roots=("/workspace", "/projects"),
-    timeout_seconds=60.0,
-)
-# registered contains worker IDs that are actually available
-```
+### Pipeline Node Integration
+
+- **`capability.select`**: Selects best matching available worker based on `required_capabilities` and `privacy_tags`. If no worker satisfies requirements, fails closed with actionable error (unless `allow_policy_relaxation: True` explicitly permits user override). User overrides strictly enforce capability and privacy constraints.
+- **`worker.run`** (or **`agent.run`**): Consumes selected `worker_id`, propagates original user message, explicit task, constraints, acceptance criteria, expected result format, and `cwd`.
+  - Never guesses `cwd`; if missing and mutation is possible, returns `NEED_USER` with `required_fields=("cwd",)` targeting the exact blocked step ID.
+  - Maps `WorkerStatus` deterministically: `SUCCESS -> NodeStatus.SUCCESS`, `TIMEOUT -> NodeStatus.RETRY`, and failure modes (`INVALID_OUTPUT`, `EMPTY_OUTPUT`, `OUTPUT_TOO_LARGE`, `TRAVERSAL_BLOCKED`, `EXECUTABLE_NOT_FOUND`, `FAILED`) to `NodeStatus.FAILED` (unless `retry_on_fail: True` is configured).
+  - Emits minimal provenance events (`worker.executed`) recording trace ID, request ID, project ID, status, and duration, without leaking prompts, constraints, or secrets.
 
 ---
 
@@ -203,3 +202,4 @@ registered = await register_available_workers(
 4. **Combined output limit**: Limits account for `len(stdout) + len(stderr)` preventing memory leaks.
 5. **Process termination & reaping**: On timeout, processes are killed (`kill()`) and waited on (`wait()`) to avoid orphaned processes.
 6. **Executable not found**: Missing binaries return `WorkerStatus.EXECUTABLE_NOT_FOUND` with sanitized descriptions.
+7. **Event provenance secrecy**: Pipeline events record provenance linkage (run/step/trace/project/worker ID) while strictly omitting raw prompts, constraints, payloads, and secrets. Invalid event actor or type fails closed predictably.

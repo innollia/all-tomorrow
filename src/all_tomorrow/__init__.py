@@ -16,10 +16,12 @@ from .contracts import (
     UserQuestion,
     Worker,
 )
+from .registry import CapabilityRegistry, SelectionRequest, WorkerService
 
 __all__ = [
     "Actor",
     "Capability",
+    "CapabilityRegistry",
     "ContractError",
     "Event",
     "ExecutionContext",
@@ -29,8 +31,10 @@ __all__ = [
     "PipelineStep",
     "Project",
     "RequestEnvelope",
+    "SelectionRequest",
     "Tool",
     "UserQuestion",
     "Worker",
+    "WorkerService",
 ]
 

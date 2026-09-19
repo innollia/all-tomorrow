@@ -16,6 +16,7 @@ from all_tomorrow.contracts import (
     UserQuestion,
     new_id,
 )
+from all_tomorrow.registry import WorkerService
 from all_tomorrow.storage.run_store import (
     InMemoryRunStateStore,
     QuestionRecord,
@@ -25,6 +26,7 @@ from all_tomorrow.storage.run_store import (
     RunStatus,
     hash_resume_token,
 )
+from .nodes import CapabilitySelectNode, WorkerRunNode
 
 
 class PipelineNode(Protocol):
@@ -68,10 +70,16 @@ class PipelineRuntime:
         *,
         store: RunStateStore | None = None,
         event_sink: InMemoryEventSink | None = None,
+        worker_service: WorkerService | None = None,
     ) -> None:
         self._nodes: dict[str, PipelineNode] = {}
         self.store: RunStateStore = store or InMemoryRunStateStore()
         self.event_sink = event_sink or InMemoryEventSink()
+        self.worker_service = worker_service
+        if worker_service is not None:
+            self.register("capability.select", CapabilitySelectNode(worker_service))
+            self.register("worker.run", WorkerRunNode(worker_service))
+            self.register("agent.run", WorkerRunNode(worker_service))
 
     def register(self, node_type: str, node: PipelineNode) -> None:
         if not node_type.strip():
@@ -155,11 +163,54 @@ class PipelineRuntime:
             except ContractError as error:
                 return await self._fail(run, str(error))
 
+            if isinstance(config, dict):
+                config.setdefault("step_id", step.id)
+
             await self._event(run, "step.started", Actor.ORCHESTRATOR, {"step_id": step.id, "node_type": step.type})
             try:
                 result = await node.run(run.context, config, inputs)
             except Exception as error:  # node boundary converts implementation errors to run failure
                 return await self._fail(run, f"node {step.id} raised {type(error).__name__}: {error}")
+
+            for node_event in result.events:
+                if not isinstance(node_event, dict):
+                    return await self._fail(run, f"node {step.id} emitted non-dict event")
+                ev_type = node_event.get("type")
+                if not isinstance(ev_type, str) or not ev_type.strip():
+                    return await self._fail(run, f"node {step.id} emitted event with invalid type: {ev_type!r}")
+                ev_actor_val = node_event.get("actor", Actor.AGENT)
+                try:
+                    ev_actor = Actor(ev_actor_val) if not isinstance(ev_actor_val, Actor) else ev_actor_val
+                except (ValueError, TypeError):
+                    return await self._fail(run, f"node {step.id} emitted event with invalid actor: {ev_actor_val!r}")
+                raw_meta = node_event.get("metadata", {})
+                if not isinstance(raw_meta, dict):
+                    return await self._fail(run, f"node {step.id} emitted event with non-dict metadata")
+                ev_meta = dict(raw_meta)
+                for forbidden in (
+                    "prompt",
+                    "message",
+                    "instructions",
+                    "task",
+                    "constraints",
+                    "secrets",
+                    "secret",
+                    "payload",
+                    "raw_prompt",
+                    "raw_output",
+                    "acceptance_criteria",
+                    "expected_result_format",
+                ):
+                    ev_meta.pop(forbidden, None)
+                ev_meta.setdefault("pipeline", run.spec.identity)
+                ev_meta.setdefault("step_id", step.id)
+                await self._event(
+                    run,
+                    ev_type.strip(),
+                    ev_actor,
+                    ev_meta,
+                    artifact_refs=tuple(node_event.get("artifact_refs", ())),
+                )
 
             await self._event(
                 run,
