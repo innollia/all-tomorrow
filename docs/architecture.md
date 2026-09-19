@@ -2,7 +2,7 @@
 
 ## 1. 시스템 경계
 
-All Tomorrow는 application이 아니라 Control Plane이다. 중앙이 소유하는 것은 authority와 공유 상태이며, 실행은 edge와 worker에 분산된다.
+All Tomorrow는 application이 아니라 Control Plane이다. 중앙이 소유하는 것은 authority와 공유 상태이며, 실행은 edge와 worker에 분산된다. 아래 그림은 목표 구조이며, 현재 구현 완료도를 나타내지 않는다.
 
 ```text
 Discord/Web/CLI/ChatGPT
@@ -72,7 +72,7 @@ V1에서는 Memory, Evaluation, Background Research를 확장 가능 경계로�
 
 ## 4. Core contracts
 
-첫 구현 단위는 다음 계약으로 제한한다.
+현재 구현된 핵심 계약은 다음과 같다.
 
 ### RequestEnvelope
 
@@ -156,7 +156,7 @@ Event는 append-only history다. canonical projection은 event와 별도이며, 
 
 ## 5. Pipeline runtime
 
-초기 runtime은 DAG 엔진이 아니라 명시적 순차 step과 제한된 조건 분기만 지원한다.
+현재 runtime은 DAG 엔진이 아니라 명시적 순차 step과 제한된 조건 분기만 지원한다. `WorkerService`가 capability metadata와 실제 CLI adapter를 묶고, `capability.select`와 `worker.run` node가 `pipelines/coding.yaml`에서 이를 사용한다. 실행 상태는 `RunStateStore`에 저장되며, `NEED_USER` 답변은 동일 run/step/version으로 재개된다.
 
 - YAML/JSON spec load와 schema validation
 - node type registry
@@ -193,7 +193,7 @@ needs_canonical_mutation
 
 모두 false이면 local 처리 가능하다. 하나 이상 true여도 자동 중앙 실행을 강제하지 않고, policy 결과와 원문을 envelope로 보낸다. 중앙 resolver가 project와 risk를 다시 검증한다.
 
-Policy도 versioned config로 관리하되 V1에서는 기존 Discord bot에 바로 심지 않는다. 먼저 pure classifier contract와 fixtures로 local/central 판정을 검증한다.
+Edge policy는 YAML로 정의하며 pure classifier 테스트가 있다. 기존 Discord bot에는 별도 Eve worktree에서 shadow routing만 연결했다. 실제 central escalation과 해당 Eve 브랜치의 통합·배포는 아직 완료되지 않았다.
 
 ## 7. Source ownership
 
@@ -231,7 +231,7 @@ capabilities
 registry_bindings
 ```
 
-실제 DDL은 Core Contracts와 runtime semantics를 테스트한 뒤 결정한다.
+`migrations/0001_core.sql`과 `0002_lessons.sql`에 초기 DDL이 있다. 다만 local live PostgreSQL 검증이 없고 run state 업데이트와 event append의 단일 트랜잭션 보장도 미완료다. 현재 Web API의 runs/questions 목록은 이 저장소의 영속 상태와 연결되지 않는다.
 
 ## 9. Security와 mutation
 
@@ -251,4 +251,3 @@ registry_bindings
 - adapter는 복제 저장이 아니라 참조와 provenance를 기록한다.
 - edge-local cache는 canonical state로 승격되지 않는다.
 - pipeline/trace/event는 모든 client가 공유한다.
-

@@ -26,10 +26,14 @@
 
 ## 현재 단계
 
-Phase 0 조사와 설계만 수행했다. production runtime은 아직 구현하지 않았다.
+2026-09-19 기준으로 Core Contracts, 버전 관리되는 YAML pipeline runtime, 실행·질문 재개 저장소, worker registry와 Antigravity/OpenCode CLI adapter, Discord edge policy, 최소 로그인 대시보드가 구현되어 있다. `pipelines/coding.yaml`은 `capability.select → worker.run`을 실행하며 작업 경로가 없으면 `NEED_USER`로 멈춘다. 전체 테스트는 로컬에서 105개 통과했다.
+
+아직 V1 완성이나 운영 배포 상태는 아니다. Web Chat은 현재 실행 API에 연결되지 않았고, 대시보드의 runs/questions는 인메모리 표시용 데이터다. PostgreSQL은 migration과 store 구현이 있지만 live DB 통합 검증이 없다. Eve/Manager의 기존 정본을 중앙으로 옮기지 않았으며, Discord 연동은 별도 Eve worktree의 shadow routing 단계다.
+
+개발 검증: `C:\projects\all-tomorrow\.venv\Scripts\python.exe -m pytest -q` (설치된 개발 환경에서 실행). API 실행에는 `.env.example`의 인증 환경변수가 필요하지만, 현재 API를 영속형 production 서비스로 취급하면 안 된다.
 
 - [기존 시스템 inventory](docs/inventory.md)
 - [아키텍처](docs/architecture.md)
 - [단계별 구현 계획](docs/roadmap.md)
 - [초기 결정 기록](docs/decisions/0001-control-plane-boundary.md)
-
+- [Worker adapter와 pipeline 연결](docs/worker-adapters.md)

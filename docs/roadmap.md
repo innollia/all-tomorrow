@@ -19,6 +19,8 @@ Exit criteria:
 
 ## Phase 1 — Core Contracts
 
+상태: 기본 계약 및 단위 테스트 구현. provider-independent contract는 유지 중이다.
+
 범위:
 
 - `RequestEnvelope`
@@ -43,6 +45,8 @@ Exit criteria:
 
 ## Phase 2 — Minimal Pipeline Runtime
 
+상태: YAML loader, 순차/분기 실행, 버전 고정, `NEED_USER` 중단·재개, run store 기반 재시작 후 재개 구현. 운영 환경의 전체 장애 복구 검증은 남았다.
+
 범위:
 
 - YAML spec loader
@@ -63,6 +67,8 @@ Acceptance scenario:
 5. 원 실행과 재개 실행이 같은 trace/run에 연결된다.
 
 ## Phase 3 — Event Store
+
+상태: PostgreSQL migration과 run/question store 구현, in-memory 원자적 재개 및 PostgreSQL 트랜잭션 코드가 있다. live PostgreSQL 통합 테스트와 run state + event append 원자성은 미완료다.
 
 - PostgreSQL migration
 - projects/tasks/runs/run_steps/events/pipeline_versions/user_questions
@@ -89,7 +95,7 @@ Redis와 pgvector는 이 phase의 필수 조건이 아니다.
 
 ## Phase 5 — First real adapters
 
-상태: CLI worker adapter (AntigravityWorker, OpenCodeWorker)의 runtime pipeline dispatch 연동 완료. 외부 시스템 adapter(Eve, Discord, Manager bridge)는 계획 단계.
+상태: CLI worker adapter (AntigravityWorker, OpenCodeWorker)의 runtime pipeline dispatch 연동 완료. Eve read-only MCP adapter 코드는 있으나 운영 연결 검증은 미완료. DiscordService read adapter와 Manager bridge adapter는 미구현.
 
 우선순위:
 
@@ -101,6 +107,8 @@ Redis와 pgvector는 이 phase의 필수 조건이 아니다.
 
 ## Phase 6 — Discord edge experiment
 
+상태: 순수 policy와 테스트 구현. 최신 Eve `origin/main` 기반 별도 worktree `C:\projects\eve-control-plane-edge`에서 Discord shadow routing을 구현·테스트했으나, Eve 본 저장소에 통합·배포하지 않았다. 중앙 실행으로의 실제 escalation은 아직 없다.
+
 - pure routing policy와 fixture dataset
 - `LOCAL_REPLY`, `LOCAL_TOOL`, `CENTRAL_QUERY`, `CENTRAL_TASK`, `PROJECT_ACTION`, `USER_CLARIFICATION`
 - 기존 bot과 충돌하지 않는 shadow decision logging
@@ -109,6 +117,8 @@ Redis와 pgvector는 이 phase의 필수 조건이 아니다.
 일반 대화가 중앙 run을 만들지 않는 것을 acceptance test로 둔다.
 
 ## Phase 7 — Minimal API and Web
+
+상태: 인증, Projects/Runs/Questions 표시용 API와 Discord edge 결정 API만 구현. Chat 실행, store-backed run/question 조회, 질문 답변 후 동일 run 재개, worker status UI는 미구현이다. 현재 `WebState` 목록을 production 정본으로 취급하지 않는다.
 
 - authentication 선택은 비용/외부 가입 결정을 사용자에게 질문한 뒤 확정
 - Chat, Projects, Runs, Questions
