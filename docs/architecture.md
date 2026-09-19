@@ -206,6 +206,7 @@ Project source identity와 executor-local workspace path도 분리한다. `repo:
 - canonical projection과 append-only event를 분리한다.
 - **Observation**은 Planner/Replanner가 현재 세계 상태 변화를 해석하기 위한 입력이다.
 - Observation은 provider-specific detail을 보존하되 generic semantic category와 resource/work refs를 가져야 한다.
+- `NodeStatus`/`WorkerStatus`는 execution lifecycle의 안정적인 primitive로 유지한다. 새로운 provider/resource condition이 생길 때마다 status enum을 늘리지 않고, quota/rate-limit/auth/capacity 같은 환경 상태는 Observation/ResourceState로 표현한다.
 - ResourceState는 availability, capacity/quota, rate-limit, health, cost/quality class, reset/expiry 같은 현재 상태를 표현할 수 있다. 모든 provider가 정확한 quota telemetry를 제공한다고 가정하지 않고 known / unknown / estimated와 source, observed_at, freshness/confidence를 표현할 수 있어야 한다.
 - Policy는 허용된 degradation/fallback/budget/approval boundary를 표현한다.
 - event는 수정 이력이 아니라 provenance/history다.
