@@ -143,7 +143,7 @@ Pipeline은 장기 목표와 전체 자율성을 소유하는 거대한 만능 �
 - 학교 자료 ingest와 scheduled brief의 end-to-end 흐름
 - 장기 게임 데모 생성 루프
 
-이 간극을 숨기기 위해 V1이라는 이름으로 최종 목적을 축소하지 않는다.
+이 간극을 숨기기 위해 초기 버전의 범위를 최종 목적 자체로 축소해 정의하지 않는다.
 
 ## Non-Negotiable Boundaries
 
