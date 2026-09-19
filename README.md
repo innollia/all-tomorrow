@@ -49,8 +49,8 @@ Control Plane, pipeline runtime, event store, worker/tool registry, scheduler, m
 4. **Cross-project learning**  
    한 프로젝트에서 얻은 검증된 노하우와 실패가 다음 프로젝트 시작 시 후보로 검색·선별되어 재사용되어야 한다.
 
-5. **Concurrent orchestration and metacognition**  
-   여러 작업을 중앙에서 동시에 조정할 수 있어야 하고, 별도의 메타인지 계층이 전체 진행을 관찰해 정체·실패·비효율·새 가능성을 스스로 발견하고 필요하면 조사나 후속 Work를 만들 수 있어야 한다.
+5. **Concurrent orchestration and recursive self-observation**  
+   여러 작업을 중앙에서 동시에 조정할 수 있어야 하고, 별도의 메타인지 계층이 전체 진행을 관찰해 정체·실패·비효율·새 가능성을 스스로 발견하고 필요하면 조사·후속 Work·새 Goal을 만들 수 있어야 한다. 메타인지는 자기 자신의 과거 판단·prompt·policy·비용·변경 결과도 같은 관찰 대상으로 삼으며, 별도 meta-meta-meta 계층을 무한히 쌓지 않는다.
 
 6. **Autonomous operation**  
    사용자의 즉시 요청이 없어도 허용된 범위에서 조사, 수집, 평가, 유지관리, 실험, 보고와 장기 작업을 계속할 수 있어야 한다.
@@ -64,8 +64,8 @@ Control Plane, pipeline runtime, event store, worker/tool registry, scheduler, m
 9. **Proactive personal operations**  
    학교 자료 처리, 할 일, 일정, 일일 브리프처럼 프로젝트 외의 개인 운영도 같은 중앙에서 owner-aware 방식으로 이어져야 한다.
 
-10. **Measured self-improvement**  
-   시스템은 자신의 실패와 성과에서 개선 후보를 만들 수 있어야 하지만, 근거 없는 자기수정이나 production 자동 덮어쓰기는 하지 않는다. 개선은 provenance, sandbox/evaluation, promotion/rollback 경계를 가진다.
+10. **Measured self-improvement with external authority boundary**  
+   시스템은 자신의 실패와 성과에서 개선 후보를 만들고 자기 prompt·policy·code까지 스스로 수정할 수 있어야 한다. 일반 변경은 provenance와 sandbox/evaluation을 거쳐 자동 promotion 후 보고할 수 있다. 권한·비용·통제 경계를 넓히는 보호 변경만 사용자의 노트북에 분리된 Approval Authority의 사전 승인을 요구하며, AWS 본체가 이 승인을 구조적으로 우회할 수 없어야 한다.
 
 ## Architectural Principle
 
@@ -110,14 +110,16 @@ Pipeline은 작업 계층에서 하나의 WorkItem을 실행하는 versioned rec
 
 전체 계획은 한 파일에 계속 누적하지 않는다.
 
-- **[1차 완성 — Durable Central Core](docs/roadmap-01-foundation.md)**  
-  지금 구현된 pipeline/event/adapter 기반을 살리면서 Goal/Work/Project Context/Trigger/Artifact와 durable execution 경계를 바로잡는다. 사용자가 실제로 중앙에 접속해 작업을 맡기고, 중단·재개하고, 결과를 추적할 수 있는 첫 운영 가능한 중심부가 목표다.
+사용자가 체감할 제품 순서는 **Researcher → Reliable assistant → Personal manager**다. 구현상 researcher 아래에는 먼저 최소 durable kernel이 필요하지만, durable core 자체를 첫 완성품으로 취급하지 않는다.
 
-- **[2차 완성 — Autonomous Personal & Project Operations](docs/roadmap-02-autonomy.md)**  
-  스케줄·watcher·background work, cross-project lesson 재사용, 개인 운영, 자원 라우팅을 붙여 사용자의 즉시 요청이 없어도 유용한 일을 지속하는 단계다.
+- **[1차 완성 — Durable Self-Improving Researcher](docs/roadmap-01-foundation.md)**  
+  Goal/Work/Event의 최소 durable kernel 위에 실제 researcher loop를 올린다. 시스템이 스스로 문제와 기회를 발견하고 새 Goal을 만들며 자기 prompt·policy·code까지 평가·개선하는 폐쇄 루프를 먼저 완성한다. AWS를 항상 켜진 중앙 runtime으로 사용하고, repo mutation은 우선 노트북 단일 executor에 제한한다.
 
-- **[3차 완성 — Measured Self-Evolving System](docs/roadmap-03-evolution.md)**  
-  외부 서비스 자동 탐색·시험, 장기 산출물 생성, 자원 최적화, 평가 기반 self-improvement와 안전한 promotion/rollback까지 닫힌 루프로 만드는 단계다.
+- **[2차 완성 — Reliable Assistant & Remote Control](docs/roadmap-02-autonomy.md)**  
+  researcher 위에 사용자의 요청을 안정적으로 처리하는 비서를 올린다. 어느 기기에서든 중앙에 작업을 맡기고, 중단·질문·재시작을 견디며, Web/Discord/CLI가 같은 Goal/Work 상태를 이어받게 한다.
+
+- **[3차 완성 — Personal Manager & Generalized Autonomy](docs/roadmap-03-evolution.md)**  
+  학교·일정·개인 운영과 cross-project knowledge, 외부 service discovery, multi-executor, 장기 artifact 생산을 연결해 지속적인 개인 관리자와 넓은 자율 운영을 완성한다.
 
 [전체 계획 인덱스와 공통 규칙](docs/roadmap.md)
 
@@ -166,7 +168,7 @@ Pipeline은 작업 계층에서 하나의 WorkItem을 실행하는 versioned rec
 - pipeline은 provider/project별 예외처리 목록이 되어서는 안 되며, 범용 planner/policy가 현재 state를 해석해 plan/work를 구성한다.
 - Goal은 resource failure 하나로 사라지지 않고, 허용된 범위에서 Plan revision 또는 NEED_USER로 이어진다.
 - 장기 상태, provenance, user control은 그 교체에서 살아남아야 한다.
-- self-improvement는 측정과 rollback 없이 production을 직접 바꾸지 않는다.
+- self-improvement는 측정과 rollback 없이 production을 바꾸지 않는다. 평가를 통과한 일반 변경은 자동 promotion 후 보고할 수 있지만, 권한·비용·통제 경계를 넓히는 보호 변경은 노트북의 별도 Approval Authority 승인 없이는 production에 적용할 수 없다.
 
 ## Documents
 
@@ -179,6 +181,7 @@ Pipeline은 작업 계층에서 하나의 WorkItem을 실행하는 versioned rec
 - [초기 경계 결정 기록](docs/decisions/0001-control-plane-boundary.md)
 - [Durable Work 아키텍처 결정](docs/decisions/0002-durable-work-above-pipeline.md)
 - [병렬 메타인지 아키텍처 결정](docs/decisions/0003-generic-planning-over-hardcoded-pipelines.md)
+- [자가수정 권한과 외부 승인 경계](docs/decisions/0004-self-modification-and-approval-boundary.md)
 - [Worker adapter와 pipeline 연결](docs/worker-adapters.md)
 
 ## Development Verification
