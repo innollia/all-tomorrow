@@ -202,7 +202,33 @@ Discord가 첫 edge일 뿐, 계약은 Web/CLI/ChatGPT에도 재사용 가능해�
 
 예쁜 dashboard보다 end-to-end durability가 우선이다.
 
-## 8. Eve and Manager Registration
+## 8. Remote Deployment and Recovery
+
+"어느 기기에서든 중앙에 접속"은 2차 이후의 장식이 아니라 1차 완성 조건이다.
+
+1차에서는 복잡한 HA보다 **단일 운영 인스턴스가 실제로 원격에서 안전하게 접근 가능하고 재시작 후 복구되는 것**을 먼저 증명한다.
+
+필수:
+
+- 현재 사용 가능한 AWS 자원을 우선 조사하되 특정 provider에 contract를 고정하지 않는다.
+- HTTPS/TLS
+- authenticated Web access
+- internal edge authentication
+- persistent PostgreSQL
+- process/service restart policy
+- health/readiness check
+- backup/restore 절차의 최소 검증
+- secrets는 environment/secret owner에서 공급하고 repository/DB/event에 평문 저장하지 않음
+- deployment configuration과 application state 분리
+
+1차에서 필요하지 않은 것:
+
+- multi-region
+- Kubernetes
+- active-active HA
+- 복잡한 autoscaling
+
+## 9. Eve and Manager Registration
 
 목적은 정본 migration이 아니라 중앙 orchestration 연결이다.
 
@@ -219,7 +245,7 @@ Discord가 첫 edge일 뿐, 계약은 Web/CLI/ChatGPT에도 재사용 가능해�
 - 필요한 memory/fact retrieval은 owner-aware gateway/adapter를 통해 수행한다.
 - Manager가 프로젝트 수정을 요청하면 중앙 WorkItem으로 연결할 수 있어야 한다.
 
-## 9. Lessons — Manual First Loop
+## 10. Lessons — Manual First Loop
 
 1차에서는 자동 self-learning을 서두르지 않는다.
 
@@ -233,7 +259,7 @@ Discord가 첫 edge일 뿐, 계약은 Web/CLI/ChatGPT에도 재사용 가능해�
 
 "lesson이 저장됨"과 "전역적으로 옳은 지식"을 구분한다.
 
-## 10. 1차 Acceptance Scenarios
+## 11. 1차 Acceptance Scenarios
 
 1차 완성은 아래 시나리오를 모두 통과해야 한다.
 
@@ -261,7 +287,15 @@ worker/control-plane process가 실행 중 죽음 → lease 만료 → work가 �
 
 Eve/Manager의 canonical fact를 중앙 편의를 위해 복제하지 않고 owner reference로 조회하며, 중앙 event는 orchestration provenance만 소유.
 
-## 11. Explicitly Not Required for 1차
+### G. Remote control surface
+
+개발 PC 밖의 기기에서 HTTPS로 로그인 → 사용자 맥락을 owner-aware 방식으로 조회하는 질의 또는 project work 제출 → 중앙 상태에 반영 → 서버 재시작 뒤에도 work/run/history가 유지됨.
+
+### H. Cross-system actionability
+
+Manager/Web에서 "Eve 프로젝트의 이 문제를 고쳐" 같은 요청 → project:eve resolution → Eve canonical state를 복제하지 않은 채 repository/runtime 쪽 WorkItem 생성 → 적절한 worker/adapter 실행 → 검증 결과가 같은 중앙 trace로 돌아옴.
+
+## 12. Explicitly Not Required for 1차
 
 - autonomous community research
 - automatic service experiments
