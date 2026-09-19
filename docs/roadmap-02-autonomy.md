@@ -54,56 +54,18 @@ background work가 사용자의 interactive work를 굶기면 실패다.
 
 ## 3. Adaptive Planning and Graceful Degradation
 
-1차의 Planner/Plan revision/Observation contract를 실제 resource 상태와 연결한다.
+1차의 Planner / Execution Resolution 경계를 실제 resource 상태와 연결한다.
 
-### Replanning inputs
+resource state에는 quota/rate-limit, health, cost, quality, priority, deadline 같은 현재 조건이 들어갈 수 있다. 정확한 quota를 알 수 없으면 unknown/estimated + freshness로 충분하다.
 
-예:
+처리 순서:
 
-- provider/account quota remaining, 또는 unknown/estimated 상태
-- state source/freshness/confidence
-- observed rate-limit/quota errors
-- rate-limit reset / concurrency ceiling
-- worker/executor health
-- current cost/budget
-- latency/quality observations
-- deadline/priority
-- completed Work/Artifact
-- policy constraints
-- user approval requirements
+1. 같은 capability와 policy를 만족하는 동등 resource가 있으면 safe failover
+2. 없고 Plan 의미를 바꿔야 하면 Planner가 남은 Work를 다시 계산
+3. 가능한 대응은 병렬성/batch 축소, 낮은 우선순위 연기, Work 분할, quota reset까지 wait, 기존 artifact 재사용, 추가 resource 요청 등
+4. Goal/acceptance criteria를 실질적으로 낮춰야 하면 사전 policy가 없는 한 NEED_USER
 
-이 값은 pipeline 내부 상수가 아니라 current state다.
-
-### Failover before replanning
-
-같은 capability, quality floor, privacy/risk, budget policy를 만족하는 다른 resource가 있으면 Execution Resolution이 concrete resource만 바꿀 수 있다. 이 경우 Work의 의미가 달라지지 않으므로 매번 새 Plan revision을 만들 필요가 없다.
-
-다만 transparent failover는 retry-safe 작업에만 적용한다. mutation side effect가 발생했는지 불명확하면 먼저 reconcile/idempotency 확인을 수행한다.
-
-동등 failover로 해결되지 않고 계획 의미를 바꿔야 할 때 Replanner로 올린다.
-
-### Generic replanning options
-
-Planner는 policy가 허용하는 범위에서 다음을 조합할 수 있다.
-
-- 더 저렴하거나 더 가벼운 model/tier로 변경
-- 병렬성 또는 batch size 축소
-- 낮은 우선순위 work 연기
-- work를 더 작은 단위로 분할
-- 이미 만든 artifact를 재사용해 남은 작업만 수행
-- quality floor를 지킬 수 없으면 멈춤
-- 추가 credential/resource가 필요하면 NEED_USER
-- quota reset 시점까지 not-before를 두고 대기
-
-이 선택지 자체도 특정 provider 이름에 묶지 않는다.
-
-### Plan revision rules
-
-- Goal과 acceptance criteria를 조용히 낮추지 않는다.
-- 범위/품질 축소가 사용자 의도를 바꿀 정도면 정책상 사전 허용이 없는 한 NEED_USER.
-- 완료된 work/artifact는 새 Plan에서 가능한 한 보존한다.
-- 왜 replan했는지 observation과 rationale을 남긴다.
-- 같은 failure가 반복되면 무한 replan하지 않고 bounded retry/decision policy를 적용한다.
+완료된 Work/Artifact는 보존하고 같은 failure에 무한 replan하지 않는다.
 
 ## 4. Cross-Project Knowledge Loop
 
@@ -188,87 +150,36 @@ Research topic도 고정 목록만 도는 방식으로 만들지 않는다. 반�
 
 ## 7. Service Experiment Framework
 
-새 이미지 AI, LLM API, storage/tool service처럼 새로운 resource/tool이 발견되었을 때 바로 registry에 production-capable로 넣지 않는다.
+새 AI/API/tool service가 발견되었다고 바로 production resource로 넣지 않는다.
 
-이 framework는 서비스별 onboarding pipeline을 만드는 것이 아니라 **generic ResourceCandidate lifecycle**을 제공한다.
-
-Candidate discovery 후 integration mode를 판정한다.
-
-- 기존 OpenAI-compatible/MCP/기타 supported adapter profile로 연결 가능 → declarative metadata/config
-- OpenAPI/HTTP schema 등 generic configurable adapter로 연결 가능 → schema/config
-- 새로운 protocol/auth semantics가 필요 → "core 수정"이 아니라 **새 adapter implementation Work/Proposal**로 분리
-
-2차에서는 custom adapter의 완전 무인 production promotion까지 요구하지 않는다. 하지만 "새 provider = planner/pipeline 수정" 구조는 허용하지 않는다.
-
-목표 단계:
+범용 흐름:
 
 ```text
-discovered
-→ ResourceCandidate
-→ capability / terms / prerequisites extraction
-→ required user action? ──yes──> NEED_USER
-→ credential/resource ref available
-→ sandbox configuration
-→ bounded experiment
-→ captured artifacts/metrics
-→ evaluated
-→ candidate_available / rejected / watch
-→ promotion policy가 허용하면 actual registry/resource-pool binding
+discover
+→ usefulness / duplication / risk / user-effort 판단
+→ 필요한 user action이 있으면 NEED_USER
+→ bounded sandbox test
+→ artifact/metric 평가
+→ available / watch / rejected
 ```
 
-예를 들어 무료 API가 새로 발견되어 API key 발급이 필요하면 시스템은 "provider X 전용 key 요청 코드"를 추가하는 대신 candidate의 `prerequisites`에 사용자 action을 기록하고 generic NEED_USER를 생성한다. 질문은 key 값을 채팅에 붙여넣으라고 요구하지 않는다. 사용자가 key를 지정된 external secret owner/registration surface에 등록한 뒤 중앙에는 opaque `credential_ref` 또는 완료 확인만 돌아오게 한다.
+이미 지원하는 protocol이면 config/metadata만으로 연결하고, 새로운 protocol이면 core/pipeline 분기가 아니라 별도 adapter implementation work로 분리한다.
 
-### User-interruption gate
+모든 후보에 가입/key 발급을 요구하지 않는다. 현재 capability 부족을 실제로 메우고 기대 효용이 충분한 후보에만 사용자 action을 요청한다.
 
-새 free-tier candidate가 있다는 이유만으로 전부 사용자에게 key 발급을 요구하지 않는다. public 정보만으로 먼저 다음을 평가한다.
-
-- 현재 Goal/Work에서 실제로 부족한 capability인가
-- 이미 등록된 resource와 중복되는가
-- 예상 free quota/capacity가 의미 있는가
-- quality/reliability signal이 최소 기준을 넘는가
-- privacy/risk/terms가 허용 범위인가
-- 가입/key 발급에 드는 사용자 effort가 기대 효용에 비해 타당한가
-- candidate가 실험할 가치가 있는지
-
-이 gate를 통과한 candidate만 사용자 action을 요구할 수 있다. 동일 목적의 후보가 많으면 묶어서 우선순위를 정하고 NEED_USER spam을 만들지 않는다.
-
-사용자에게 요청할 때는 최소한 **왜 필요한지 / 현재 무엇이 막혔는지 / 기대 효용 / 필요한 action / 이후 검증 과정**을 설명할 수 있어야 한다.
-
-필수:
-
-- isolated credential/resource ref
-- bounded test budget
-- repeatable evaluation case
-- output artifact retention
-- failure reason
-- provider terms/limits metadata
-- capability / quota model / reset semantics / pricing class / auth prerequisite metadata
-- 가입, key 발급, 결제, 약관 동의, 사용자 인증처럼 사용자가 직접 처리해야 하는 필수 단계가 생기면 우회하지 않고 해당 WorkItem을 NEED_USER로 전환
-- user-facing question에는 왜 이 resource가 현재 Goal/Plan에 유용한지와 필요한 action만 전달하고 secret 값 자체를 chat/event에 복사하지 않음
-- NEED_USER required field는 가능하면 `credential_ref`/registration confirmation이지 raw API key가 아님
+Raw API key는 chat/event에 받지 않는다. external secret owner에 등록하고 opaque credential ref만 사용한다.
 
 ## 8. Resource Pool Foundation
 
-1차의 Worker/Executor/Provider Resource seam을 실제 라우팅에 사용한다.
+Worker/Executor/Provider Resource seam을 실제 라우팅에 사용한다.
 
-관리 대상 예:
+관리 대상은 local/AWS/Sol Pi 같은 host, API/model/account, free quota/paid budget, concurrency/rate limit 등이다.
 
-- local machine
-- AWS host
-- Sol Pi
-- API providers
-- account identities
-- model endpoints
-- free quota / paid budget
-- concurrency/rate limit
+resource pool은 provider별 switch문이 아니라 metadata/state registry로 동작한다. 같은 capability를 만족하는 새 resource가 등록되면 기존 candidate set에 들어가야 한다.
 
-credential secret 값은 외부 secret owner에 두고 중앙은 opaque ref와 usage metadata만 가진다.
+정확한 quota telemetry가 없는 resource도 recent success/failure와 freshness를 이용해 conservative state로 운영할 수 있다.
 
-2차에서는 "최저 비용 자동 최적화"까지 강제하지 않는다. 우선 availability, quota/capacity, rate-limit, permission, capability, quality floor를 기준으로 정상 라우팅하고, 상태 변화가 생기면 Planner에 observation을 보내 Plan revision을 만들 수 있어야 한다.
-
-resource pool은 provider별 switch문이 아니라 descriptor/state registry로 동작한다. 같은 capability를 만족하는 새 resource가 등록되면 generic candidate set에 자연스럽게 포함되어야 한다.
-
-정확한 quota telemetry가 없는 resource도 배제하지 않는다. 최근 successful use, rate-limit/quota observation, reset hint, freshness/confidence를 이용해 conservative state를 유지하고 필요하면 probe/실행 결과로 갱신한다.
+credential 값은 외부 secret owner에 두고 중앙에는 opaque ref만 둔다.
 
 ## 9. Artifact Catalog
 
