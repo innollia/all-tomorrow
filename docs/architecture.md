@@ -79,7 +79,7 @@ Discord / Web / CLI / ChatGPT / schedules / watchers / external events
 
 - **Goal**: 여러 plan, work, run에 걸쳐 살아남는 목적과 acceptance criteria
 - **Plan**: 현재 state/policy/resource 조건에서 Goal을 달성하기 위한 versioned work graph
-- **PlanRevision**: observation 때문에 기존 Plan을 유지·변경·축소·연기한 새 version과 rationale
+- **Plan revision**: 별도 entity가 필수라는 뜻이 아니라, observation 때문에 Plan의 새 version이 만들어지는 행위
 - **WorkItem**: 실제 수행·추적·대기·재시도되는 durable 작업
 - **Run**: WorkItem을 특정 pipeline version으로 실행한 한 시도
 
@@ -328,6 +328,8 @@ promotion or rejection
 
 범용성은 모든 것을 문자열 metadata로 바꾸는 것이 아니라 **변화 속도가 다른 책임을 올바른 층에 두는 것**이다.
 
+또한 architecture의 명사는 곧바로 class/table/service를 뜻하지 않는다. Observation은 Event metadata일 수 있고, ResourceState는 registry metadata일 수 있고, Policy는 versioned config일 수 있으며, Plan revision은 같은 Plan의 새 version일 수 있다. 별도 저장 구조는 실제 쿼리·동시성·수명주기 요구가 생길 때만 승격한다.
+
 ## 5. Current Contracts
 
 ### RequestEnvelope
@@ -414,100 +416,34 @@ metadata
 
 Event는 append-only다.
 
-### Target Planning Contracts — 1차에서 추가할 경계
+### Target Planning Semantics — 1차에서 확보할 경계
 
-아래는 아직 현재 구현 contract로 간주하지 않는다. 1차 Gate A의 목표 계약이다.
+아래는 **semantic boundary**다. 각각을 별도 class/table로 만들라는 요구가 아니다.
 
-#### Plan / PlanRevision
+- Goal: durable intent / acceptance criteria
+- Plan: versioned Work 구성과 rationale
+- Observation: 외부 상태 변화의 generic 의미 + provenance
+- Resource state: 현재 availability/capacity/health/cost/quality의 최소 snapshot
+- Policy: budget, permission, quality floor, fallback/degradation/user-approval 규칙
+- Resource candidate: 새 resource가 production pool에 들어오기 전의 평가 상태
 
-```text
-plan_id
-version
-goal_id
-status
-work_refs / dependency refs
-assumption refs
-policy_ref
-resource_snapshot_ref
-rationale
-created_from_observation_refs
-supersedes_version
-created_at
-```
-
-#### Observation
+초기 표현은 기존 primitive를 최대한 재사용한다.
 
 ```text
-observation_id
-type / semantic category
-occurred_at
-source_ref
-project_id / goal_id / work_id / run_id
-resource_ref
-severity
-details_ref / metadata
+Plan              → versioned JSON/data attached to Goal/Work orchestration
+Observation       → Event type + metadata
+Resource state    → registry metadata/state
+Policy            → versioned config/ref
+Resource candidate→ 2차 discovery/evaluation state; 1차 별도 table 불필요
 ```
 
-#### ResourceState
+새로운 영속 엔티티는 다음 중 하나가 실제로 필요할 때만 추가한다.
 
-```text
-resource_id
-capabilities
-availability
-capacity/quota state: known | unknown | estimated + value/ref
-rate-limit state
-health
-cost class
-quality/evaluation refs
-credential_ref
-source_ref
-observed_at / freshness / confidence
-```
+- 독립적으로 조회해야 함
+- 독립 수명주기가 있음
+- 동시성/transaction boundary가 다름
+- 여러 다른 객체가 안정적으로 참조해야 함
 
-#### ResourceCandidate
-
-새 resource/tool/provider를 바로 production registry에 넣지 않고 candidate lifecycle을 거칠 수 있어야 한다.
-
-Candidate는 integration mode를 구분한다.
-
-- **existing adapter profile**: OpenAI-compatible/MCP 등 이미 지원하는 protocol/config로 등록 가능
-- **declarative schema/config**: OpenAPI/HTTP schema처럼 generic adapter에 configuration만 추가하면 됨
-- **new adapter required**: provider-specific protocol/auth/response mapping이 필요해 새 adapter artifact를 만들어야 함
-
-세 번째 경우에도 generic planner/pipeline을 수정하지 않는다. AdapterProposal/implementation work를 별도로 만들어 sandbox/evaluation 뒤 adapter registry에 등록한다.
-
-```text
-candidate_id
-source/provenance refs
-claimed capabilities
-integration_mode / adapter_profile_ref
-public quota/pricing/terms metadata
-prerequisites / required_user_action
-expected utility
-duplication/risk assessment
-status: discovered | watch | needs_user | experimenting | evaluated | available | rejected
-evaluation refs
-```
-
-credential 자체는 candidate metadata에 저장하지 않는다.
-
-#### PolicyRef
-
-Policy 내용은 versioned data로 관리할 수 있으며 Plan과 Work가 어떤 정책 하에서 만들어졌는지 참조 가능해야 한다.
-
-예:
-
-```text
-budget / free-only constraint
-quality floor
-deadline / priority
-privacy / risk
-fallback/degradation permission
-retry/failover safety
-user approval requirements
-```
-
-이 계약의 목적은 세상의 모든 provider 필드를 사전에 하나의 거대한 schema로 통일하는 것이 아니다. Planner가 공통 의미를 읽을 수 있는 최소 semantic layer와 provider-specific detail ref를 분리하는 것이다.
 
 ## 6. Edge Escalation
 
@@ -540,18 +476,16 @@ needs_canonical_mutation
 
 ```text
 goals
-plans / plan_revisions
 work_items or expanded tasks
-work_dependencies
-observations
-policy versions / refs
-resource state snapshots
+plan data/version refs where needed
+work dependencies where needed
 triggers
 artifacts
-executors
-provider_resources
+executors / provider resources
 leases / scheduling state
 ```
+
+Observation, policy, resource-state는 우선 Event/registry/config를 재사용한다. 별도 table은 실제 persistence/query 요구가 생길 때 추가한다.
 
 정확한 테이블 이름은 구현 시 schema review에서 결정한다.
 
@@ -625,10 +559,10 @@ Redis는 요구가 증명되기 전 필수가 아니다.
 아직 목표 구조로 간주하지 않는 것:
 
 - Goal/Plan/Work graph
-- Planner/Replanner contract와 durable PlanRevision
-- Run result/Observation을 Work/Goal lifecycle로 해석하는 orchestration layer
-- normalized Observation/ResourceState/Policy lifecycle
-- extensible CapabilityDescriptor와 pipeline execution metadata
+- Planner / Execution Resolution boundary와 versioned Plan data
+- Run result를 durable Work/Goal lifecycle로 해석하는 orchestration layer
+- provider-specific 상태를 generic Event/registry state로 정규화하는 seam
+- extensible capability/pipeline metadata
 - replaceable selection/ranking policy
 - durable trigger engine
 - production scheduler leases
