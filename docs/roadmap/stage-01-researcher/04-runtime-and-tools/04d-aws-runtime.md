@@ -4,74 +4,91 @@
 
 - 상태: **선행작업 대기**
 - 지금 시작 가능: **아니오**
-- 선행조건: Stage 0 완료 + 01 durable bridge + 04A model wiring
+- 선행조건: Stage 0 + 01 durable bridge + 04A
+- contracts: ../../failure-recovery-contract.md, ../../data-security-artifact-contract.md
 
 ## 목적
 
-AWS를 항상 켜진 researcher 중앙 runtime으로 사용한다.
+AWS를 항상 켜진 researcher 중앙 runtime으로 실제 배치하고 reboot/deploy/backup/secret 경계를 검증한다.
 
-처음부터 distributed control cluster를 만들지 않는다.
+## Topology
 
-## 초기 process
+00E에서 확정한 최소 process topology를 문서와 IaC/service config로 고정한다.
 
-Stage 0 선택 후 최소 topology를 쓴다.
+최소 logical services:
 
-1. All Tomorrow application PostgreSQL
-2. All Tomorrow service
-3. selected durable backend가 요구하는 runtime/state service
-4. LiteLLM Proxy model gateway
-5. selected tool gateway — LiteLLM MCP를 선택했다면 4와 같은 process/service일 수 있음
+- All Tomorrow application
+- application PostgreSQL
+- selected durable runtime/state
+- LiteLLM Proxy
+- selected tool gateway if separate
+- OTel exporter/collector if selected
 
-OTel collector/exporter는 실제 backend 요구가 있을 때 추가한다.
+## Deployment contract
 
-## State 경계
+각 service에 명시:
 
-논리적으로 다음을 분리한다.
+- package/image/binary exact version
+- process supervisor/autostart
+- bind address/port
+- inbound/outbound network policy
+- health/readiness probe
+- persistent volume/path
+- secret injection source
+- log destination/retention
+- restart policy
+- deployment/update command
+- rollback command/version
 
-- All Tomorrow application/domain state
-- selected durable backend system/journal state
-- gateway operational state, if any
+mutable latest 금지.
 
-durable backend 내부 schema를 All Tomorrow canonical domain으로 직접 조회/수정하지 않는다.
+## Network/security
 
-## Crash behavior
+- public surface는 필요한 HTTPS ingress만
+- PostgreSQL/durable/gateway admin ports는 private/local security group
+- TLS termination과 certificate renewal owner
+- AWS runtime에 laptop approval secret/protected deployment credential 없음
+- IAM/security group 최소권한 inventory
 
-service/host restart 뒤 selected durable backend가 in-flight execution을 복구하고, All Tomorrow는 ExecutionRef와 deterministic run identity로 상태를 다시 연결한다.
+## Persistence / backup
 
-custom claim/lease/requeue recovery loop를 작성하지 않는다.
+application DB, durable state, gateway persistent state(사용 시)를 별도 owner로 기록.
 
-## Single-node 이유
+각각:
 
-초기 personal AWS에서는 가장 작은 production topology부터 닫는다.
+- backup mechanism
+- schedule
+- retention
+- restore procedure
+- restore verification fixture
+- application/durable state를 단일 transaction-consistent backup이라고 가정하지 않음
 
-multi-host/high-availability가 실제 요구가 될 때만 Stage 0 selection record의 migration trigger를 사용해 다음을 재검토한다.
+restore 후 cross-store reconciliation으로 semantic Run identity를 회복할 수 있어야 한다.
 
-- 현재 선택 backend의 HA/control-plane 요구
-- 라이선스 변화
-- 별도 managed/control service 필요성
-- 다른 durable backend로 migration할 비용
+## Failure scenarios
 
-후보 이름을 이 문서에서 미리 고정하지 않는다.
+- service process restart
+- whole instance reboot
+- LiteLLM unavailable
+- durable runtime restart
+- PostgreSQL restart
+- disk/persistent state remount
+- laptop offline
+- deploy V1→V2 + in-flight Run
+- backup restore to test environment
 
-## Failure-domain Check
+## Requirements
 
-model gateway와 tool gateway를 같은 LiteLLM process에 둘 경우 한 process 장애가 두 surface를 동시에 끊는다.
-
-Stage 0에서 이 blast radius가 durable recovery로 충분히 흡수되는지 확인한 결과를 그대로 따른다.
-
-필요하면 tool gateway만 별도 process로 분리한다.
-
-## Laptop
-
-repo mutation과 protected approval은 laptop 경계를 유지한다.
-
-laptop offline은 durable execution을 잃게 하지 않고 기다림/재시도 가능한 상태로 남아야 한다.
+| ID | 요구 | Level |
+|---|---|
+| 04D-01 reboot 뒤 in-flight recovery | L3 |
+| 04D-02 model/tool gateway failure가 Goal 유실 안 함 | L3 |
+| 04D-03 laptop offline → durable wait | L3 |
+| 04D-04 protected credential AWS 부재 | L3 security |
+| 04D-05 backup→restore 후 domain + reconciliation | L3 |
+| 04D-06 health/readiness와 supervisor actual behavior | L3 |
+| 04D-07 deploy/rollback runbook 재현 | L3 |
 
 ## 완료조건
 
-1. AWS reboot 뒤 in-flight researcher work 복구
-2. application state와 backend system state 분리
-3. model/tool gateway 장애가 Goal 유실로 이어지지 않음
-4. laptop offline이 central state 유실로 이어지지 않음
-5. custom queue recovery daemon 없음
-6. Stage 0에서 고른 최소 process topology와 일치
+AWS single-node를 실제 재부팅/복원/업그레이드해도 semantic state가 유지되고 모든 service/secret/backup/rollback 책임이 문서와 실제 설정에서 일치해야 한다.
