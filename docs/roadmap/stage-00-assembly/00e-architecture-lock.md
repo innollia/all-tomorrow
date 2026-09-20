@@ -4,59 +4,136 @@
 
 - 상태: **선행작업 대기**
 - 선행조건: 00A~00D
+- 공통 계약:
+  - ../plan-verification-contract.md
+  - ../domain-contracts.md
+  - ../failure-recovery-contract.md
+  - ../data-security-artifact-contract.md
 
 ## 목적
 
-spike 결과로만 Stage 1을 다시 연다.
+spike 결과를 architecture decision과 Stage 1 실행 계획으로 동결한다.
+00E는 단순 기록 단계가 아니라 Stage 1의 모든 packet이 더 이상 Stage 0 결과를 추측하지 않도록 만드는 rewrite gate다.
 
-## 해야 할 일
+## Decision record 형식
 
-- 채택한 durable substrate와 exact version pin 기록
-- LiteLLM MCP Gateway 채택 결과 기록
-- FastMCP fallback 필요 여부 기록
-- 각 substrate consumption mode(package/container/protocol/fork) 기록
-- backend 교체 조건 기록
-- durable journal data-classification/retention/backup 정책 기록
-- LiteLLM persistence/logging on/off 결정 기록
-- architecture/ADR를 실제 결과에 맞게 갱신
-- Stage 1 schema에서 substrate 내부 상태 제거
-- custom queue/lease/heartbeat 계획 삭제
-- LiteLLM raw client 계획을 실제 PydanticAI integration에 맞게 축소
-- 기존 PipelineRuntime의 지위를 유지/compatibility/retire 중 하나로 결정
-- Stage 1 acceptance를 crash/restart/versioning 중심으로 갱신
+각 architecture 결정은 최소 다음을 가진다.
 
-## Durable Backend별 특별 확인
+- decision id/title
+- chosen option + exact version
+- consumption mode: package/container/protocol/fork
+- observed evidence refs/test ids
+- rejected alternatives와 실제 기각 이유
+- owned/non-owned state
+- failure/retry owner
+- data/retention impact
+- upgrade compatibility constraint
+- rollback/escape condition
+- migration trigger
+- downstream packets affected
 
-### DBOS 채택 시
+"선호한다/쓸 예정이다"만 있는 기록은 확정 결정이 아니다.
 
-DBOS application version과 in-flight workflow recovery 관계를 배포 계획에 넣는다.
+## 반드시 닫을 결정
 
-DBOS Python 기본 serializer가 pickle+Base64이고 workflow input/output/step output이 system DB에 남는다는 점을 데이터 분류에 포함한다. custom serializer/encryption을 사용할 경우 DBOS tooling/recovery와 round-trip compatibility를 acceptance에서 검증한다.
-Conductor 없이 single-node production을 시작하는 경우 그 선택을 명시하고, Conductor 기능에 암묵적으로 의존하는 운영 절차를 쓰지 않는다.
+1. selected durable backend + exact version
+2. run_id → external identity mapping
+3. upgrade strategy: direct replay 또는 blue/green/drain 등 실제 검증된 방식
+4. model retry primary owner
+5. tool transport retry primary owner
+6. priority/delay/signal/cancel mapping
+7. LiteLLM MCP Gateway 채택 여부
+8. FastMCP fallback 필요 여부
+9. LiteLLM persistence/logging on/off + retention
+10. durable journal data classification/retention/backup
+11. artifact storage/ref strategy
+12. existing PipelineRuntime: maintain / compatibility-only / retire
+13. AWS 최소 process topology
+14. protected approval credential boundary
 
-초기 single-node AWS에서는 Conductor 없이 사용할 수 있지만, multi-host/high-availability가 필요해질 때는:
-- DBOS Conductor의 운영/라이선스 조건을 재검토하거나
-- PydanticAI native 지원인 Temporal로 migration spike
-- Hatchet은 embedded/self-host 장점이 native-agent integration 비용보다 큰지 별도 비교
+## Stage 1 rewrite requirements
 
-를 수행한다.
+Stage 1 문서 전체를 다음 기준으로 다시 검사한다.
 
-### Restate 채택 시
+### Identity/schema
 
-- BSL 1.1의 Public Restate Platform Service 제한과 All Tomorrow 사용 형태가 충돌하지 않는지 기록
-- journal/state에 저장되는 serialized payload의 data classification/retention
-- runtime single-node backup/restore
-- application PostgreSQL과 Restate state의 ownership 중복 여부
-- service/virtual-object/workflow 중 All Tomorrow에 필요한 최소 primitive
-- deployment version 변경 중 invocation recovery
+- Work에는 단일 ExecutionRef를 두지 않음
+- Run이 ExecutionRef 소유
+- Work 1:N Run
+- Run state는 semantic attempt state이며 backend status 복사 아님
+- canonical Question/Artifact refs 사용
+
+### 제거
+
+- custom queue claim/lease/heartbeat/requeue
+- custom durable retry/recovery ownership
+- substrate 내부 state/schema 복제
+- custom LiteLLM raw provider client
+- provider/project 이름별 generic-core branch
+
+### 구체화
+
+- selected adapter mapping
+- actual retry policy
+- actual process/runtime layout
+- crash barrier와 acceptance level
+- V1→V2 history handling
+- artifact/data retention
+- CI required lanes
+- approval threat model
+
+## Backend-specific lock
+
+### DBOS 선택 시
+
+기록/검증:
+
+- application version과 in-flight workflow 관계
+- persisted serializer/output classification
+- custom serializer/encryption 사용 시 round-trip/tooling compatibility
+- single-node 시 Conductor 비의존성
+- backup/restore procedure
+- multi-host/HA trigger가 생겼을 때 Conductor/Temporal/Hatchet 재검토 조건
+
+### Restate 선택 시
+
+기록/검증:
+
+- 라이선스/서비스 제한과 실제 사용 형태
+- journal/state serialization/retention
+- single-node backup/restore
+- application PostgreSQL과 state ownership 분리
+- 필요한 최소 primitive(service/object/workflow)
+- deployment version 변경 중 recovery
 - Pydantic integration upgrade compatibility
 
-## Persisted Compatibility 확인
+## Persisted compatibility
 
-PydanticAI/DBOS가 durable history에 사용하는 agent name, toolset id, durable operation/step name은 compatibility data로 취급한다.
+compatibility data로 취급:
 
-일반적인 tool 추가가 기존 workflow를 깨지 않도록 stable MCP/DynamicToolset 경계를 선택하고 versioning/upgrade 문서에 남긴다.
+- agent name
+- durable operation/step name
+- toolset id
+- workflow/service handler identity
+- serializer/schema version
+- model/tool contract version
+
+일반 tool 추가가 기존 history를 깨지 않도록 stable dynamic tool boundary를 사용하고 snapshot/replay test를 남긴다.
+
+## Requirements
+
+| ID | 요구 | 증거 |
+|---|---|---|
+| E-ADR-01 | 모든 필수 architecture 결정이 형식에 맞게 닫힘 | ADR set |
+| E-REWRITE-01 | Stage 1 모든 packet이 새 contract와 모순 없음 | checklist/grep/plan review |
+| E-ID-01 | Work/Run/ExecutionRef schema 계획 일치 | plan/schema fitness |
+| E-UP-01 | 실제 upgrade strategy가 C/D tests로 증명됨 | L2 evidence |
+| E-RET-01 | journal/gateway/artifact retention 정책 확정 | inventory |
+| E-RUNTIME-01 | AWS 최소 topology와 backup/restart 책임 확정 | deployment plan |
+| E-ESCAPE-01 | backend 교체 trigger/escape condition 기록 | ADR |
 
 ## 완료조건
 
-Stage 1의 각 packet이 "직접 구현할 의미"와 "외부 OSS에 맡길 mechanism"을 섞지 않고, 01A를 실제로 시작해도 되는 상태가 된다.
+Stage 1의 각 packet이 직접 구현할 semantic meaning과 외부 OSS mechanism을 섞지 않고, packet별 input/output/failure/evidence가 확정되어 01A를 추측 없이 시작할 수 있어야 한다.
+
+Stage 1 rewrite에 unresolved placeholder가 남아 있으면 00E와 Stage 0를 개발완료로 올리지 않는다.
