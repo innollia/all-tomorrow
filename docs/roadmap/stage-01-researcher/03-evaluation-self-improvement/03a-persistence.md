@@ -5,88 +5,94 @@
 - 상태: **선행작업 대기**
 - 선행조건: 02 Researcher Loop 완료
 - 지금 시작 가능: **아니오**
-- 완료 후 열림: 03B Mixed Evaluation
+- 완료 후 열림: 03B
 
 ## 목적
 
-현재 in-memory dataclass 수준의 ImprovementProposal/EvaluationScore를 durable lifecycle로 승격한다.
-
-## 수정 파일
-
-- 새 migration: `migrations/0005_improvement.sql`
-- 수정: `src/all_tomorrow/evaluation.py`
-- 새 파일: `src/all_tomorrow/storage/evaluation_store.py`
-- 수정: `src/all_tomorrow/storage/postgres.py`
-- 새 테스트: `tests/test_evaluation_store.py`
+ImprovementProposal/Evaluation을 immutable refs와 versioned criteria를 가진 durable lifecycle로 승격한다.
 
 ## Tables
 
 ### improvement_proposals
 
-- proposal_id PK
-- target_type
-- target_id
-- baseline_ref
-- candidate_ref
+- proposal_id
+- target_type / target_id
+- baseline_ref + immutable hash/version
+- candidate_ref + immutable hash/version optional until sandboxed
 - reason
 - status
 - protection_class
-- source_goal_id optional
-- source_work_id optional
-- evidence_refs jsonb
-- metadata jsonb
+- source_goal_id/work_id
+- evidence_refs
+- criteria_ref
+- metadata
 - revision
-- created_at/updated_at
+- timestamps
 
 status:
+PROPOSED / SANDBOXED / EVALUATED / ACCEPTED / REJECTED / PROMOTED / ROLLED_BACK / APPROVAL_REQUIRED / STALE
 
-PROPOSED / SANDBOXED / EVALUATED / ACCEPTED / REJECTED / PROMOTED / ROLLED_BACK / APPROVAL_REQUIRED
+### evaluation_criteria
+
+평가기준을 candidate 결과와 분리해 versioned/frozen snapshot으로 저장한다.
+
+- criteria_id/version
+- proposal_id
+- generated_from refs
+- common required metrics
+- dynamic criteria
+- hard invariants
+- frozen_at
+- content hash
+
+candidate execution 시작 전에 freeze한다.
 
 ### evaluation_runs
 
-- evaluation_id PK
-- proposal_id FK
-- baseline_ref
-- candidate_ref
-- criteria jsonb
-- common_metrics jsonb
-- dynamic_metrics jsonb
-- user_evidence_refs jsonb
+- evaluation_id
+- proposal_id
+- criteria_ref
+- baseline_ref/hash
+- candidate_ref/hash
+- common/dynamic/user evidence refs
 - decision
 - reason
+- evaluator version/ref
 - created_at
 
 ### user_feedback
 
-Stage 1 최소:
-
 - feedback_id
 - user_id
-- target_type
-- target_id
-- rating/text optional
+- target_type/id
+- rating/text ref optional
 - source
 - occurred_at
 - metadata
 
-raw conversation 전체 저장은 하지 않는다.
+raw conversation 전체를 복제하지 않는다.
 
-## Existing API compatibility
+## Immutability
 
-현재 `EvaluationScore`, `ImprovementProposal`, `EvaluationService.compare()` 테스트를 당장 깨지 않는다.
+proposal ACCEPT 이후 candidate hash/version이 바뀌면 기존 evaluation/approval은 무효이며 proposal은 STALE 또는 새 revision으로 재평가한다.
 
-새 lifecycle은 기존 compare 위에 확장하고 나중에 단순 fixed-score compare를 내부 helper로 축소 가능.
+evaluation criteria도 candidate가 변경할 수 있는 mutable working-tree file만으로 참조하지 않는다.
 
-## Store API
+## Atomicity
 
-- create/get/update proposal
-- append evaluation
-- list proposal evaluations
-- append/list user feedback
-- list pending approval proposals
+모든 proposal status change + Event는 같은 transaction.
+illegal transition은 reject한다.
 
-모든 status change는 Event와 같은 transaction으로 기록.
+## Requirements
+
+| ID | 요구 | 검증 |
+|---|---|---|
+| 03A-01 | restart 후 lifecycle/provenance 보존 | PostgreSQL integration |
+| 03A-02 | criteria candidate 실행 전 freeze | ordering test |
+| 03A-03 | candidate hash 변경 시 prior evaluation 무효 | stale test |
+| 03A-04 | status + Event atomic | transaction failure |
+| 03A-05 | observation에서 proposal/eval refs 재사용 가능 | projection test |
 
 ## 완료조건
 
-proposal/evaluation/user feedback이 restart 뒤에도 보존되고 provenance로 다시 researcher observation에 들어갈 수 있음.
+proposal, frozen criteria, evaluation, user evidence가 immutable provenance로 연결되어 이후 candidate가 자신의 평가 기록을 바꿀 수 없어야 한다.
