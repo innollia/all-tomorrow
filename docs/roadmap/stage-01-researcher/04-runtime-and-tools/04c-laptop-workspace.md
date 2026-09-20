@@ -2,115 +2,61 @@
 
 ## Status
 
-- 상태: **시작안했음**
-- 지금 시작 가능: **예**
-- 선행조건: 없음
+- 상태: **선행작업 대기**
+- 지금 시작 가능: **아니오**
+- 선행조건: Stage 0 완료
 
 ## 목적
 
-1차 repo mutation을 사용자의 노트북 하나에 한정하면서 project identity와 `C:\...` 같은 host-local path를 분리한다.
+logical project/source identity와 host-local checkout path를 분리하고 worker가 허용된 workspace 밖으로 빠져나가지 못하게 한다.
 
-## 수정 파일
+## Mapping
 
-- 새 파일: `src/all_tomorrow/workspaces.py`
-- 수정: `projects/catalog.yaml`
-- 새 파일: `projects/workspaces.example.yaml`
-- 수정: `.gitignore`
-- 새 테스트: `tests/test_workspaces.py`
-- 필요 시 보강: `tests/test_projects.py`
+catalog에는 logical source만 저장.
+local ignored file은 executor_id + project_id → path binding을 저장한다.
 
-## Project catalog
-
-`projects/catalog.yaml`의 source_refs에서 host-local repo path를 logical source로 바꾼다.
-
-예:
-
-- All Tomorrow: `github:innollia/all-tomorrow`
-- Eve: 실제 GitHub repository identity
-- domain refs는 그대로 유지
-
-실제 local checkout path는 catalog 정본에 넣지 않는다.
-
-## Local mapping
-
-commit되는 template:
-
-`projects/workspaces.example.yaml`
-
-실제 사용자 파일:
-
-`projects/workspaces.local.yaml`
-
-.gitignore에 local file 추가.
-
-형태:
-
-executor_id
-→ project_id
-→ path
-
-초기 executor_id는 하나:
-
-- `laptop`
-
-## workspaces.py
-
-dataclass:
-
-`WorkspaceBinding`
+WorkspaceBinding:
 
 - executor_id
 - project_id
 - path
+- allowed_root
+- optional expected source/ref
 
-`WorkspaceResolver`:
+## Resolution invariants
 
-- config load
-- duplicate binding reject
-- `resolve(project_id, executor_id) -> Path | None`
-- path resolve
-- 존재하는 directory인지 확인
-- symlink/path traversal 결과가 configured root 밖으로 빠지지 않는지 확인
+1. path와 allowed_root 모두 realpath로 normalize
+2. workspace realpath가 allowed_root 하위여야 함
+3. worker allowed_roots에도 같은 normalized root가 포함되어야 함
+4. symlink/junction을 따라 root 밖으로 나가면 reject
+5. missing/non-directory는 explicit unavailable
+6. expected repo source가 있으면 remote/repo identity mismatch를 관측해 reject/warn policy 적용
 
-1차에서는 checkout 생성/clone/pull을 자동으로 하지 않는다.
+## Dirty tree policy
 
-binding 없으면 상위 orchestration이 WAITING/NEED_USER/provisioning을 결정하도록 명시적 missing result를 반환한다.
+1차에서 자동 stash/reset/checkout하지 않는다.
 
-## Worker 연결
+repo mutation Work 전에:
 
-worker에 project_id만 던져 resolver가 내부에서 cwd를 암묵적으로 찾게 하지 않는다.
+- dirty/untracked state 관측
+- current branch/HEAD ref 기록
+- proposal/Work가 요구한 baseline과 다르면 NEED_USER 또는 explicit safe disposable worktree path
+- 사용자 기존 변경을 조용히 덮어쓰지 않음
 
-상위 execution resolution이:
+03C sandbox는 disposable worktree를 별도 생성할 수 있으나 canonical laptop checkout을 암묵 수정하지 않는다.
 
-project_id + executor_id
-→ WorkspaceResolver
-→ cwd
-→ WorkerRequest.payload["cwd"]
+## Requirements
 
-순서로 명시적으로 조립한다.
-
-기존 worker의 cwd safety check는 그대로 유지해 2중 경계를 둔다.
-
-## 테스트
-
-- all-tomorrow/laptop 정상 resolve
-- unknown project → None/error contract
-- unknown executor
-- duplicate binding reject
+- 정상 resolve
+- unknown project/executor
+- duplicate binding
 - nonexistent path
-- path normalization
-- worker allowed_root 밖 mapping 차단
-- catalog에 `repo:C:/...` 잔존하지 않는지 검사
-
-## 하지 말 것
-
-- Git clone/pull 자동화
-- dirty tree 자동 stash
-- branch reconciliation
-- AWS/Sol Pi mapping 실제 구현
-- network filesystem
-- path를 Project.project_id로 사용
+- symlink/junction escape
+- resolver root와 worker allowed_root mismatch
+- logical source mismatch
+- dirty tree detection
+- catalog에 host-local path 없음
 
 ## 완료조건
 
-logical project source와 laptop cwd가 분리되고, 기존 worker는 resolver가 준 cwd로 그대로 실행 가능.
+logical project identity와 local cwd가 분리되고 resolver와 worker가 같은 filesystem boundary를 이중 검증해야 한다.
