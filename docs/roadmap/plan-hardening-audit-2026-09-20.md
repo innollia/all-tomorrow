@@ -84,9 +84,11 @@
 8. AWS exact process topology/version
 9. journal/gateway/artifact 실제 retention 기간
 10. Remote-control RPO/RTO 숫자
-11. Stage 3 dependency wait를 Work WAITING+reason으로 유지할지 별도 BLOCKED state를 추가할지
+11. ~~Stage 3 dependency wait state~~ → 두 번째 hardening에서 `Work WAITING + wait_reason=dependency_blocked`로 확정
 
-이 값은 해당 선행 evidence가 생긴 즉시 00E/해당 packet에서 확정해야 하며, 미정 상태로 downstream packet을 개발완료 처리할 수 없다.
+1~10은 해당 선행 evidence가 생긴 즉시 00E/해당 packet에서 확정해야 하며, 미정 상태로 downstream packet을 개발완료 처리할 수 없다. 11은 두 번째 hardening에서 설계상 닫혔다.
+
+후속 감사와 최신 상태는 `plan-hardening-audit-2-2026-09-20.md`를 따른다.
 
 ## 감사 결론
 
