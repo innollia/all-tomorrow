@@ -1,5 +1,7 @@
 # Canonical Domain Contracts
 
+Goal completion, Outcome, Event, Error, SourceRef, Project, Tool/Worker descriptor와 일반 Authorization은 [Control Plane Semantic Contracts](control-plane-contracts.md)를 함께 따른다.
+
 00B 이후 계획이 공유하는 identity/state 의미를 고정한다. 외부 durable backend나 provider의 내부 type/status를 이 의미로 승격하지 않는다.
 
 ## Identity glossary
@@ -55,7 +57,7 @@ NEED_USER를 표현하는 durable semantic projection.
 - question_id
 - work_id/run_id
 - prompt/content ref
-- status: PENDING / ANSWERED / CANCELLED / EXPIRED
+- status: PENDING / ANSWERED / SUPERSEDED / CANCELLED / EXPIRED
 - answer ref
 - durable signal correlation
 - revision/timestamps
