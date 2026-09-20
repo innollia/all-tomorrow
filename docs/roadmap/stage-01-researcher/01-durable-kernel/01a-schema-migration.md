@@ -6,94 +6,114 @@
 - 지금 시작 가능: **아니오**
 - 선행조건: Stage 0 완료
 - 완료 후 열림: 01B
+- contracts: ../../domain-contracts.md, ../../plan-verification-contract.md
 
 ## 목적
 
-기존 thin tasks를 All Tomorrow가 실제로 소유하는 Goal/Work semantic state로 확장한다.
+기존 thin tasks를 Goal/Work/Run semantic state로 확장하되 durable backend queue/checkpoint schema를 복제하지 않는다.
 
-durable backend의 queue/lease/checkpoint schema는 복제하지 않는다.
+## Migration policy
 
-## 수정 방향
+- 0001/0002 등 기존 migration은 과거 사실로 유지
+- 새 forward migration으로만 변경
+- 기존 row identity와 provenance 보존
+- migration 전/후 row-count 및 key mapping fixture를 둠
 
-새 migration은 0001/0002를 과거 migration으로 유지하고 추가한다.
+## goals
 
-### goals
+최소 semantic fields:
 
-유지할 의미:
 - goal_id
 - user_id
 - project_id
 - title
 - objective
-- semantic status
+- semantic_status
 - priority
 - origin
 - metadata
 - revision
-- timestamps
+- created_at / updated_at
 
-### work_items
+## work_items
 
-tasks를 rename해 기존 row를 보존한다.
+기존 tasks를 rename/변환하며 row identity를 보존한다.
 
-유지할 의미:
+최소:
+
 - work_id
 - goal_id
 - user_id
 - project_id
 - title
-- semantic status
+- semantic_status
 - priority
 - origin
 - trace_id
 - payload/reference
 - wait_reason
 - parent_work_id
+- lineage refs
 - revision
 - timestamps
 
-외부 실행 연결:
+**execution_backend / execution_id / execution_version을 Work에 두지 않는다.**
+Work는 여러 Run을 가질 수 있으므로 external execution linkage는 Run이 소유한다.
+
+## runs
+
+Run은 Work의 한 logical execution attempt다.
+
+최소:
+
+- run_id PK
+- work_id FK
+- semantic_status
+- attempt_origin / reason
 - execution_backend nullable
 - execution_id nullable
 - execution_version nullable
+- trace_id
+- started_at / terminal_at
+- revision
+- created_at / updated_at
 
-이 세 필드는 provenance/linkage이며 external engine의 state machine을 복제하지 않는다.
+제약:
 
-## 삭제된 기존 계획
+- Work 1:N Run
+- 하나의 Run에는 최대 하나의 active logical ExecutionRef
+- runs.trace_id UNIQUE 금지
+- terminal Run을 새 attempt로 재사용 금지
+- backend internal status/schema column 복제 금지
 
-다음 column을 All Tomorrow queue authority 목적으로 추가하지 않는다.
+## events
+
+- event provenance가 Run 삭제/정리와 함께 cascade 소실되지 않음
+- Goal/Work/Run/source/external refs 연결 가능
+- payload에는 raw provider object/secret를 저장하지 않음
+
+## 삭제/금지 대상
+
+All Tomorrow queue authority 목적으로 다음을 추가하지 않는다.
 
 - claimed_by
 - lease_expires_at
-- attempt_count
+- attempt_count as backend retry bookkeeping
+- custom claim/lease recovery index
 
-다음 index도 만들지 않는다.
+priority는 semantic domain field이며 adapter가 backend priority로 변환한다.
 
-- custom claim partial index
-- lease recovery index
+## Requirement / verification
 
-priority는 사용자/프로젝트 의미를 보존하는 domain field다. 실제 enqueue 시 durable backend priority로 변환한다.
-
-## runs / events
-
-기존 오류는 별도로 바로잡는다.
-
-- runs.trace_id UNIQUE 제거
-- 한 Work 아래 여러 execution/run attempt 허용
-- event provenance가 run 정리와 함께 cascade 삭제되지 않게 수정
-- external execution ref와 trace linkage 가능하게 함
-
-## 하지 말 것
-
-- DBOS system table을 migration에서 생성/수정
-- DBOS workflow status를 work status enum으로 그대로 복제
-- future Hatchet/Temporal 내부 id를 위한 vendor별 column 추가
-- 0001을 과거 migration 대신 다시 쓰기
+| ID | 요구 | 검증 | Level |
+|---|---|---|---|
+| 01A-01 | 기존 task/goal data 보존 | pre/post fixture + live migration row mapping | L1 |
+| 01A-02 | Work 1:N Run | DB constraint/integration | L1 |
+| 01A-03 | ExecutionRef fields는 Run에만 존재 | schema fitness test | L0 |
+| 01A-04 | queue/lease mechanics 없음 | schema grep/architecture test | L0 |
+| 01A-05 | event provenance 비-cascade 보존 | deletion/retention integration | L1 |
+| 01A-06 | migration chain이 빈 DB와 기존 fixture DB 모두 통과 | migration integration | L1 |
 
 ## 완료조건
 
-1. 기존 task data가 보존됨
-2. Goal/Work semantic state 저장 가능
-3. Work가 external execution ref를 vendor-neutral하게 참조 가능
-4. queue/lease mechanics가 schema에 들어오지 않음
-5. multi-run/multi-trace provenance 요구를 만족
+위 요구가 모두 통과하고, 01B가 Goal/Work/Run semantic store를 구현할 수 있는 schema가 확정되어야 한다.
