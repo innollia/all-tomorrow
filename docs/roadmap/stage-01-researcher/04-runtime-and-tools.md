@@ -18,6 +18,8 @@ Stage 0 gate가 활성인 동안 04B/04C를 포함한 Stage 1 구현을 시작�
 | 04C | Laptop Workspace Resolver | 선행작업 대기 | 아니오 | Stage 0 |
 | 04D | AWS Single-Node Runtime | 선행작업 대기 | 아니오 | Stage 0 + 01 + 04A |
 | 04E | Laptop Approval Authority | 선행작업 대기 | 아니오 | 03 + 04D security boundary |
+| 04F | Artifact Store & Integrity | 선행작업 대기 | 아니오 | Stage 0 + 01 | 
+| 04G | Secrets / Operations / Dependency Security | 선행작업 대기 | 아니오 | Stage 0 + 04D |
 
 ## 원칙
 
@@ -27,3 +29,8 @@ Stage 0 gate가 활성인 동안 04B/04C를 포함한 Stage 1 구현을 시작�
 - project identity와 host-local workspace 분리
 - AWS와 laptop credential/authority domain 분리
 - runtime/deployment도 evidence level과 rollback path를 가진다
+- Artifact bytes lifecycle과 secret/alert/dependency security를 별도 packet으로 둔다
+
+## Implementation map
+
+[Stage 1 Implementation Map](implementation-map.md)을 사용한다.
