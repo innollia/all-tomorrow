@@ -61,6 +61,8 @@ packet은 다음을 모두 만족할 때만 개발완료다.
 
 부분 구현은 개발중으로 유지한다.
 
+implementation-ready packet은 구현 경로와 테스트 경로가 비어 있으면 시작안했음/개발중으로 올리지 않는다. 선행 evidence 때문에 아직 경로를 확정할 수 없으면 evidence blocker와 확정 시점을 명시한다.
+
 ## 6. Upstream invalidation
 
 상위 contract가 변경되면 영향을 받는 downstream packet을 즉시 재검토 대상으로 표시한다.
@@ -94,6 +96,7 @@ packet은 다음을 모두 만족할 때만 개발완료다.
 11. 완료조건
 12. 비범위
 13. downstream에 넘기는 확정 산출물
+14. 구현 예정 위치: code/module/migration/config/test 경로 또는 stage implementation-map entry
 
 ## 8. 상태표 일관성
 
