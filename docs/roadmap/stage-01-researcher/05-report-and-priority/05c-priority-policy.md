@@ -23,14 +23,36 @@
 
 domain 문자열 자체를 condition으로 쓰지 않는다.
 
-## Policy
+## Priority semantics
 
-- hard_commitment user Work: P0/P1 candidate
-- normal_request: context에 따른 active priority
-- low_commitment_idea: TODO/Goal candidate, 즉시 실행 필수 아님
-- autonomous research: 기본 background priority
+- P0 — 즉시 중단 대응이 필요한 사용자 명시 긴급/안전/시간 임박 commitment
+- P1 — 사용자 명시 high-priority 또는 가까운 hard deadline
+- P2 — 현재 사용자가 직접 맡긴 active request
+- P3 — 일반 scheduled/user-owned Work
+- P4 — proactive personal/manager Work
+- P5 — autonomous research/self-improvement
+- P6 — opportunistic maintenance/discovery
 
-실제 mapping 값은 versioned policy/config로 기록한다.
+동일 priority 안에서는 deadline, explicit ordering, age, enqueue time을 versioned policy로 사용한다.
+
+### Aging / starvation
+
+- P5/P6가 오래 대기하면 제한적으로 한 단계씩 aging 가능
+- aging만으로 P2 이상이 되지 않음
+- explicit user constraint/deadline 없이는 autonomous Work가 current active user request보다 위로 올라가지 않음
+- P0/P1은 무제한 선점 권한이 아니라 non-interruptible mutation safety boundary를 여전히 준수
+
+### Commitment mapping
+
+- hard_commitment → P0/P1
+- ordinary current request → P2
+- scheduled user task → P3
+- proactive brief/preparation → P4
+- autonomous background → P5
+- low-value maintenance/opportunistic discovery → P6
+- "재밌겠다/나중에 해볼까"처럼 low-commitment idea는 즉시 실행 priority가 아니라 TODO/Goal candidate로 materialize 가능
+
+policy version/ref를 모든 priority decision provenance에 기록한다.
 
 ## Dispatch vs preemption
 
