@@ -16,7 +16,7 @@ All Tomorrow가 직접 소유하는 Goal/Work 의미를 저장하고, 외부 dur
 |---:|---|---|---:|---|---|
 | 01A | Semantic Schema Migration | 선행작업 대기 | 아니오 | Stage 0 | [01a](01-durable-kernel/01a-schema-migration.md) |
 | 01B | Goal/Work Domain & Store | 선행작업 대기 | 아니오 | 01A | [01b](01-durable-kernel/01b-domain-and-store.md) |
-| 01C | Durable Execution Bridge | 선행작업 대기 | 아니오 | 01B | [01c](01-durable-kernel/01c-durable-queue.md) |
+| 01C | Durable Execution Bridge | 선행작업 대기 | 아니오 | 01B | [01c](01-durable-kernel/01c-durable-execution-bridge.md) |
 | 01D | Run / Compatibility Linkage | 선행작업 대기 | 아니오 | 01B + 01C | [01d](01-durable-kernel/01d-run-linkage.md) |
 | 01E | Live Failure Verification | 선행작업 대기 | 아니오 | 01A~01D | [01e](01-durable-kernel/01e-live-db-verification.md) |
 
