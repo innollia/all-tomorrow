@@ -1,5 +1,7 @@
 # Failure, Retry & Recovery Contract
 
+Run start 외 Question signal, Trigger fire, Artifact attach, source mutation, outbound delivery의 dual-write는 [Delivery, Consistency & Repair Contract](delivery-consistency-contract.md)를 따른다.
+
 00B 이후 durable execution, gateway, worker, trigger가 공유하는 실패 의미를 정의한다.
 
 ## 1. Retry ownership
