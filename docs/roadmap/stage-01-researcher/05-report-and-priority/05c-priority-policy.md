@@ -3,68 +3,61 @@
 ## Status
 
 - 상태: **선행작업 대기**
-- 선행조건: 01 Durable Queue + 02 Researcher Loop
+- 선행조건: 01 Durable Execution Bridge + 02 Researcher Loop
 - 지금 시작 가능: **아니오**
 
 ## 목적
 
-autonomous background work가 사용자 실제 commitment를 방해하지 않게 하되 학교/대회 같은 domain 이름을 core에 하드코딩하지 않는다.
+사용자 commitment가 autonomous background work보다 우선하도록 semantic priority와 safe preemption policy를 정의한다.
 
-## 수정 파일
+## Inputs
 
-- 새 파일: `src/all_tomorrow/priority_policy.py`
-- 수정: `src/all_tomorrow/scheduler.py`
-- 수정: `src/all_tomorrow/work.py`
-- 새 테스트: `tests/test_priority_policy.py`
-
-## 입력
-
-Work metadata에서:
-
-- origin: user / researcher / system
+- origin
 - explicit priority
-- commitment_level optional
-- urgency/deadline optional
+- commitment_level
+- deadline/urgency
 - interruptibility
 - resource class
+- authority/budget constraints
+- provenance
 
-commitment_level 후보:
+domain 문자열 자체를 condition으로 쓰지 않는다.
 
-- hard_commitment
-- normal_request
-- low_commitment_idea
+## Policy
 
-이 값은 ingress/researcher가 맥락에서 생성할 수 있고 provenance를 가진다.
+- hard_commitment user Work: P0/P1 candidate
+- normal_request: context에 따른 active priority
+- low_commitment_idea: TODO/Goal candidate, 즉시 실행 필수 아님
+- autonomous research: 기본 background priority
 
-학교 수행평가/AI 대회라는 문자열 자체를 policy condition으로 사용하지 않는다.
+실제 mapping 값은 versioned policy/config로 기록한다.
 
-## 현재 사용자 정책
+## Dispatch vs preemption
 
-- hard_commitment user Work → P0/P1, background researcher yield
-- normal user request → active project 수준
-- low_commitment_idea → 바로 실행 필수 아님, Goal/TODO candidate 가능
-- autonomous research → 기본 P4 이하
+semantic priority와 durable backend mechanism을 구분한다.
 
-정확한 priority는 deadline/resource context로 조정 가능.
+### Pending dispatch
 
-## Yield
+selected backend의 priority/delay mapping을 사용해 새 high-priority Work가 먼저 실행되도록 한다.
 
-현재 실행 중 Work가 interruptible이고 더 높은 priority pending Work가 있으면:
+### Already running background Work
 
-- safe boundary에서 heartbeat/lease 반환 또는 WAITING/PENDING transition
-- `work.yielded` Event
-- user Work claim 가능
+lease/heartbeat 반환 같은 custom queue 용어를 사용하지 않는다.
 
-외부 side effect 중간인 non-interruptible Work를 kill해서 corruption 만들지 않는다.
+- interruptible + selected backend가 safe suspend/cancel boundary를 지원하면 cooperative yield request
+- 현재 operation이 non-interruptible external mutation이면 reconciliation 가능한 boundary까지 강제 kill 금지
+- backend가 pause를 지원하지 않으면 새 background Run 시작을 막고 현재 bounded operation 종료 후 user Work를 우선
+- yield/cancel 여부와 이유는 Event/Run provenance로 남김
 
-## 테스트
+## Requirements
 
-- hard commitment가 research보다 우선
+- hard commitment가 pending research보다 먼저 dispatch
 - low-commitment idea가 자동 P0 아님
-- domain string 없이 metadata로 동작
-- non-interruptible mutation은 safe boundary까지 기다림
-- yield 후 background Work provenance/재개 가능
+- running safe-yield 시 Work/Run provenance 유지
+- non-interruptible mutation을 중간 kill하지 않음
+- selected backend가 지원하지 않는 pause primitive를 core에서 가짜로 구현하지 않음
+- policy version/ref 기록
 
 ## 완료조건
 
-user-owned high-priority Work가 autonomous work를 실제 queue level에서 밀어내고, low commitment는 즉시 전체 자원을 점유하지 않음.
+사용자 high-priority Work가 실제 resource dispatch에서 우선하며 preemption이 selected backend semantics와 충돌하지 않아야 한다.
