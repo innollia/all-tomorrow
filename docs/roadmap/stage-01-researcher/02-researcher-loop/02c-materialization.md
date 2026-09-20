@@ -5,100 +5,82 @@
 - 상태: **선행작업 대기**
 - 선행조건: 02B 완료
 - 지금 시작 가능: **아니오**
-- 완료 후 열림: 02D Lineage & Dedup
+- 완료 후 열림: 02D
+- contracts: ../../domain-contracts.md, ../../plan-verification-contract.md
 
 ## 목적
 
-Researcher model output을 검증된 durable Goal/Work/Question/Proposal mutation으로 변환한다.
+validated typed decision을 durable Goal/Work/Question/Proposal state로 materialize한다.
 
-## 수정 파일
+## Core rule
 
-- 수정: `src/all_tomorrow/researcher.py`
-- 수정: `src/all_tomorrow/storage/postgres.py`
-- 수정: `src/all_tomorrow/work.py`
-- 수정: `src/all_tomorrow/evaluation.py`
-- 새 테스트: `tests/test_researcher_materialization.py`
-
-## Materializer
-
-class:
-
-`ResearcherDecisionMaterializer`
-
-method:
-
-- `apply(snapshot, decision)`
-
-모든 mutation은 model output을 그대로 SQL로 연결하지 않고 typed contract로 변환.
+model payload를 SQL/domain object에 그대로 복사하지 않는다.
+action별 validator → canonical domain command → transaction 순서다.
 
 ## Action mapping
 
 ### NOOP
 
-- DB mutation 없음
-- `researcher.noop` Event
+- state mutation 없음
+- researcher.noop Event
 
 ### CREATE_GOAL
 
-- origin=`researcher`
-- objective/title/priority validation
-- Goal 생성
-- 필요하면 root Work 함께 생성
-- `goal.autonomous_created` Event
+한 transaction:
+
+- Goal(origin=researcher)
+- 필요 시 root Work
+- lineage/evidence refs
+- Event
 
 ### CREATE_WORK
 
-- existing Goal 검증
+- target Goal ownership/state 검증
 - parent/evidence lineage
-- priority/budget inherit
-- trace lineage 결정
-- Work 생성
-- `work.autonomous_created`
+- budget reservation 확인
+- Work + Event atomic
 
 ### REVISE_WORK
 
-1차에서는 기존 Work payload를 제자리에서 조용히 덮지 않는다.
-
-- 기존 Work가 terminal이면 새 child/successor Work 생성
-- non-terminal이면 revision 증가 + Event
-- 이유/evidence refs 필수
+- terminal Work: in-place revive 금지, successor Work 생성
+- non-terminal Work: allowed semantic fields만 revision 증가
+- arbitrary status 변경 금지
+- reason/evidence 필수
 
 ### ASK_USER
 
-현재 Pipeline UserQuestion과 같은 resume-token 구조를 억지로 재사용하지 않는다.
+canonical Question contract를 사용한다.
 
-Stage 1 researcher question은 Work를 WAITING으로 만들고 pending question record를 연결할 수 있도록 durable question primitive를 Goal/Work 레벨로 일반화한다.
+- Question durable record 생성
+- Work를 semantic WAITING으로 transition
+- backend durable wait/signal correlation 생성
+- duplicate decision/question_id는 record 1개
+- answer 저장과 signal 전송은 idempotent
 
-01 구현 결과를 보고 기존 user_questions를 확장하거나 별도 work_questions를 추가한다.
+기존 user_questions schema가 contract를 만족하면 확장하고, 아니면 migration을 추가한다. 저장 의미는 이 packet에서 더 이상 미정이 아니다.
 
 ### PROPOSE_IMPROVEMENT
 
-03의 `ImprovementProposal` persistence로 넘김.
+03A store가 있으면 ImprovementProposal 생성.
+03A 전이면 immutable typed proposal candidate + Event만 남기며 production mutation 금지.
 
-03이 아직 구현 전이면 typed proposal candidate를 Event/Work로 남길 수 있지만 production change는 금지.
+## Atomicity / idempotency
 
-## Atomicity
+- Goal/Work/Question/Proposal mutation + provenance Event는 application transaction으로 묶음
+- decision_id 또는 materialization_key에 DB unique constraint를 둬 같은 decision replay가 duplicate mutation을 만들지 않음
+- Event만 성공하고 domain mutation이 실패하거나 그 반대인 partial commit 금지
 
-Goal/Work 생성 + provenance Event는 같은 transaction.
+## Requirements
 
-CREATE_GOAL + initial Work를 함께 만들면 둘도 같은 transaction.
-
-## 테스트
-
-- autonomous Goal + root Work atomic 생성
-- invalid target Goal → mutation 없음
-- terminal Work revise → successor 생성
-- evidence ref 없이 mutation 거절
-- NOOP state change 없음
-- improvement proposal은 production mutation 없음
-
-## 하지 말 것
-
-- model 출력 SQL 실행
-- model이 지정한 arbitrary status 그대로 수용
-- 기존 Work history 삭제/덮어쓰기
-- 사용자 질문을 ephemeral memory에만 저장
+| ID | 요구 | 검증 | Level |
+|---|---|---|---|
+| 02C-01 | same decision 두 번 apply → mutation 1개 | concurrent/replay integration | L1 |
+| 02C-02 | CREATE_GOAL + root Work + Event atomic | transaction failure test | L1 |
+| 02C-03 | terminal Work revise → successor | domain integration | L1 |
+| 02C-04 | invalid target/evidence → mutation 0 | negative | L0/L1 |
+| 02C-05 | ASK_USER durable + duplicate safe | restart/replay | L2 |
+| 02C-06 | proposal candidate가 production change를 직접 만들지 않음 | architecture/negative | L0 |
 
 ## 완료조건
 
-모델 decision이 typed durable state로 materialize되고 모든 mutation에 origin/evidence/provenance가 남음.
+모든 decision action이 canonical typed state로 atomic/idempotent하게 materialize되고 origin/evidence/provenance를 가진다.
