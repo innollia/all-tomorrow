@@ -44,7 +44,7 @@ All Tomorrow는 범용 인프라를 다시 구현하는 프로젝트가 아니�
 
 우선 외부 엔진에 위임하는 것:
 - PydanticAI: agent/tool/MCP/structured-output/eval interface
-- DBOS: 첫 durable execution backend
+- Stage 0에서 선택된 durable backend: execution journal/recovery/signal mechanics
 - LiteLLM: model/provider gateway
 - OpenTelemetry: telemetry contract
 - GitHub/Actions: code change와 CI/evaluation rail
@@ -55,6 +55,10 @@ All Tomorrow는 범용 인프라를 다시 구현하는 프로젝트가 아니�
 
 - 현재 기반 선택: [Stage 0](roadmap/stage-00-assembly/index.md)
 - 작업 파일 찾기: [roadmap file map](roadmap/README.md)
+- 00B 이후 공통 작성/완료 기준: [plan verification contract](roadmap/plan-verification-contract.md)
+- identity/state: [domain contracts](roadmap/domain-contracts.md)
+- failure/recovery: [failure recovery contract](roadmap/failure-recovery-contract.md)
+- data/security/artifact: [data security artifact contract](roadmap/data-security-artifact-contract.md)
 - 구조/권한 변경 작업만: [cross-stage invariants](roadmap/invariants.md)
 - 원문 요구 누락 감사만: [vision coverage](roadmap/vision-coverage.md)
 - 확정된 OSS 조립 원칙: [ADR 0005](decisions/0005-assemble-open-source-substrates.md)
