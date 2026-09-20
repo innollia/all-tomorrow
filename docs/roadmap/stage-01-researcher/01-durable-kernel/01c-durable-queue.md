@@ -5,78 +5,96 @@
 - 상태: **선행작업 대기**
 - 지금 시작 가능: **아니오**
 - 선행조건: 01B + Stage 0 substrate 채택
+- contracts: ../../domain-contracts.md, ../../failure-recovery-contract.md, ../../plan-verification-contract.md
 
 ## 목적
 
-custom DurableWorkQueue를 만들지 않고 All Tomorrow Work를 Stage 0에서 선택된 durable backend에 연결한다.
+custom DurableWorkQueue를 만들지 않고 Run을 Stage 0 selected durable backend에 연결한다.
 
-이 문서는 backend 선택 전에는 stable port와 cross-store protocol만 확정한다. DBOS/Restate별 concrete mapping은 00E에서 winner에 맞춰 채운다.
+## Stable port
 
-## Stable Port
+00B에서 확정한 DurableExecutionPort contract를 그대로 구현한다.
 
-DurableExecutionPort 최소 contract:
+- start
+- get
+- cancel
+- signal
+- result
 
-- start(work_id, execution_spec, *, idempotency_key, priority, delay)
-- get(execution_ref)
-- cancel(execution_ref)
-- signal(execution_ref, topic, payload)
-- result(execution_ref)
-
-필요한 기능만 contract에 올린다. 외부 engine API 전체를 추상화하지 않는다.
+새 backend 기능이 필요하다는 이유로 port를 vendor API mirror로 확장하지 않는다. 추가 operation은 실제 semantic 필요와 alternate adapter contract를 먼저 증명한다.
 
 ## Identity
 
 - Work 1:N Run
-- 새 logical attempt는 새 run_id
-- run_id는 첫 adapter의 deterministic external execution/idempotency identity 후보
-- ExecutionRef는 backend-neutral reference
-- external backend status/schema를 Run domain으로 복사하지 않음
+- Run = logical attempt
+- run_id = deterministic external execution/idempotency identity의 source
+- ExecutionRef는 Run 소유
+- same run_id recovery는 same logical external execution으로 수렴
 
-## Cross-store start protocol
+## Start protocol
 
-application DB와 durable backend state 사이에 distributed transaction을 만들지 않는다.
+../../failure-recovery-contract.md의 cross-store start/reconciliation을 구현한다.
 
-1. Work에 새 Run/ExecutionAttempt를 STARTING으로 application DB transaction에 기록
-2. commit
-3. 같은 run_id를 deterministic external execution identity로 사용해 start
-4. 반환된 handle을 ExecutionRef로 attach
-5. crash로 3/4 사이가 끊기면 STARTING + no-ref Run을 scan
-6. 같은 run_id로 start/get을 반복해 기존 execution을 회수
+필수:
 
-이 reconciliation은 external start delivery 복구만 담당한다. queue ordering/lease/retry를 새로 구현하지 않는다.
+1. Run STARTING app commit
+2. same run_id external start
+3. ExecutionRef attach CAS
+4. attach 후 semantic state 전환
+5. STARTING/no-ref scan
+6. concurrent reconciler lock/revision
+7. existing execution recover
+8. divergent ref fail closed
+9. bounded reconciliation exhaustion 기록
+
+## Selected adapter mapping
+
+00E가 다음 concrete mapping을 채운 뒤에만 구현 시작:
+
+- package/runtime/version
+- run_id → external identity
+- priority
+- delay/timer
+- signal + signal dedup identity
+- cancel
+- result retrieval
+- restart/recovery
+- concurrency/rate primitive
+- persisted names/version constraints
+- system-state storage boundary
+
+placeholder가 남아 있으면 01C 시작 불가다.
+
+## Side effects
+
+external mutation은 ../../failure-recovery-contract.md의 세 semantics 중 하나를 선언한다.
+
+- IDEMPOTENT_REPLAY
+- RECONCILE_BEFORE_RETRY
+- NON_RETRYABLE_AMBIGUOUS
+
+engine replay를 exactly-once effect로 간주하지 않는다.
 
 ## scheduler.py
 
-기존 in-memory WorkQueue는 test/prototype로 남길 수 있다.
+production SQL claim/lease/heartbeat/requeue queue를 만들지 않는다.
 
-production용 새 SQL heap/claim/lease/heartbeat/requeue class는 만들지 않는다.
+상위 policy는 semantic priority/delay만 결정한다.
+실행 순서/flow-control은 selected backend adapter에 위임한다.
 
-상위 scheduler는 "무슨 Work가 우선인가"라는 semantic policy를 소유하고 selected adapter가 이해하는 priority/delay로 매핑한다.
+## Requirement / verification
 
-## Side Effect Rule
-
-durable engine retry가 외부 mutation의 exactly-once를 보장한다고 가정하지 않는다.
-
-worker/tool mutation에는 idempotency key + reconciliation contract를 둔다.
-
-## Stage 0가 채워야 할 항목
-
-00E에서만 다음을 구체화한다.
-
-- selected adapter package
-- run_id → external identity mapping
-- priority/delay mapping
-- user signal mapping
-- backend restart semantics
-- concurrency/rate-control mapping
-- persisted name/versioning constraints
-- system-state storage boundary
+| ID | 요구 | 검증 | Level |
+|---|---|---|---|
+| 01C-01 | duplicate same run start → execution 1개 | live adapter integration | L1 |
+| 01C-02 | commit→start crash reconciliation | real process kill | L2 |
+| 01C-03 | start→attach crash reconciliation | real process kill | L2 |
+| 01C-04 | concurrent reconciler same ref로 수렴 | concurrent integration | L1 |
+| 01C-05 | backend restart 뒤 recovery | live runtime restart | L2 |
+| 01C-06 | priority/delay/signal/cancel 실제 mapping | selected adapter integration | L1 |
+| 01C-07 | alternate fake adapter가 같은 port contract 통과 | contract suite | L0 |
+| 01C-08 | custom lease/recovery daemon 없음 | architecture fitness | L0 |
 
 ## 완료조건
 
-1. custom lease/queue recovery code 없음
-2. cross-store crash 두 지점 모두 same run_id reconciliation으로 복구
-3. 동일 run_id 중복 start가 duplicate execution을 만들지 않음
-4. priority/delay가 selected adapter를 통해 동작
-5. backend restart 뒤 execution recovery
-6. domain package가 selected backend 내부 type을 import하지 않음
+위 요구가 모두 통과하고 application DB와 durable state 사이 crash window가 duplicate logical execution 없이 복구되어야 한다.
