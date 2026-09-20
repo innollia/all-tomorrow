@@ -86,6 +86,57 @@ Run은 Work의 한 logical execution attempt다.
 - terminal Run을 새 attempt로 재사용 금지
 - backend internal status/schema column 복제 금지
 
+## outcomes
+
+CompletionEvidence/OutcomeRecord persistence:
+
+- outcome_id
+- target_type / target_id
+- status
+- criterion_ref/version
+- evidence_refs / artifact_refs
+- observed_values
+- evaluator_ref/version
+- created_at
+
+Work/Goal SUCCEEDED transition은 outcome/evidence linkage를 가져야 한다.
+
+## delivery_records
+
+cross-store intent/reconciliation metadata:
+
+- delivery_id
+- kind
+- subject refs
+- destination ref
+- idempotency key + namespace/version
+- status
+- attempts/error/next_attempt
+- timestamps
+
+durable execution queue 자체를 복제하는 table이 아니다.
+
+## questions
+
+기존 user_questions가 있으면 canonical contract로 확장:
+
+- question_id
+- work_id/run_id
+- status: PENDING / ANSWERED / SUPERSEDED / CANCELLED / EXPIRED
+- answer_ref
+- signal correlation
+- revision/timestamps
+
+## project/source refs
+
+기존 project schema가 있으면 재사용/확장한다.
+
+- canonical Project identity
+- SourceRef owner/type/id/version/hash/freshness/access metadata
+- host-local workspace path를 canonical source record에 저장하지 않음
+
+새 중복 project registry를 만들지 않는다.
+
 ## events
 
 - event provenance가 Run 삭제/정리와 함께 cascade 소실되지 않음
@@ -113,6 +164,9 @@ priority는 semantic domain field이며 adapter가 backend priority로 변환한
 | 01A-04 | queue/lease mechanics 없음 | schema grep/architecture test | L0 |
 | 01A-05 | event provenance 비-cascade 보존 | deletion/retention integration | L1 |
 | 01A-06 | migration chain이 빈 DB와 기존 fixture DB 모두 통과 | migration integration | L1 |
+| 01A-07 | Work/Goal success가 Outcome linkage를 가질 수 있음 | schema/integration | L1 |
+| 01A-08 | Delivery/Question canonical lifecycle schema 존재 | schema/integration | L1 |
+| 01A-09 | Project/SourceRef가 기존 project system과 중복 정본을 만들지 않음 | architecture/schema review | L0 |
 
 ## 완료조건
 
