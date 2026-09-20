@@ -1118,6 +1118,38 @@
         "L2",
         "L3"
       ]
+    },
+    {
+      "packet_id": "S1-04F",
+      "path": "docs/roadmap/stage-01-researcher/04-runtime-and-tools/04f-artifact-store.md",
+      "parent_id": "S1-04",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0",
+        "S1-01"
+      ],
+      "requirement_prefix": "S1-04F-",
+      "required_evidence_levels": [
+        "L1",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S1-04G",
+      "path": "docs/roadmap/stage-01-researcher/04-runtime-and-tools/04g-secrets-operations-security.md",
+      "parent_id": "S1-04",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0",
+        "S1-04"
+      ],
+      "requirement_prefix": "S1-04G-",
+      "required_evidence_levels": [
+        "L1",
+        "L3"
+      ]
     }
   ]
 }
