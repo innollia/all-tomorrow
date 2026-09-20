@@ -19,6 +19,7 @@
 - [Canonical Domain Contracts](domain-contracts.md)
 - [Failure, Retry & Recovery Contract](failure-recovery-contract.md)
 - [Data, Security & Artifact Contract](data-security-artifact-contract.md)
+- [00B+ Plan Hardening Audit](plan-hardening-audit-2026-09-20.md)
 
 packet이 공통 계약과 충돌하면 packet을 구현하기 전에 먼저 계획을 수정한다.
 
