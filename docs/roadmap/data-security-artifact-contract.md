@@ -1,5 +1,7 @@
 # Data, Security & Artifact Contract
 
+Secret backend/rotation, prompt-policy version, untrusted content, migration/API compatibility, audit tamper boundary, alerting과 dependency security는 [Operations, Security & Compatibility Contract](operations-security-contract.md)를 함께 따른다.
+
 ## 1. Data classes
 
 최소 분류:
