@@ -71,6 +71,13 @@ checks:
 
 legacy IDs는 rewrite 시 migration table을 남기고 신규 ID로 정규화한다.
 
+manifest migration fields:
+- requirement_prefix: 현재 문서에서 실제 사용하는 prefix
+- target_requirement_prefix: 목표 전역 prefix
+- prefix_migration_pending: 둘이 다를 때 true
+
+Stage 1 legacy packet은 구현 직전 rewrite에서 requirement id를 바꾸고, old→new ID mapping을 해당 packet 또는 audit에 남긴다.
+
 ## CI — 향후 구현 계획
 
 예정 위치:
