@@ -6,80 +6,79 @@
 - 선행조건: 03A + 03C
 - 지금 시작 가능: **아니오**
 - 실제 승인 적용 선행조건: 04E Laptop Approval Authority
+- contracts: ../../data-security-artifact-contract.md
 
 ## 목적
 
-"semantic 판단 하나"만 믿지 않고 mechanical protected surface + semantic expansion detection을 결합해 protected proposal을 자동 promotion path에서 제외한다.
+mechanical protected surface + semantic authority expansion + unknown-impact fail-closed rule로 protected proposal을 automatic promotion에서 제외한다.
 
-## 수정 파일
+## Mechanical protected surfaces
 
-- 새 파일: `src/all_tomorrow/protection.py`
-- 수정: `src/all_tomorrow/promotion.py`
-- 새 config: `config/protected-surfaces.example.yaml`
-- 새 테스트: `tests/test_protection.py`
+예:
 
-## Mechanical protected surface
-
-초기 protected resource 예:
-
-- approval authority code/config
-- production deployment credential refs
-- budget ceiling config
-- concurrency/rate ceiling config
-- secret permission policy
+- approval authority code/config/data
+- deployment/signing credential refs
+- budget/concurrency/rate ceilings
+- secret/permission policy
 - production write role/policy
 - kill switch
 - rollback enforcement
 - audit/provenance enforcement
+- classifier/protection policy 자체
+- retention/security policy
 
-실제 writable credential boundary는 04E/deployment가 강제.
+실제 목록은 versioned config/hash로 관리한다.
 
-이 목록은 problem taxonomy가 아니라 security authority surface다.
+## Semantic signals
 
-## Semantic expansion detection
-
-proposal diff/effect summary에서 다음을 별도 signal로 판단:
-
-- 비용 상한 증가
-- concurrency/rate 확대
-- permission scope 확대
-- secret scope 확대
+- 비용/자원 ceiling 확대
+- permission/secret scope 확대
 - production write 확대
-- approval requirement 약화
+- approval 약화
 - rollback/audit/kill-switch 약화
-- protected surface 축소/우회 경로 생성
+- protected surface 축소
+- 우회 경로 생성
+- 새로운 credential/deployment surface 생성
 
-semantic detector가 ordinary라고 말해도 mechanical protected resource touch면 protected.
+## Fail-closed
 
-둘 중 하나라도 protected면 APPROVAL_REQUIRED.
+다음이면 APPROVAL_REQUIRED:
 
-## Handoff record
+- mechanical touch
+- semantic detector protected
+- detector 결과 unknown/insufficient
+- 새 미분류 authority surface 영향
+- classifier/policy 자체 변경
 
-04E로 넘길 exact package:
+ordinary임을 증명하지 못한 변경을 ordinary로 간주하지 않는다.
 
-- proposal_id
-- candidate artifact/hash/version
-- baseline ref/hash
+## Handoff package
+
+immutable:
+
+- proposal_id/revision
+- candidate artifact hash/version
+- baseline hash/version
+- frozen evaluation refs
 - protected reason list
-- evaluation refs
 - requested boundary change
-- nonce/expiry
+- protection policy version
+- nonce
+- expiry
 
-approval은 이 exact candidate에만 유효.
+candidate/proposal/protection policy가 바뀌면 prior handoff invalid.
 
-## 테스트
+## Requirements
 
-- budget 10→20 protected
-- concurrency 4→8 protected
-- production write permission 추가 protected
-- approval bypass code path protected
-- prompt wording change ordinary
-- internal refactor ordinary
-- mechanical touch + semantic ordinary → protected
-- candidate hash 변경 → prior handoff invalid
+| ID | 요구 | 검증 |
+|---|---|---|
+| 03E-01 | known authority expansion protected | fixtures |
+| 03E-02 | unknown classifier result protected | negative |
+| 03E-03 | mechanical touch가 semantic ordinary를 override | negative |
+| 03E-04 | classifier 자체 변경 protected | fixture |
+| 03E-05 | artifact/proposal hash 변경 시 handoff invalid | integrity |
+| 03E-06 | AWS ordinary path가 APPROVAL_REQUIRED apply 못함 | integration |
 
 ## 완료조건
 
-AWS ordinary promotion path가 protected proposal을 fail closed하고 exact approval package만 생성.
-
-실제 승인/적용 보안은 04E 완료조건에서 검증.
+분류 누락이 권한 확대로 이어질 수 없고 exact immutable approval package만 04E로 전달되어야 한다.
