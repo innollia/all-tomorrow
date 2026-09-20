@@ -13,13 +13,19 @@
 
 ## 공통 계약
 
-00B 이후의 계획은 다음 네 문서를 공통 기반으로 사용한다.
+00B 이후의 계획은 다음 공통 문서를 기반으로 사용한다.
 
 - [Plan & Verification Contract](plan-verification-contract.md)
 - [Canonical Domain Contracts](domain-contracts.md)
 - [Failure, Retry & Recovery Contract](failure-recovery-contract.md)
 - [Data, Security & Artifact Contract](data-security-artifact-contract.md)
+- [Control Plane Semantic Contracts](control-plane-contracts.md)
+- [Delivery, Consistency & Repair Contract](delivery-consistency-contract.md)
+- [Operations, Security & Compatibility Contract](operations-security-contract.md)
+- [Roadmap Automation Contract](roadmap-automation-contract.md)
+- [Machine-readable Roadmap Manifest](manifest.json)
 - [00B+ Plan Hardening Audit](plan-hardening-audit-2026-09-20.md)
+- [Second-pass Hardening Audit](plan-hardening-audit-2-2026-09-20.md)
 
 packet이 공통 계약과 충돌하면 packet을 구현하기 전에 먼저 계획을 수정한다.
 
