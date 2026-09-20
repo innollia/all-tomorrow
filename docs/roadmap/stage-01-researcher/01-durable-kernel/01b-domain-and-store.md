@@ -30,6 +30,25 @@ WorkRecord에 단일 ExecutionRef를 두지 않는다.
 - lineage/source refs
 - transition + provenance Event atomicity
 
+### Outcome/Event store
+
+- CompletionEvidence/OutcomeRecord append
+- target Goal/Work/Run linkage
+- immutable evidence refs
+- Event append-only domain path
+
+### Delivery/Question store
+
+- cross-store Delivery intent create/update
+- REPAIR_REQUIRED query
+- Question create/answer/supersede/cancel
+- answer + signal Delivery intent atomic
+
+### Source/Project store
+
+- canonical project/source refs와 freshness/access metadata
+- 기존 project/source subsystem이 있으면 그 API를 확장하고 병렬 registry를 만들지 않음
+
 ### RunStore
 
 - create STARTING Run
@@ -75,6 +94,9 @@ backend numeric priority/range를 domain enum에 넣지 않는다.
 | 01B-04 | concurrent revision 충돌이 lost update를 만들지 않음 | concurrent transaction test | L1 |
 | 01B-05 | ExecutionRef conflicting attach fail closed | CAS race test | L1 |
 | 01B-06 | backend internal type/status가 domain에 없음 | architecture fitness | L0 |
+| 01B-07 | CompletionEvidence 없는 Work/Goal success transition 거부 | domain/store test | L0/L1 |
+| 01B-08 | Event 일반 write path append-only | store permission/contract | L1 |
+| 01B-09 | Question answer + signal Delivery intent atomic | transaction test | L1 |
 
 ## 완료조건
 
