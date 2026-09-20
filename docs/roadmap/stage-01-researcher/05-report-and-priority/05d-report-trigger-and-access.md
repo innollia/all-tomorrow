@@ -3,59 +3,65 @@
 ## Status
 
 - 상태: **선행작업 대기**
-- 선행조건: 05A + 05B + 04D AWS Runtime
+- 선행조건: 05A + 05B + 04D
 - 지금 시작 가능: **아니오**
+- contracts: ../../failure-recovery-contract.md
 
 ## 목적
 
-Stage 2 full assistant UI 전에도 일일보고서가 실제로 생성되고 사용자가 볼 수 있게 한다.
+Stage 2 전에도 report를 정확한 logical day/time semantics로 생성하고 authenticated read-only access를 제공한다.
 
-## 수정 파일
+## Time model
 
-- 수정: AWS service/runtime loop
-- 수정: `src/all_tomorrow/web.py`
-- 수정: `tests/test_web.py`
-- 보강: `tests/test_reports.py`
+config:
 
-## Trigger
+- IANA timezone
+- local report boundary time
+- misfire policy
+- catch-up horizon
+- projection_version
 
-Stage 1 최소 time trigger:
+logical_period_id는 local calendar date + timezone + report boundary policy version으로 만든다.
+UTC timestamp만으로 "하루" identity를 만들지 않는다.
 
-- configurable daily report time
-- timezone 명시
-- missed run 시 다음 startup/wake에서 한 번 catch-up
-- 같은 날짜 duplicate 생성 방지
+## Trigger semantics
 
-general trigger engine 전체를 Stage 1에서 만들지 않는다.
+- duplicate fire → same logical_period_id/idempotency key
+- restart 시 missed period를 misfire policy에 따라 catch-up
+- 여러 날 offline이면 catch-up horizon 밖 period를 무제한 생성하지 않음
+- DST fold/gap에서도 logical period 중복 금지
+- 이미 FINAL인 same watermark report를 duplicate 생성하지 않음
+- late source면 05A revision semantics 사용
+- report failure가 researcher loop를 죽이지 않음
 
-이 trigger는 특정 생활 assistant scheduler가 아니라 control-plane 자체 운영보고용 system trigger다.
+general trigger engine 전체는 Stage 3로 미룸.
 
 ## Access
 
-기존 authenticated Web에 read-only endpoint 추가:
+authenticated read-only:
 
-- `GET /api/reports/latest`
-- `GET /api/reports?from=&to=`
+- latest
+- range/list
+- specific report/revision
 
-dashboard에 latest report를 보여주는 작은 read-only section은 허용.
+authorization:
 
-새 chat/control UX는 Stage 2.
+- user scope isolation
+- report source ref fetch도 원본 access scope 준수
+- auth 없으면 401
+- 다른 user report ID 추측으로 조회 불가
 
-## Delivery
+## Requirements
 
-Stage 1 필수는 durable 생성 + authenticated retrieval.
-
-Discord push/email 등 proactive delivery channel은 Stage 2/3에서 추가 가능.
-
-## 테스트
-
-- scheduled period 한 번 생성
+- normal schedule
 - restart catch-up
-- duplicate prevention
-- auth 없으면 report API 401
-- user A/B isolation 준비
-- report generation failure가 researcher loop를 죽이지 않음
+- multi-day offline horizon
+- DST fold/gap fixture
+- duplicate trigger
+- FINAL revision behavior
+- auth/user isolation
+- generation failure isolation
 
 ## 완료조건
 
-AWS가 매일 report를 durable 생성하고 기존 Web auth를 통해 조회 가능.
+실제 AWS restart/time boundary에서도 period당 의도한 report revision만 생성되고 authenticated owner만 조회 가능해야 한다.
