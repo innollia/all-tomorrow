@@ -1,7 +1,8 @@
 # 00B-3 — Delivery & Reconciliation Protocol
 
 ## Status
-- 상태: 선행작업 대기
+- 상태: **개발완료**
+- 지금 시작 가능: **—**
 - 선행조건: 00B-1
 - 완료 후 열림: 00C
 
@@ -11,7 +12,7 @@ Run start만이 아니라 Question answer, Trigger fire, Artifact attach, source
 ## 구현 예정 위치
 - 새: src/all_tomorrow/delivery.py
 - 새: src/all_tomorrow/storage/delivery_store.py
-- 새 migration: migrations/00xx_delivery.sql
+- 새 migration: migrations/0003_delivery.sql
 - 테스트: tests/test_delivery_store.py
 - integration: tests/integration/test_delivery_reconciliation.py
 
@@ -43,6 +44,40 @@ Trigger/source mutation은 Stage 2/3에서 같은 primitive를 확장한다.
 - S0-00B3-05: idempotency key scope/version/retention 정의
 
 ## 완료 증거
-- delivery state machine
-- SQL constraint/index plan
-- crash-window sequence diagrams
+- delivery state machine (`src/all_tomorrow/delivery.py`)
+- SQL constraint/index plan (`migrations/0003_delivery.sql`)
+- tests: `tests/test_delivery_store.py`, `tests/integration/test_delivery_reconciliation.py` (8 passed)
+
+### Delivery State Machine
+
+```
+[ PENDING ] ──(dispatch)──> [ DISPATCHING ] ──(success)──> [ DELIVERED ] (terminal)
+     │                               │
+     │ (cancel)                      │ (ambiguous timeout / connection error)
+     v                               v
+[ CANCELLED ]                   [ AMBIGUOUS ] ──(probe existing effect)──> [ DELIVERED ]
+(terminal)                           │
+                                     │ (attempts >= max_attempts)
+                                     v
+                              [ REPAIR_REQUIRED ] (terminal)
+```
+
+### Crash-Window Sequence Diagram
+
+```
+Application DB          DeliveryReconciler           Durable Backend (DBOS)
+     │                         │                              │
+     │──1. Atomic Commit──────>│                              │
+     │   (Work + Run STARTING  │                              │
+     │    + DeliveryRecord)    │                              │
+     │                         │──2. External Start(idmp_key)─>│
+     │                         │   <── Crash / Network cut ───X
+     │                         │                              │
+     │──3. Reconciler Restart─>│                              │
+     │   (detect AMBIGUOUS)    │                              │
+     │                         │──4. Probe Status(idmp_key)──>│
+     │                         │   <── Returns ExecutionRef ──│
+     │──5. CAS Commit Delivered│                              │
+     │<────────────────────────│                              │
+```
+

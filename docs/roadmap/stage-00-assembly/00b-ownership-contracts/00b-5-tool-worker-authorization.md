@@ -1,7 +1,8 @@
 # 00B-5 — Tool / Worker / Authorization Boundary
 
 ## Status
-- 상태: 선행작업 대기
+- 상태: **개발완료**
+- 지금 시작 가능: **—**
 - 선행조건: 00B-2 + 00A gateway result
 - 완료 후 열림: Stage 1 runtime/tool packets
 
@@ -42,7 +43,26 @@ retrieved docs/README/tool output가 tool permission이나 system instruction을
 - S0-00B5-04: 새 tool/worker 추가에 core name branch 없음
 
 ## 완료 증거
-- descriptor schema
-- authority matrix
-- selected gateway mapping
-- deny/confirm negative fixtures
+- descriptor schema: `src/all_tomorrow/ports/tools.py`, `src/all_tomorrow/ports/workers.py`
+- canonical registry: `src/all_tomorrow/tools/registry.py`
+- authorizer: `src/all_tomorrow/authorization.py`
+- policy configuration: `config/authority-policy.example.yaml`
+- tests: `tests/test_authorization.py`, `tests/test_tool_registry.py` (4 passed)
+
+### Capability Authority Matrix
+
+| Capability | Risk Class | Decision | Requires Confirmation Nonce |
+|---|---|---|---|
+| `read` / `fetch` | LOW | ALLOW | 아니오 |
+| `write` | MEDIUM | ALLOW | 아니오 |
+| `delete` | HIGH | CONFIRM | 예 |
+| `git_push` | HIGH | CONFIRM | 예 |
+| `production_deploy` | CRITICAL | CONFIRM | 예 |
+| `untrusted_eval` | CRITICAL | DENY | N/A |
+| untrusted injection | CRITICAL | DENY | N/A |
+
+### Selected Gateway Mapping (LiteLLM MCP)
+- PydanticAI client에는 단일 엔드포인트 `all-tomorrow-tools`만 노출
+- LiteLLM MCP Gateway는 transport 및 upstream protocol aggregation 담당
+- All Tomorrow가 canonical ToolDescriptor와 authority policy를 단독 소유
+

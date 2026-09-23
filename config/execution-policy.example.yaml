@@ -1,0 +1,117 @@
+version: "1.0"
+description: "All Tomorrow unified execution, timeout, and retry policy"
+
+# S0-00B4-01: Exactly one primary retry owner per operation class.
+operation_policies:
+  model_invocation:
+    primary_retry_owner: "durable_backend_step" # DBOS model step (OpenAI SDK max_retries=0, LiteLLM num_retries=0)
+    retryable_categories:
+      - "RATE_LIMITED"
+      - "UNAVAILABLE"
+    max_attempts: 4
+    per_attempt_timeout_seconds: 30.0
+    total_timeout_seconds: 120.0
+    backoff_seconds: 2.0
+    backoff_jitter: true
+    idempotency_required: true
+    exhausted_transition: "FAILED"
+    telemetry_keys:
+      - "model.alias"
+      - "model.retry_attempt"
+
+  read_only_tool:
+    primary_retry_owner: "tool_adapter"
+    retryable_categories:
+      - "UNAVAILABLE"
+      - "TIMEOUT"
+    max_attempts: 3
+    per_attempt_timeout_seconds: 10.0
+    total_timeout_seconds: 30.0
+    backoff_seconds: 1.0
+    backoff_jitter: true
+    idempotency_required: false
+    exhausted_transition: "FAILED"
+    telemetry_keys:
+      - "tool.id"
+      - "tool.duration"
+
+  idempotent_mutation:
+    primary_retry_owner: "durable_backend_step"
+    retryable_categories:
+      - "UNAVAILABLE"
+      - "TIMEOUT"
+    max_attempts: 3
+    per_attempt_timeout_seconds: 15.0
+    total_timeout_seconds: 45.0
+    backoff_seconds: 1.5
+    backoff_jitter: true
+    idempotency_required: true
+    exhausted_transition: "FAILED"
+    telemetry_keys:
+      - "mutation.idempotency_key"
+
+  reconcile_before_retry_mutation:
+    primary_retry_owner: "all_tomorrow_reconciler"
+    retryable_categories:
+      - "UNAVAILABLE"
+    max_attempts: 3
+    per_attempt_timeout_seconds: 20.0
+    total_timeout_seconds: 60.0
+    backoff_seconds: 2.0
+    backoff_jitter: true
+    idempotency_required: true
+    exhausted_transition: "REPAIR_REQUIRED"
+    telemetry_keys:
+      - "delivery.id"
+      - "delivery.attempts"
+
+  worker_process:
+    primary_retry_owner: "worker_adapter"
+    retryable_categories:
+      - "UNAVAILABLE"
+    max_attempts: 2
+    per_attempt_timeout_seconds: 120.0
+    total_timeout_seconds: 240.0
+    backoff_seconds: 5.0
+    backoff_jitter: false
+    idempotency_required: true
+    exhausted_transition: "FAILED"
+    telemetry_keys:
+      - "worker.id"
+      - "worker.pid"
+
+  durable_start_reconcile:
+    primary_retry_owner: "all_tomorrow_reconciler"
+    retryable_categories:
+      - "UNAVAILABLE"
+      - "TIMEOUT"
+    max_attempts: 3
+    per_attempt_timeout_seconds: 10.0
+    total_timeout_seconds: 30.0
+    backoff_seconds: 1.0
+    backoff_jitter: true
+    idempotency_required: true
+    exhausted_transition: "REPAIR_REQUIRED"
+    telemetry_keys:
+      - "durable.run_id"
+
+  user_request_semantic_replan:
+    primary_retry_owner: "all_tomorrow_planner"
+    retryable_categories:
+      - "INVALID_STATE"
+      - "RETRY_EXHAUSTED"
+    max_attempts: 3 # S0-00B4-03: Upper bound on replans
+    per_attempt_timeout_seconds: 300.0
+    total_timeout_seconds: 900.0
+    backoff_seconds: 0.0
+    backoff_jitter: false
+    idempotency_required: true
+    exhausted_transition: "NEED_USER"
+    telemetry_keys:
+      - "work.replan_attempt"
+      - "work.error_fingerprint"
+
+replan_storm_protection:
+  max_replan_runs_per_work: 3
+  suppress_repeated_error_fingerprint: true
+  exhausted_action: "NEED_USER"
