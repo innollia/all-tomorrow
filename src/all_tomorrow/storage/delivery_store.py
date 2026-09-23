@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, Coroutine
+from datetime import UTC, datetime
+from typing import Any, Callable, Coroutine, Protocol
 
-from all_tomorrow.delivery import DeliveryRecord, DeliveryStatus
+from all_tomorrow.delivery import (
+    DeliveryKind,
+    DeliveryRecord,
+    DeliveryStatus,
+    utc_now,
+)
 from all_tomorrow.domain.errors import InvariantViolationError
 from all_tomorrow.domain.ids import DeliveryId
 
@@ -12,8 +18,30 @@ class DeliveryCASConflictError(InvariantViolationError):
     """Raised when a concurrent reconciler conflicts on DeliveryRecord revision."""
 
 
+class IdempotencyKeyExpiredError(InvariantViolationError):
+    """Raised when an idempotency key is presented after its valid_until expiration."""
+
+
+class DeliveryCommitError(InvariantViolationError):
+    """Raised when an atomic outbox intent commit fails."""
+
+
+class DeliveryStoreProtocol(Protocol):
+    async def create_delivery(self, record: DeliveryRecord) -> DeliveryRecord:
+        ...
+
+    async def get_delivery(self, delivery_id: DeliveryId) -> DeliveryRecord | None:
+        ...
+
+    async def get_by_idempotency_key(self, key: str) -> DeliveryRecord | None:
+        ...
+
+    async def update_cas(self, expected_revision: int, updated: DeliveryRecord) -> bool:
+        ...
+
+
 class DeliveryStore:
-    """In-memory atomic storage for DeliveryRecord with CAS support."""
+    """Transactional storage for DeliveryRecord adhering to atomic outbox semantics."""
 
     def __init__(self) -> None:
         self._records_by_id: dict[DeliveryId, DeliveryRecord] = {}
@@ -22,9 +50,22 @@ class DeliveryStore:
 
     async def create_delivery(self, record: DeliveryRecord) -> DeliveryRecord:
         async with self._lock:
+            now = utc_now()
             if record.idempotency_key in self._records_by_idempotency_key:
                 existing_id = self._records_by_idempotency_key[record.idempotency_key]
-                return self._records_by_id[existing_id]
+                existing = self._records_by_id[existing_id]
+                # S0-00B3-05: Idempotency retention check
+                if existing.is_expired(now):
+                    raise IdempotencyKeyExpiredError(
+                        f"Idempotency key '{record.idempotency_key}' expired at {existing.valid_until}"
+                    )
+                return existing
+
+            if record.is_expired(now):
+                raise IdempotencyKeyExpiredError(
+                    f"Cannot create delivery with already expired idempotency key (valid_until={record.valid_until})"
+                )
+
             self._records_by_id[record.delivery_id] = record
             self._records_by_idempotency_key[record.idempotency_key] = record.delivery_id
             return record
@@ -38,7 +79,10 @@ class DeliveryStore:
             delivery_id = self._records_by_idempotency_key.get(key)
             if delivery_id is None:
                 return None
-            return self._records_by_id.get(delivery_id)
+            rec = self._records_by_id.get(delivery_id)
+            if rec is not None and rec.is_expired():
+                return None
+            return rec
 
     async def update_cas(self, expected_revision: int, updated: DeliveryRecord) -> bool:
         """Compare-and-swap update based on revision."""
@@ -55,17 +99,54 @@ class DeliveryStore:
         self,
         intent: DeliveryRecord,
         domain_action: Callable[[], Coroutine[Any, Any, Any]],
+        rollback_action: Callable[[], Coroutine[Any, Any, Any]] | None = None,
     ) -> tuple[Any, DeliveryRecord]:
-        """S0-00B3-01: Atomic application state mutation + delivery intent commit."""
+        """S0-00B3-01: Atomic application state mutation + delivery intent commit.
+
+        Guarantees:
+        - If domain_action fails, delivery intent is never committed.
+        - If committing delivery intent fails, rollback_action is called to revert domain mutation.
+        - App transaction and outbox intent succeed together or fail together.
+        """
         async with self._lock:
-            # Execute domain action
-            domain_result = await domain_action()
-            # Commit intent
-            if intent.idempotency_key in self._records_by_idempotency_key:
-                existing_id = self._records_by_idempotency_key[intent.idempotency_key]
-                committed_intent = self._records_by_id[existing_id]
-            else:
-                self._records_by_id[intent.delivery_id] = intent
-                self._records_by_idempotency_key[intent.idempotency_key] = intent.delivery_id
-                committed_intent = intent
+            now = utc_now()
+            # 1. Pre-validate intent (e.g. check TTL expiration or constraints)
+            if intent.is_expired(now):
+                raise IdempotencyKeyExpiredError(
+                    f"Cannot commit outbox intent with expired key (valid_until={intent.valid_until})"
+                )
+
+            # 2. Execute domain action
+            domain_result = None
+            try:
+                domain_result = await domain_action()
+            except Exception as e:
+                # Domain mutation failed: intent is never committed
+                raise e
+
+            # 3. Commit intent atomically
+            try:
+                if intent.idempotency_key in self._records_by_idempotency_key:
+                    existing_id = self._records_by_idempotency_key[intent.idempotency_key]
+                    existing = self._records_by_id[existing_id]
+                    if existing.is_expired(now):
+                        raise IdempotencyKeyExpiredError(
+                            f"Idempotency key '{intent.idempotency_key}' expired at {existing.valid_until}"
+                        )
+                    committed_intent = existing
+                else:
+                    self._records_by_id[intent.delivery_id] = intent
+                    self._records_by_idempotency_key[intent.idempotency_key] = intent.delivery_id
+                    committed_intent = intent
+            except Exception as commit_err:
+                # Outbox commit failed: rollback domain mutation to preserve atomicity!
+                if rollback_action is not None:
+                    try:
+                        await rollback_action()
+                    except Exception as rollback_err:
+                        raise DeliveryCommitError(
+                            f"Failed to commit outbox intent ({commit_err}) AND rollback failed: {rollback_err}"
+                        ) from commit_err
+                raise DeliveryCommitError(f"Failed to commit outbox delivery intent: {commit_err}") from commit_err
+
             return domain_result, committed_intent

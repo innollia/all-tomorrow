@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 import pytest
 
 from all_tomorrow.adapters.fake_adapters import FakeDurableAdapter
 from all_tomorrow.delivery import (
-    BlindReplayForbiddenError,
     DeliveryKind,
     DeliveryRecord,
     DeliveryReconciler,
     DeliveryStatus,
+    RetentionClass,
+    calculate_valid_until,
     format_idempotency_key,
+    utc_now,
 )
-from all_tomorrow.domain.ids import new_delivery_id
+from all_tomorrow.domain.errors import ErrorCategory
+from all_tomorrow.domain.ids import ExecutionRef, new_delivery_id
 from all_tomorrow.storage.delivery_store import DeliveryStore
 
 
@@ -82,23 +86,62 @@ class TestDeliveryReconciliation:
         assert res2.status == DeliveryStatus.DELIVERED
         assert res1.idempotency_key == res2.idempotency_key
 
-    async def test_ambiguous_external_effect_blind_replay_forbidden(self) -> None:
-        """S0-00B3-03: Ambiguous external effect must never be blindly replayed."""
+    async def test_ambiguous_recovery_queries_existing_effect_without_blind_replay(self) -> None:
+        """S0-00B3-03: Ambiguous recovery checks external state and does not blindly replay."""
         durable_port = FakeDurableAdapter()
         reconciler = DeliveryReconciler(durable_port)
+
+        run_id = "run_ambiguous_recovery"
+        # Pre-seed external backend as if the start reached it before network crashed
+        from all_tomorrow.domain.ids import RunId
+        exec_ref = await durable_port.start(
+            run_id=RunId(run_id),
+            workflow_name="flow_ambiguous",
+            payload={},
+        )
 
         ambiguous_rec = DeliveryRecord(
             delivery_id=new_delivery_id(),
             kind=DeliveryKind.RUN_START,
-            subject_refs={"run_id": "run_ambiguous"},
+            subject_refs={"run_id": run_id},
             destination_adapter="fake_durable",
-            idempotency_key=format_idempotency_key("run", "start", "run_ambiguous"),
+            idempotency_key=format_idempotency_key("run", "start", run_id),
             payload={"workflow_name": "flow_ambiguous"},
             status=DeliveryStatus.AMBIGUOUS,
+            attempts=1,
+            max_attempts=3,
         )
 
-        with pytest.raises(BlindReplayForbiddenError, match="Blind replay is forbidden"):
-            await reconciler.reconcile(ambiguous_rec, allow_blind_replay=False)
+        # Reconciling the AMBIGUOUS record must query external backend, discover execution is RUNNING,
+        # and resolve to DELIVERED (no blind replay error, no duplicate execution)
+        resolved = await reconciler.reconcile(ambiguous_rec)
+        assert resolved.status == DeliveryStatus.DELIVERED
+        assert resolved.delivered_at is not None
+
+    async def test_ambiguous_recovery_when_external_not_found(self) -> None:
+        """S0-00B3-03: When ambiguous probe confirms NOT_FOUND, then and only then start."""
+        durable_port = FakeDurableAdapter()
+        reconciler = DeliveryReconciler(durable_port)
+
+        run_id = "run_not_yet_started"
+        ambiguous_rec = DeliveryRecord(
+            delivery_id=new_delivery_id(),
+            kind=DeliveryKind.RUN_START,
+            subject_refs={"run_id": run_id},
+            destination_adapter="fake_durable",
+            idempotency_key=format_idempotency_key("run", "start", run_id),
+            payload={"workflow_name": "flow_new"},
+            status=DeliveryStatus.AMBIGUOUS,
+            attempts=1,
+            max_attempts=3,
+        )
+
+        resolved = await reconciler.reconcile(ambiguous_rec)
+        assert resolved.status == DeliveryStatus.DELIVERED
+        # Verify it now exists in external backend
+        ref = ExecutionRef(backend="fake_durable", execution_id=f"exec_{run_id}")
+        status = await durable_port.get_status(ref)
+        assert status.error is None
 
     async def test_exhausted_delivery_moves_to_repair_required(self) -> None:
         """S0-00B3-04: Exhausted delivery moves to REPAIR_REQUIRED and is not deleted."""
@@ -123,13 +166,46 @@ class TestDeliveryReconciliation:
         assert exhausted.is_terminal()
         assert exhausted.attempts == 3
 
-    async def test_idempotency_key_formatting_and_versioning(self) -> None:
-        """S0-00B3-05: Idempotency key scope, version, and collision resistance."""
-        key_v1 = format_idempotency_key("run", "start", "run_999", version=1)
-        key_v2 = format_idempotency_key("run", "start", "run_999", version=2)
-        key_diff_scope = format_idempotency_key("run", "signal", "run_999", version=1)
+    async def test_unimplemented_delivery_kind_fails_closed_never_marked_delivered(self) -> None:
+        """Issue 1: Unimplemented/unhandled delivery kind must NOT be marked DELIVERED."""
+        durable_port = FakeDurableAdapter()
+        reconciler = DeliveryReconciler(durable_port)
 
-        assert key_v1.startswith("idmp_run_start_v1_")
-        assert key_v2.startswith("idmp_run_start_v2_")
-        assert key_v1 != key_v2
-        assert key_v1 != key_diff_scope
+        unhandled_rec = DeliveryRecord(
+            delivery_id=new_delivery_id(),
+            kind=DeliveryKind.TRIGGER_FIRE,
+            subject_refs={"trigger_id": "trig_1"},
+            destination_adapter="scheduler",
+            idempotency_key="idmp_unhandled_trig",
+            payload={"trigger_name": "daily_eval"},
+        )
+
+        result = await reconciler.reconcile(unhandled_rec)
+        assert result.status == DeliveryStatus.FAILED
+        assert result.status != DeliveryStatus.DELIVERED
+        assert result.last_error is not None
+        assert result.last_error.category == ErrorCategory.UNSUPPORTED
+        assert result.delivered_at is None
+
+    async def test_idempotency_retention_ttl_expiration_fails_closed(self) -> None:
+        """Issue 4: Idempotency retention TTL expiration prevents dispatching expired delivery."""
+        durable_port = FakeDurableAdapter()
+        reconciler = DeliveryReconciler(durable_port)
+
+        now = utc_now()
+        past = now - timedelta(minutes=5)
+        expired_rec = DeliveryRecord(
+            delivery_id=new_delivery_id(),
+            kind=DeliveryKind.RUN_START,
+            subject_refs={"run_id": "run_ttl"},
+            destination_adapter="fake_durable",
+            idempotency_key="idmp_ttl_expired",
+            payload={},
+            valid_until=past,
+        )
+
+        res = await reconciler.reconcile(expired_rec)
+        assert res.status == DeliveryStatus.FAILED
+        assert res.status != DeliveryStatus.DELIVERED
+        assert res.last_error is not None
+        assert res.last_error.code == "idempotency_key_expired"

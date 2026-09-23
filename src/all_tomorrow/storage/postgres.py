@@ -11,6 +11,12 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from all_tomorrow.contracts import ContractError, Event, PipelineSpec, Project, UserQuestion, new_id, utc_now
+from all_tomorrow.delivery import (
+    DeliveryId,
+    DeliveryKind,
+    DeliveryRecord,
+    DeliveryStatus,
+)
 from all_tomorrow.storage.run_store import (
     QuestionRecord,
     RunConflictError,
@@ -592,6 +598,88 @@ class PostgresStore:
                 )
 
     atomic_resume = resume_run
+
+    async def atomic_outbox_transaction(
+        self,
+        intent: DeliveryRecord,
+        domain_action: Any,
+    ) -> tuple[Any, DeliveryRecord]:
+        """S0-00B3-01: True atomic PostgreSQL application transaction + delivery outbox intent."""
+        async with self.pool.connection() as connection:
+            async with connection.transaction():
+                domain_result = await domain_action(connection)
+                await connection.execute(
+                    """
+                    INSERT INTO delivery_records
+                        (delivery_id, kind, subject_refs, destination_adapter,
+                         idempotency_key, idempotency_scope, retention_class, valid_until,
+                         payload, status, attempts, max_attempts, revision,
+                         last_error, next_attempt_at, delivered_at, created_at, updated_at)
+                    VALUES
+                        (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (idempotency_key) DO UPDATE SET
+                        updated_at = now()
+                    """,
+                    (
+                        str(intent.delivery_id),
+                        intent.kind.value,
+                        Jsonb(intent.subject_refs),
+                        intent.destination_adapter,
+                        intent.idempotency_key,
+                        intent.idempotency_scope,
+                        intent.retention_class,
+                        intent.valid_until,
+                        Jsonb(intent.payload),
+                        intent.status.value,
+                        intent.attempts,
+                        intent.max_attempts,
+                        intent.revision,
+                        Jsonb(_jsonable(intent.last_error)) if intent.last_error else None,
+                        intent.next_attempt_at,
+                        intent.delivered_at,
+                        intent.created_at,
+                        intent.updated_at,
+                    ),
+                )
+                return domain_result, intent
+
+    async def get_delivery(self, delivery_id: str) -> DeliveryRecord | None:
+        async with self.pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT delivery_id, kind, subject_refs, destination_adapter,
+                       idempotency_key, idempotency_scope, retention_class, valid_until,
+                       payload, status, attempts, max_attempts, revision,
+                       last_error, next_attempt_at, delivered_at, created_at, updated_at
+                FROM delivery_records
+                WHERE delivery_id = %s
+                """,
+                (delivery_id,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return DeliveryRecord(
+                delivery_id=DeliveryId(row[0]),
+                kind=DeliveryKind(row[1]),
+                subject_refs=dict(row[2] or {}),
+                destination_adapter=row[3],
+                idempotency_key=row[4],
+                idempotency_scope=row[5],
+                retention_class=row[6],
+                valid_until=row[7],
+                payload=dict(row[8] or {}),
+                status=DeliveryStatus(row[9]),
+                attempts=row[10],
+                max_attempts=row[11],
+                revision=row[12],
+                last_error=None,
+                next_attempt_at=row[14],
+                delivered_at=row[15],
+                created_at=row[16],
+                updated_at=row[17],
+            )
+
 
 
 class PostgresEventSink:
