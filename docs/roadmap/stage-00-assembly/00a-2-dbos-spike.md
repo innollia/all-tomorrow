@@ -2,72 +2,18 @@
 
 ## Status
 
-- 상태: **선행작업 대기**
-- 지금 시작 가능: **아니오**
+- 상태: **개발완료**
 - 선행조건: 00A-1
+- 판단 기준: [검증 분류](00a-live-gate-matrix.md)
 
-## 목적
+## 선택에 필요한 결과
 
-PydanticAI + DBOS 조합이 All Tomorrow의 durable execution 요구를 custom queue/lease/recovery daemon 없이 만족하는지 증명한다.
+DBOS 3.0.0 / Python 3.13 / PostgreSQL에서 공통 typed agent와 외부 효과, 승인 대기·복구가 구현됐다. 동일 workflow ID의 중복 시작과 별도 Run 분리, 저장된 모델 결과 재사용을 확인했다. commit 직후 worker 종료에서는 호출 2회·외부 적용 1회로 애플리케이션 idempotency seam을 확인했다.
 
-## 연결 원칙
+일반 코드 교체와 PydanticAI 2.45.0→2.46.0 시험에서 기존 모델 결과를 재사용하고 새 finalization을 완료했다. **호환 코드의 application_version을 명시적으로 유지해야 한다.** 비호환 변경은 이전 worker를 유지해 drain하며, compatibility version을 무조건 고정하는 전략은 사용하지 않는다.
 
-- DBOS는 durable execution mechanism만 소유
-- Goal/Work/Run 의미는 All Tomorrow가 소유
-- application DB와 DBOS system state는 논리적으로 분리
-- run_id를 deterministic external execution identity 후보로 사용
-- domain package는 DBOS 내부 type을 import하지 않음
+시스템 DB는 입력과 단계 결과를 저장한다. 입력 metadata 카나리가 base64 pickle에서 관측됐으며 암호화를 뜻하지 않는다. 최소 입력·artifact 참조, 접근 제한, 저장소 암호화와 백업/보존 책임이 필요하다.
 
-## PydanticAI Compatibility Check
+## 비용과 결론
 
-반드시 확인:
-
-- agent name이 persisted recovery compatibility에 미치는 영향
-- toolset/tool/operation 이름 변경이 in-flight execution에 미치는 영향
-- DynamicToolset 또는 MCP toolset을 durable하게 쓸 때 stable ID 요구
-- runtime-added toolset 제한
-- application version upgrade 시 old execution replay/recovery 방법
-
-문서상 가능 여부가 아니라 D10으로 검증한다.
-
-## DBOS-specific Checks
-
-공통 D01~D12 외에 기록:
-
-- workflow-ID duplicate behavior
-- queue priority/delay mapping 가능 범위
-- concurrency/rate-control을 custom scheduler 없이 표현 가능한 범위
-- durable signal/message mapping
-- single-node에서 필요한 별도 process 수
-- Postgres/SQLite system DB 선택의 운영 차이
-- multi-host로 갈 때 Conductor가 필요한 시점과 현재 license boundary
-
-## Durable Data Footprint
-
-unique canary를 model input, tool input, tool output에 각각 넣고 다음에서 검색한다.
-
-- application DB
-- DBOS system DB
-- stdout/stderr
-- OTel export
-- LiteLLM logs if model gateway를 붙인 추가 실험을 했다면 해당 로그
-
-workflow input/output, step output, serializer 형식, retention/cleanup, backup/encryption 경계를 기록한다.
-
-## 탈락 조건
-
-- D01~D12 hard scenario 중 필수 항목 실패
-- ordinary upgrade마다 in-flight execution을 버려야 함
-- Goal/Work schema가 DBOS workflow schema에 종속
-- external mutation duplicate를 제어할 seam 없음
-- personal AWS single-node에서 과도한 상시 control plane 필요
-
-## 산출물
-
-- exact version
-- setup steps
-- adapter/glue LOC
-- D01~D12 결과
-- data-footprint 결과
-- 운영/라이선스 제약
-- DBOS를 제거할 때 유지되는 All Tomorrow contract
+기존 PostgreSQL과 worker로 시작할 수 있고, 별도 durable 서버를 추가하지 않는다. 이 점을 주요 선택 근거로 DBOS를 채택한다. Conductor/HA/다중 호스트 설계와 queue 최적화는 현재 선택 조건이 아니다. [최종 계약과 선택](00a-5-selection.md)을 따른다.

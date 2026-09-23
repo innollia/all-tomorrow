@@ -13,7 +13,7 @@
 
 ## 지금 바로 작업 가능한 것
 
-Stage 0만 진행한다.
+Stage 0만 진행한다. 00A는 DBOS + LiteLLM 선택으로 완료했다. 현재 00B를 시작할 수 있으며, 근거는 [00A 선택 기록](roadmap/stage-00-assembly/00a-5-selection.md)에 있다.
 
 - OSS substrate spike
 - All Tomorrow와 외부 엔진의 ownership boundary 확정

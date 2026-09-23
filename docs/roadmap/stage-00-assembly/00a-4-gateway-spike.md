@@ -2,100 +2,24 @@
 
 ## Status
 
-- 상태: **선행작업 대기**
-- 지금 시작 가능: **아니오**
+- 상태: **개발완료**
 - 선행조건: 00A-1
+- 판단 기준: [검증 분류](00a-live-gate-matrix.md)
 
-## 목적
+## 결정: LiteLLM Proxy 1.101.0
 
-durable backend 선택과 분리해 stable tool gateway를 선택한다.
+PydanticAI MCPToolset의 `all-tomorrow-tools` ID와 고정 `/mcp` endpoint로 두 upstream의 동명 도구를 충돌 없이 조회·호출했다. 설정에 세 번째 upstream을 추가하고 재시작한 뒤 신규 client가 발견했다. 정의 JSON과 SHA-256을 저장·비교할 수 있다.
 
-첫 후보는 LiteLLM MCP Gateway지만 안정성을 전제하지 않는다.
+실제 PydanticAI 실행에서 LiteLLM model route와 MCP route가 함께 동작했다. OTel content 수집을 끄고 단일 trace tree, prompt/key 로그 카나리 부재를 확인했다. 서버 allowlist는 목록과 직접 호출을 제한했다. 환경 참조로 master key를 주입했다. DB 없는 잘못된 키 요청은 400으로 fail-closed되며, 가상 키별 권한을 제공한다고 주장하지 않는다.
 
-## 중요한 현재 신호
+## 채택 계약
 
-2026-09-19 조사 시 LiteLLM은 MCP Gateway를 public feature로 노출하고 있지만 핵심 구현의 상당 부분이 repository의 `litellm/proxy/_experimental/mcp_server/` 경로에 있다.
+- gateway는 별도 Python 환경에서 `deploy/gateway/requirements.txt`의 exact version을 사용한다.
+- 초기 단일 신뢰 호출자, 정적 registry, 서버 allowlist로 시작한다. DB/virtual keys는 실제 필요할 때 추가한다.
+- config 변경은 gateway restart로 반영하고 새 Run마다 discovery한다. 시작 시 정의와 fingerprint를 기록한다.
+- 진행 중 도구 계약을 조용히 교체하지 않는다. 기존 Run에는 호환 upstream을 유지하거나 명시적 migration을 한다.
+- provider credential은 gateway runtime env 소유, 외부 logging callbacks와 원문 수집은 비활성화한다.
+- model/MCP를 한 프로세스에 두므로 프로세스 장애 영역은 공유한다. 이 비용을 현재 규모에서 수용한다. 분리가 필요해질 때 FastMCP fallback을 검토한다.
+- 새 버전 PR에서 실제 agent discovery/call·structured output·privacy 계약을 재확인한다. 모든 장애 조합은 요구하지 않는다.
 
-따라서 "공식 feature"와 "우리 production seam으로 충분히 안정적"을 같은 뜻으로 취급하지 않는다.
-
-## Candidate A — LiteLLM MCP Gateway
-
-목표 구조:
-
-PydanticAI Agent
-→ stable MCPToolset id `all-tomorrow-tools`
-→ LiteLLM fixed MCP endpoint
-→ upstream MCP servers
-
-검증:
-
-- upstream 2개 이상 연결
-- namespace collision
-- list_tools/call_tool
-- auth/credential ownership
-- config reload/restart 요구
-- 새 server/tool 추가 후 new run discovery
-- tool definition/name/version을 안정적으로 기록하고 재현할 수 있는지
-- gateway process restart
-- model route 장애와 MCP route 장애가 같은 process에 있을 때 blast radius
-- required MCP protocol/version compatibility
-- allow/deny/filter
-- OTel duplication
-- prompt/tool payload logging
-
-실제 durable in-flight run과 gateway의 recovery compatibility는 이 단계에서 판정하지 않는다. 선택된 durable backend와 결합한 00A-5에서 검증한다.
-
-LiteLLM DB는 dynamic registry/virtual keys/budgets가 실제로 필요할 때만 추가한다.
-
-초기 data policy:
-
-- `store_prompts_in_spend_logs=false`
-- `turn_off_message_logging=true`
-- external logging callbacks off
-- provider credential은 gateway runtime secret/env 소유
-
-## Candidate B — FastMCP Fallback
-
-LiteLLM이 아래 concrete requirement 중 하나를 못 닫을 때만 시험한다.
-
-- required protocol/version compatibility
-- dynamic provider/composition
-- fine-grained transformation/filter
-- process failure domain 분리 필요
-- operationally stable tool registry가 LiteLLM보다 명확히 필요
-
-FastMCP를 쓰더라도 background task/Docket durability는 활성화하지 않는다. durable owner는 하나만 둔다.
-
-## Gateway Acceptance
-
-- G01 fixed agent-side endpoint
-- G02 upstream 2개 이상
-- G03 namespace collision 없음
-- G04 new-run discovery
-- G05 tool definition/name/version을 capture하고 재현 가능
-- G06 gateway restart recovery
-- G07 credential non-leak
-- G08 allow/deny/filter
-- G09 no duplicate OTel span tree
-- G10 no prohibited payload logging
-- G11 exact-version pin 가능
-- G12 upgrade contract를 regression test로 표현 가능
-
-## 결정 규칙
-
-LiteLLM이 G01~G12를 만족하면 model gateway와 MCP gateway 통합을 우선한다.
-
-실패하면 durable backend를 탈락시키지 않는다. FastMCP fallback을 같은 G01~G12로 시험한다.
-
-durable execution과 결합했을 때만 드러나는 문제는 00A-5 integration issue로 기록한다.
-
-## 산출물
-
-- selected gateway
-- exact version
-- reason for fallback if any
-- separate process 필요 여부
-- config reload semantics
-- auth/secret ownership
-- tool discovery/versioning contract
-- known experimental/upgrade risk
+FastMCP 4.0.5는 시험 upstream/client였다. 별도의 FastMCP gateway 또는 background durability를 채택하지 않았다.

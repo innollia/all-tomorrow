@@ -1,0 +1,30 @@
+[
+  {
+    "scenario_id": "D11",
+    "candidate": "DBOS",
+    "version": "3.0.0",
+    "passed": true,
+    "manual_steps": ["Run tests/test_live_common_d01.py::test_dbos_live_common_d01 with the two PostgreSQL test URLs"],
+    "custom_glue_loc": 19,
+    "adapter_loc": 107,
+    "processes_required": 2,
+    "persistent_state_systems": ["DBOS PostgreSQL system database", "external PostgreSQL fixture database"],
+    "recovery_notes": "D11 runs two independent Run IDs for one Work; no crash is injected.",
+    "persisted_payload_notes": "Both work_id:run_id values had separate SUCCESS rows in dbos.workflow_status and separate external fixture rows, each with calls=1 and applications=1.",
+    "trace_notes": "Each typed input supplied a distinct correlation ID and the respective output retained it."
+  },
+  {
+    "scenario_id": "D11",
+    "candidate": "Restate",
+    "version": "server 1.7.10 / SDK 1.0.5",
+    "passed": true,
+    "manual_steps": ["Run tests/test_live_common_d01.py::test_restate_live_common_d01 with Restate and fixture URLs"],
+    "custom_glue_loc": 19,
+    "adapter_loc": 81,
+    "processes_required": 3,
+    "persistent_state_systems": ["Restate journal/state directory", "external PostgreSQL fixture database"],
+    "recovery_notes": "D11 runs two independent Run IDs for one Work; no crash is injected.",
+    "persisted_payload_notes": "The two work_id:run_id values had distinct Restate invocation IDs and independently retrievable outputs plus separate external fixture rows, each with calls=1 and applications=1.",
+    "trace_notes": "Each typed input supplied a distinct correlation ID and the respective output retained it."
+  }
+]

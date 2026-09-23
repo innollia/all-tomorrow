@@ -1,0 +1,38 @@
+[
+  {
+    "scenario_id": "D01",
+    "candidate": "DBOS",
+    "version": "3.0.0",
+    "passed": true,
+    "manual_steps": [
+      "Start PostgreSQL with at_dbos_probe and at_external_fixture databases",
+      "Set AT_TEST_POSTGRES_URL and AT_TEST_FIXTURE_URL",
+      "Run tests/test_live_common_d01.py::test_dbos_live_common_d01 in Ubuntu WSL"
+    ],
+    "custom_glue_loc": 19,
+    "adapter_loc": 107,
+    "processes_required": 2,
+    "persistent_state_systems": ["DBOS PostgreSQL system database", "external PostgreSQL fixture database"],
+    "recovery_notes": "D01 does not inject a failure. A separate subprocess completed the workflow.",
+    "persisted_payload_notes": "dbos.workflow_status reported SUCCESS; dbos.operation_outputs contained three step records. dbos.workflow_input.inputs contained the full typed payload, including an unused privacy canary, in base64-encoded pickle bytes. External fixture calls=1, applications=1.",
+    "trace_notes": "Typed output returned the supplied correlation ID; OTel span topology is covered by D12, not D01."
+  },
+  {
+    "scenario_id": "D01",
+    "candidate": "Restate",
+    "version": "server 1.7.10 / SDK 1.0.5",
+    "passed": true,
+    "manual_steps": [
+      "Start Restate Server and PostgreSQL at_external_fixture database",
+      "Set AT_TEST_FIXTURE_URL, AT_TEST_RESTATE_ADMIN and AT_TEST_RESTATE_INGRESS",
+      "Run tests/test_live_common_d01.py::test_restate_live_common_d01 in Ubuntu WSL"
+    ],
+    "custom_glue_loc": 19,
+    "adapter_loc": 81,
+    "processes_required": 3,
+    "persistent_state_systems": ["Restate journal/state directory", "external PostgreSQL fixture database"],
+    "recovery_notes": "D01 does not inject a failure. Restate Server and a separate Uvicorn handler process completed the workflow.",
+    "persisted_payload_notes": "The Restate output endpoint returned the same typed result as ingress. External fixture calls=1, applications=1.",
+    "trace_notes": "Typed output returned the supplied correlation ID; OTel span topology is covered by D12, not D01."
+  }
+]
