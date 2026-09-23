@@ -47,6 +47,7 @@ Trigger/source mutation은 Stage 2/3에서 같은 primitive를 확장한다.
 - delivery state machine (`src/all_tomorrow/delivery.py`)
 - SQL constraint/index plan & evolution (`migrations/0003_delivery.sql`, `migrations/0004_delivery_retention.sql`)
 - tests: `tests/test_delivery_store.py`, `tests/integration/test_delivery_reconciliation.py`, `tests/test_postgres_store.py`, `tests/test_migration.py`
+- duplicate idempotency key regression: canonical record를 반환하며 domain mutation 재실행 0회
 
 ### Delivery State Machine
 

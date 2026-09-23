@@ -16,6 +16,8 @@
 - retry policy no-unresolved-cell: `tests/test_execution_policy.py` (4 passed)
 - tool/worker authorization fixtures: `tests/test_authorization.py`, `tests/test_tool_registry.py` (4 passed)
 - Stage 1 schema/doc consistency scan: `tests/contracts/test_00b_acceptance.py` (4 passed)
+- PostgreSQL outbox atomicity/idempotency/error round-trip: `tests/test_postgres_store.py`
+- 최종 repository 검증 (2026-09-23): `python -m pytest -q` — 176 passed, 45 skipped
 
 ## Requirements
 - S0-00B6-01: 00B-1~5 requirement evidence complete

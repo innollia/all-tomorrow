@@ -127,6 +127,21 @@ class TestDeliveryStore:
         in_store = await store.get_delivery(intent.delivery_id)
         assert in_store is not None
 
+        duplicate_calls = 0
+
+        async def duplicate_domain_mutation() -> str:
+            nonlocal duplicate_calls
+            duplicate_calls += 1
+            return "must-not-run"
+
+        duplicate_result, duplicate_intent = await store.atomic_app_transaction(
+            intent,
+            duplicate_domain_mutation,
+        )
+        assert duplicate_result is None
+        assert duplicate_calls == 0
+        assert duplicate_intent == committed_intent
+
     async def test_atomic_app_transaction_rollback_on_commit_failure(self) -> None:
         """S0-00B3-01: True atomic outbox rollback when delivery intent commit fails."""
         store = DeliveryStore()

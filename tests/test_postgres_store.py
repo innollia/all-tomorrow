@@ -693,12 +693,18 @@ async def test_postgres_store_atomic_outbox_returns_db_canonical_row_on_conflict
         valid_until=existing_time + timedelta(hours=24),
     )
 
-    async def noop_domain(conn):
-        return None
+    domain_calls = 0
 
-    _, returned_record = await store.atomic_outbox_transaction(new_intent, noop_domain)
+    async def noop_domain(conn):
+        nonlocal domain_calls
+        domain_calls += 1
+        return "must-not-run"
+
+    domain_result, returned_record = await store.atomic_outbox_transaction(new_intent, noop_domain)
 
     # Invariant: Caller receives the DB canonical row (del_existing_999, DELIVERED), NOT new_intent (del_new_attempt, PENDING)
+    assert domain_result is None
+    assert domain_calls == 0
     assert returned_record.delivery_id == DeliveryId("del_existing_999")
     assert returned_record.status == DeliveryStatus.DELIVERED
     assert returned_record.revision == 2
@@ -746,11 +752,16 @@ async def test_postgres_store_atomic_outbox_detects_conflict_on_divergent_payloa
         valid_until=utc_now() + timedelta(hours=24),
     )
 
+    domain_calls = 0
+
     async def noop_domain(conn):
+        nonlocal domain_calls
+        domain_calls += 1
         return None
 
     with pytest.raises(DeliveryCASConflictError, match="already exists with different destination or subjects"):
         await store.atomic_outbox_transaction(divergent_intent, noop_domain)
+    assert domain_calls == 0
 
 
 @pytest.mark.asyncio
@@ -795,11 +806,16 @@ async def test_postgres_store_atomic_outbox_rejects_expired_existing_idempotency
         valid_until=utc_now() + timedelta(hours=24),
     )
 
+    domain_calls = 0
+
     async def noop_domain(conn):
+        nonlocal domain_calls
+        domain_calls += 1
         return None
 
     with pytest.raises(IdempotencyKeyExpiredError, match="expired at"):
         await store.atomic_outbox_transaction(intent, noop_domain)
+    assert domain_calls == 0
 
 
 @pytest.mark.asyncio
@@ -848,5 +864,4 @@ async def test_postgres_store_preserves_last_error_on_retrieval() -> None:
     assert delivery.last_error.category == ErrorCategory.UNAVAILABLE
     assert delivery.last_error.code == "network_down"
     assert delivery.last_error.safe_message == "Network cut off"
-
 

@@ -129,11 +129,13 @@ class DeliveryStore:
                         f"Idempotency key '{intent.idempotency_key}' already exists with different destination or subjects"
                     )
                 committed_intent = existing
+                domain_result = None
             else:
                 committed_intent = intent
-
-            # 2. Execute domain mutation under lock
-            domain_result = await domain_action()
+                # 2. Execute a new domain mutation under the same lock. A valid
+                # duplicate intent returns the canonical record without applying
+                # the semantic mutation a second time.
+                domain_result = await domain_action()
 
             # 3. Finalize intent storage
             if committed_intent is intent:

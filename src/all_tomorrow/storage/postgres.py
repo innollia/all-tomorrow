@@ -647,7 +647,6 @@ class PostgresStore:
 
         async with self.pool.connection() as connection:
             async with connection.transaction():
-                domain_result = await domain_action(connection)
                 cursor = await connection.execute(
                     """
                     SELECT delivery_id, kind, subject_refs, destination_adapter,
@@ -683,7 +682,9 @@ class PostgresStore:
                         (intent.idempotency_key,),
                     )
                     row = existing_row
+                    domain_result = None
                 else:
+                    domain_result = await domain_action(connection)
                     cursor = await connection.execute(
                         """
                         INSERT INTO delivery_records
