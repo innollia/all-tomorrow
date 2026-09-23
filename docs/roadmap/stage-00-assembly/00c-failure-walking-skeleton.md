@@ -2,7 +2,7 @@
 
 ## Status
 
-- 상태: **개발중**
+- 상태: **개발완료**
 - 선행조건: 00A + 00B
 - 공통 계약:
   - ../plan-verification-contract.md

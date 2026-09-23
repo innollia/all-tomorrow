@@ -13,7 +13,7 @@
 
 ## 지금 바로 작업 가능한 것
 
-Stage 0만 진행한다. 00A(기반 선택)와 00B(소유권 및 어댑터 계약)를 완료했다. 현재 00C(Failure Walking Skeleton)를 시작할 수 있으며, 근거는 [00B Acceptance](roadmap/stage-00-assembly/00b-ownership-contracts/00b-6-acceptance.md)에 있다.
+Stage 0만 진행한다. 00A(기반 선택), 00B(소유권 및 어댑터 계약), 00C(Failure Walking Skeleton)를 완료했다. 현재 00D(Observability / Eval / CI Seam)를 시작할 수 있다.
 
 - OSS substrate spike
 - All Tomorrow와 외부 엔진의 ownership boundary 확정
