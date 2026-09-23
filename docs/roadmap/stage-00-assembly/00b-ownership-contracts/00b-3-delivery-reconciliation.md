@@ -12,8 +12,8 @@ Run start만이 아니라 Question answer, Trigger fire, Artifact attach, source
 ## 구현 예정 위치
 - 새: src/all_tomorrow/delivery.py
 - 새: src/all_tomorrow/storage/delivery_store.py
-- 새 migration: migrations/0003_delivery.sql
-- 테스트: tests/test_delivery_store.py
+- 새 migration: migrations/0003_delivery.sql, migrations/0004_delivery_retention.sql
+- 테스트: tests/test_delivery_store.py, tests/test_postgres_store.py, tests/test_migration.py
 - integration: tests/integration/test_delivery_reconciliation.py
 
 ## DeliveryRecord
@@ -45,8 +45,8 @@ Trigger/source mutation은 Stage 2/3에서 같은 primitive를 확장한다.
 
 ## 완료 증거
 - delivery state machine (`src/all_tomorrow/delivery.py`)
-- SQL constraint/index plan (`migrations/0003_delivery.sql`)
-- tests: `tests/test_delivery_store.py`, `tests/integration/test_delivery_reconciliation.py` (8 passed)
+- SQL constraint/index plan & evolution (`migrations/0003_delivery.sql`, `migrations/0004_delivery_retention.sql`)
+- tests: `tests/test_delivery_store.py`, `tests/integration/test_delivery_reconciliation.py`, `tests/test_postgres_store.py`, `tests/test_migration.py`
 
 ### Delivery State Machine
 

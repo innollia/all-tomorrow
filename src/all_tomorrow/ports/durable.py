@@ -87,6 +87,10 @@ class DurableExecutionPort(Protocol):
         """Returns the current status of the external execution."""
         ...
 
+    async def find_by_run_id(self, run_id: RunId) -> ExecutionRef | None:
+        """Discovers existing execution ref from the external engine without guessing IDs."""
+        ...
+
     async def cancel(self, ref: ExecutionRef) -> CancelResult:
         """Requests cancellation of external execution.
 

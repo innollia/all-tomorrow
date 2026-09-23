@@ -11,7 +11,19 @@ from all_tomorrow.contracts import (
     RequestEnvelope,
     UserQuestion,
 )
+from all_tomorrow.delivery import (
+    DeliveryId,
+    DeliveryKind,
+    DeliveryRecord,
+    DeliveryStatus,
+    RetentionClass,
+    calculate_valid_until,
+    format_idempotency_key,
+    utc_now,
+)
 from all_tomorrow.storage import (
+    DeliveryCASConflictError,
+    IdempotencyKeyExpiredError,
     PostgresStore,
     QuestionRecord,
     RunConflictError,
@@ -515,3 +527,221 @@ async def test_postgres_store_resume_run_validation_failure_leaves_records_untou
     queries = [call[0][0] for call in mock_connection.execute.call_args_list]
     assert not any("UPDATE runs" in q for q in queries)
     assert not any("UPDATE user_questions" in q for q in queries)
+
+
+@pytest.mark.asyncio
+async def test_postgres_store_atomic_outbox_commits_domain_and_outbox_in_transaction() -> None:
+    """S0-00B3-01: PostgresStore.atomic_outbox_transaction commits domain and outbox intent together."""
+    from datetime import timedelta
+
+    intent = DeliveryRecord(
+        delivery_id=DeliveryId("del_pg_1"),
+        kind=DeliveryKind.RUN_START,
+        subject_refs={"run_id": "run_pg_1"},
+        destination_adapter="fake_durable",
+        idempotency_key="idmp_pg_outbox_1",
+        payload={"flow": "test"},
+        retention_class="standard",
+        valid_until=utc_now() + timedelta(hours=24),
+    )
+
+    db_row = (
+        "del_pg_1",
+        "RUN_START",
+        {"run_id": "run_pg_1"},
+        "fake_durable",
+        "idmp_pg_outbox_1",
+        "global",
+        "standard",
+        intent.valid_until,
+        {"flow": "test"},
+        "PENDING",
+        0,
+        3,
+        1,
+        None,
+        None,
+        None,
+        intent.created_at,
+        intent.updated_at,
+    )
+
+    mock_cursor = AsyncMock()
+    mock_cursor.fetchone.return_value = db_row
+
+    mock_pool, mock_connection = _create_mock_pool(mock_cursor)
+    store = PostgresStore("postgresql://fake:5432/test", pool=mock_pool)
+
+    domain_mutations = []
+
+    async def domain_action(conn):
+        domain_mutations.append("domain_work_done")
+        return "domain_result_val"
+
+    result, canonical = await store.atomic_outbox_transaction(intent, domain_action)
+
+    assert result == "domain_result_val"
+    assert domain_mutations == ["domain_work_done"]
+    assert canonical.delivery_id == intent.delivery_id
+    assert canonical.idempotency_key == intent.idempotency_key
+
+    # Invariant: connection.transaction() was used
+    assert mock_connection.transaction.called
+    queries = [call[0][0] for call in mock_connection.execute.call_args_list]
+    assert any("INSERT INTO delivery_records" in q and "RETURNING" in q for q in queries)
+
+
+@pytest.mark.asyncio
+async def test_postgres_store_atomic_outbox_rolls_back_domain_when_outbox_fails() -> None:
+    """S0-00B3-01: When outbox insert fails, entire PostgreSQL transaction rolls back."""
+    from datetime import timedelta
+
+    intent = DeliveryRecord(
+        delivery_id=DeliveryId("del_pg_fail"),
+        kind=DeliveryKind.RUN_START,
+        subject_refs={"run_id": "run_pg_fail"},
+        destination_adapter="fake_durable",
+        idempotency_key="idmp_pg_fail",
+        payload={},
+        retention_class="standard",
+        valid_until=utc_now() + timedelta(hours=24),
+    )
+
+    # Simulate database error on insert
+    mock_connection = AsyncMock()
+    mock_connection.execute.side_effect = RuntimeError("Database constraint or disk failure")
+
+    mock_tx = AsyncMock()
+    mock_tx.__aenter__.return_value = mock_tx
+    mock_tx.__aexit__.return_value = False  # Does not suppress exception -> triggers rollback
+    mock_connection.transaction = MagicMock(return_value=mock_tx)
+
+    mock_conn_ctx = AsyncMock()
+    mock_conn_ctx.__aenter__.return_value = mock_connection
+    mock_conn_ctx.__aexit__.return_value = False
+
+    mock_pool = MagicMock()
+    mock_pool.connection.return_value = mock_conn_ctx
+
+    store = PostgresStore("postgresql://fake:5432/test", pool=mock_pool)
+
+    domain_mutated = []
+
+    async def domain_action(conn):
+        domain_mutated.append("run_created")
+        return "run_123"
+
+    with pytest.raises(RuntimeError, match="Database constraint or disk failure"):
+        await store.atomic_outbox_transaction(intent, domain_action)
+
+    # Invariant: transaction context exited with error, propagating rollback
+    assert mock_tx.__aexit__.called
+    exc_type = mock_tx.__aexit__.call_args[0][0]
+    assert exc_type is RuntimeError
+
+
+@pytest.mark.asyncio
+async def test_postgres_store_atomic_outbox_returns_db_canonical_row_on_conflict() -> None:
+    """S0-00B3-01: When idempotency key already exists, RETURNING yields DB canonical row instead of caller input."""
+    from datetime import timedelta
+
+    existing_time = utc_now()
+    existing_db_row = (
+        "del_existing_999",
+        "RUN_START",
+        {"run_id": "run_original"},
+        "fake_durable",
+        "idmp_shared_key",
+        "global",
+        "standard",
+        existing_time + timedelta(hours=24),
+        {"workflow": "original_flow"},
+        "DELIVERED",
+        1,
+        3,
+        2,
+        None,
+        None,
+        existing_time,
+        existing_time,
+        existing_time,
+    )
+
+    mock_cursor = AsyncMock()
+    mock_cursor.fetchone.return_value = existing_db_row
+
+    mock_pool, mock_connection = _create_mock_pool(mock_cursor)
+    store = PostgresStore("postgresql://fake:5432/test", pool=mock_pool)
+
+    # Second caller tries with different delivery_id & status
+    new_intent = DeliveryRecord(
+        delivery_id=DeliveryId("del_new_attempt"),
+        kind=DeliveryKind.RUN_START,
+        subject_refs={"run_id": "run_original"},
+        destination_adapter="fake_durable",
+        idempotency_key="idmp_shared_key",
+        payload={"workflow": "original_flow"},
+        status=DeliveryStatus.PENDING,
+        retention_class="standard",
+        valid_until=existing_time + timedelta(hours=24),
+    )
+
+    async def noop_domain(conn):
+        return None
+
+    _, returned_record = await store.atomic_outbox_transaction(new_intent, noop_domain)
+
+    # Invariant: Caller receives the DB canonical row (del_existing_999, DELIVERED), NOT new_intent (del_new_attempt, PENDING)
+    assert returned_record.delivery_id == DeliveryId("del_existing_999")
+    assert returned_record.status == DeliveryStatus.DELIVERED
+    assert returned_record.revision == 2
+
+
+@pytest.mark.asyncio
+async def test_postgres_store_atomic_outbox_detects_conflict_on_divergent_payload() -> None:
+    """S0-00B3-01: When same idempotency key is presented with different target/subject, fail closed with DeliveryCASConflictError."""
+    from datetime import timedelta
+
+    existing_db_row = (
+        "del_orig",
+        "RUN_START",
+        {"run_id": "run_orig"},
+        "destination_A",
+        "idmp_shared_key",
+        "global",
+        "standard",
+        utc_now() + timedelta(hours=24),
+        {},
+        "DELIVERED",
+        1,
+        3,
+        1,
+        None,
+        None,
+        None,
+        utc_now(),
+        utc_now(),
+    )
+
+    mock_cursor = AsyncMock()
+    mock_cursor.fetchone.return_value = existing_db_row
+    mock_pool, mock_connection = _create_mock_pool(mock_cursor)
+    store = PostgresStore("postgresql://fake:5432/test", pool=mock_pool)
+
+    # Divergent caller with different destination_adapter
+    divergent_intent = DeliveryRecord(
+        delivery_id=DeliveryId("del_divergent"),
+        kind=DeliveryKind.RUN_START,
+        subject_refs={"run_id": "run_divergent"},
+        destination_adapter="destination_B",
+        idempotency_key="idmp_shared_key",
+        payload={},
+        valid_until=utc_now() + timedelta(hours=24),
+    )
+
+    async def noop_domain(conn):
+        return None
+
+    with pytest.raises(DeliveryCASConflictError, match="already exists with different destination or subjects"):
+        await store.atomic_outbox_transaction(divergent_intent, noop_domain)
+

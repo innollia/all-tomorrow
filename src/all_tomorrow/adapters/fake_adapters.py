@@ -114,6 +114,11 @@ class FakeDurableAdapter(DurableExecutionPort):
             )
         return ExecutionStatusResult(ref=ref, state=internal.state, updated_at=internal.updated_at)
 
+    async def find_by_run_id(self, run_id: RunId) -> ExecutionRef | None:
+        if self.simulate_unavailable:
+            raise ConnectionError("Simulated backend unavailable")
+        return self._runs_to_ref.get(str(run_id))
+
     async def cancel(self, ref: ExecutionRef) -> CancelResult:
         # S0-00B2-02: cancel terminal/missing/unavailable 분리
         if self.simulate_unavailable:

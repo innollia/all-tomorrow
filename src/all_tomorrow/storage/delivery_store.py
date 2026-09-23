@@ -99,14 +99,14 @@ class DeliveryStore:
         self,
         intent: DeliveryRecord,
         domain_action: Callable[[], Coroutine[Any, Any, Any]],
-        rollback_action: Callable[[], Coroutine[Any, Any, Any]] | None = None,
     ) -> tuple[Any, DeliveryRecord]:
         """S0-00B3-01: Atomic application state mutation + delivery intent commit.
 
         Guarantees:
+        - Domain mutation and outbox intent are validated and committed atomically under lock.
+        - If pre-validation or intent commit fails, domain_action is never executed.
         - If domain_action fails, delivery intent is never committed.
-        - If committing delivery intent fails, rollback_action is called to revert domain mutation.
-        - App transaction and outbox intent succeed together or fail together.
+        - Neither partial commit nor pseudo-compensation rollback is used.
         """
         async with self._lock:
             now = utc_now()
@@ -116,37 +116,28 @@ class DeliveryStore:
                     f"Cannot commit outbox intent with expired key (valid_until={intent.valid_until})"
                 )
 
-            # 2. Execute domain action
-            domain_result = None
-            try:
-                domain_result = await domain_action()
-            except Exception as e:
-                # Domain mutation failed: intent is never committed
-                raise e
+            if intent.idempotency_key in self._records_by_idempotency_key:
+                existing_id = self._records_by_idempotency_key[intent.idempotency_key]
+                existing = self._records_by_id[existing_id]
+                if existing.is_expired(now):
+                    raise IdempotencyKeyExpiredError(
+                        f"Idempotency key '{intent.idempotency_key}' expired at {existing.valid_until}"
+                    )
+                # Check for semantic payload/destination conflict on duplicate key
+                if existing.destination_adapter != intent.destination_adapter or existing.subject_refs != intent.subject_refs:
+                    raise DeliveryCASConflictError(
+                        f"Idempotency key '{intent.idempotency_key}' already exists with different destination or subjects"
+                    )
+                committed_intent = existing
+            else:
+                committed_intent = intent
 
-            # 3. Commit intent atomically
-            try:
-                if intent.idempotency_key in self._records_by_idempotency_key:
-                    existing_id = self._records_by_idempotency_key[intent.idempotency_key]
-                    existing = self._records_by_id[existing_id]
-                    if existing.is_expired(now):
-                        raise IdempotencyKeyExpiredError(
-                            f"Idempotency key '{intent.idempotency_key}' expired at {existing.valid_until}"
-                        )
-                    committed_intent = existing
-                else:
-                    self._records_by_id[intent.delivery_id] = intent
-                    self._records_by_idempotency_key[intent.idempotency_key] = intent.delivery_id
-                    committed_intent = intent
-            except Exception as commit_err:
-                # Outbox commit failed: rollback domain mutation to preserve atomicity!
-                if rollback_action is not None:
-                    try:
-                        await rollback_action()
-                    except Exception as rollback_err:
-                        raise DeliveryCommitError(
-                            f"Failed to commit outbox intent ({commit_err}) AND rollback failed: {rollback_err}"
-                        ) from commit_err
-                raise DeliveryCommitError(f"Failed to commit outbox delivery intent: {commit_err}") from commit_err
+            # 2. Execute domain mutation under lock
+            domain_result = await domain_action()
+
+            # 3. Finalize intent storage
+            if committed_intent is intent:
+                self._records_by_id[intent.delivery_id] = intent
+                self._records_by_idempotency_key[intent.idempotency_key] = intent.delivery_id
 
             return domain_result, committed_intent

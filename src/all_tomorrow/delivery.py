@@ -125,6 +125,15 @@ class DeliveryRecord:
             raise ValueError("DeliveryRecord.max_attempts must be >= 1")
         if self.attempts < 0:
             raise ValueError("DeliveryRecord.attempts must be >= 0")
+        if self.valid_until is None:
+            r_class = self.retention_class.upper() if isinstance(self.retention_class, str) else self.retention_class
+            try:
+                ret_enum = RetentionClass(r_class)
+            except ValueError:
+                ret_enum = RetentionClass.STANDARD
+            ttl = calculate_valid_until(ret_enum, self.created_at)
+            if ttl is not None:
+                object.__setattr__(self, "valid_until", ttl)
 
     def is_terminal(self) -> bool:
         return self.status in TERMINAL_DELIVERY_STATUSES
@@ -415,14 +424,17 @@ class DeliveryReconciler:
 
         if record.kind == DeliveryKind.RUN_START:
             run_id = record.subject_refs.get("run_id", "")
-            ref = ExecutionRef(backend=record.destination_adapter, execution_id=f"exec_{run_id}")
-
             try:
+                # S0-00B3-03: Discover external execution ref through port discovery (never guess IDs)
+                ref = await self.durable_port.find_by_run_id(RunId(run_id))
+                if ref is None:
+                    # External backend confirmed execution does not exist.
+                    # Safe to start now with deterministic key.
+                    return await self._dispatch_run_start(record, next_attempts, now)
+
                 status_res = await self.durable_port.get_status(ref)
                 if status_res.error is not None:
                     if status_res.error.category == ErrorCategory.NOT_FOUND:
-                        # External backend confirmed execution does not exist.
-                        # Safe to start now with deterministic key.
                         return await self._dispatch_run_start(record, next_attempts, now)
                     elif status_res.error.category == ErrorCategory.UNAVAILABLE:
                         # Still unreachable. Do not blind replay.

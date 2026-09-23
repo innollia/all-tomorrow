@@ -147,12 +147,9 @@ class TestDeliveryStore:
             domain_state.append("mutated")
             return "done"
 
-        async def rollback_action() -> None:
-            domain_state.clear()
-
         # Committing with expired intent fails outbox pre-validation, domain action not run
         with pytest.raises(IdempotencyKeyExpiredError):
-            await store.atomic_app_transaction(expired_intent, domain_mutation, rollback_action)
+            await store.atomic_app_transaction(expired_intent, domain_mutation)
 
         assert domain_state == []
 

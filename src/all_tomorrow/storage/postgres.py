@@ -17,6 +17,10 @@ from all_tomorrow.delivery import (
     DeliveryRecord,
     DeliveryStatus,
 )
+from all_tomorrow.storage.delivery_store import (
+    DeliveryCASConflictError,
+    IdempotencyKeyExpiredError,
+)
 from all_tomorrow.storage.run_store import (
     QuestionRecord,
     RunConflictError,
@@ -604,11 +608,24 @@ class PostgresStore:
         intent: DeliveryRecord,
         domain_action: Any,
     ) -> tuple[Any, DeliveryRecord]:
-        """S0-00B3-01: True atomic PostgreSQL application transaction + delivery outbox intent."""
+        """S0-00B3-01: True atomic PostgreSQL application transaction + delivery outbox intent.
+
+        Guarantees:
+        - Domain mutation and outbox intent commit within a single database transaction.
+        - Idempotency key expiration is checked before commit.
+        - Canonical row is returned via RETURNING * so caller and DB always observe identical state.
+        - Conflicting destination or subjects for the same key raise DeliveryCASConflictError.
+        """
+        now = utc_now()
+        if intent.is_expired(now):
+            raise IdempotencyKeyExpiredError(
+                f"Cannot commit outbox intent with expired key (valid_until={intent.valid_until})"
+            )
+
         async with self.pool.connection() as connection:
             async with connection.transaction():
                 domain_result = await domain_action(connection)
-                await connection.execute(
+                cursor = await connection.execute(
                     """
                     INSERT INTO delivery_records
                         (delivery_id, kind, subject_refs, destination_adapter,
@@ -619,6 +636,10 @@ class PostgresStore:
                         (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (idempotency_key) DO UPDATE SET
                         updated_at = now()
+                    RETURNING delivery_id, kind, subject_refs, destination_adapter,
+                              idempotency_key, idempotency_scope, retention_class, valid_until,
+                              payload, status, attempts, max_attempts, revision,
+                              last_error, next_attempt_at, delivered_at, created_at, updated_at
                     """,
                     (
                         str(intent.delivery_id),
@@ -641,7 +662,38 @@ class PostgresStore:
                         intent.updated_at,
                     ),
                 )
-                return domain_result, intent
+                row = await cursor.fetchone()
+                if row is None:
+                    raise DeliveryCASConflictError(f"Failed to retrieve canonical delivery record for {intent.idempotency_key}")
+
+                canonical_record = DeliveryRecord(
+                    delivery_id=DeliveryId(row[0]),
+                    kind=DeliveryKind(row[1]),
+                    subject_refs=dict(row[2] or {}),
+                    destination_adapter=row[3],
+                    idempotency_key=row[4],
+                    idempotency_scope=row[5],
+                    retention_class=row[6],
+                    valid_until=row[7],
+                    payload=dict(row[8] or {}),
+                    status=DeliveryStatus(row[9]),
+                    attempts=row[10],
+                    max_attempts=row[11],
+                    revision=row[12],
+                    last_error=None,
+                    next_attempt_at=row[14],
+                    delivered_at=row[15],
+                    created_at=row[16],
+                    updated_at=row[17],
+                )
+
+                # Check for semantic conflict on duplicate key
+                if canonical_record.destination_adapter != intent.destination_adapter or canonical_record.subject_refs != intent.subject_refs:
+                    raise DeliveryCASConflictError(
+                        f"Idempotency key '{intent.idempotency_key}' already exists with different destination or subjects"
+                    )
+
+                return domain_result, canonical_record
 
     async def get_delivery(self, delivery_id: str) -> DeliveryRecord | None:
         async with self.pool.connection() as connection:
