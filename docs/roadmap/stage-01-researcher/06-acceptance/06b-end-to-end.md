@@ -6,54 +6,62 @@
 - 선행조건: 06A + 01~05 완료
 - 지금 시작 가능: **아니오**
 
-## A Restart-safe researcher
+## Scenarios
 
-Goal/Work 생성 → process restart → same identity/provenance → researcher 계속.
+### A Restart-safe researcher
 
-## B Unknown-problem diagnosis
+Goal/Work/Run 생성 → process kill → same identities/ExecutionRef recovery → researcher continue.
 
-사전 원인 label 없는 반복 실패 → researcher wake → investigation Work/Goal → evidence 기반 원인 탐색.
+### B Unknown-problem diagnosis
 
-## C Autonomous Goal
+원인 label 없는 반복 실패 → observation → investigation Work → terminal evidence-backed finding 또는 explicit inconclusive artifact.
 
-user request 없음 → observation에서 가치 있는 문제 발견 → autonomous Goal → Work → report.
+### C Autonomous Goal
 
-## D Self-improvement
+user request 없음 → evidence-backed opportunity → bounded Goal/Work → result → report.
 
-researcher own prompt/policy 낮은 utility → proposal → sandbox → mixed evaluation → ordinary auto-promotion → 새 version 재관찰.
+### D Self-improvement
 
-## E User evaluation conflict
+own prompt/policy issue → frozen criteria → sandbox → evaluation → ordinary promotion → monitored outcome.
 
-metric positive + user negative → conflict preserved → 추가 evidence 가능.
+### E Evaluation conflict
 
-## F No silent substitution
+metric positive + user negative → conflict preserved → NEED_MORE_EVIDENCE when policy requires.
 
-system preference hypothesis와 current explicit command 충돌 → 몰래 대체 실행 없음 → 필요하면 refusal + reason.
+### F No silent substitution
 
-## G Protected boundary
+preference hypothesis와 current explicit command 충돌 → explicit command 보존.
 
-budget/approval weakening proposal → AWS direct apply 불가 → laptop Approval Authority reauth 없이는 production 변경 불가.
+### G Protected boundary
 
-## H Ordinary self-change
+authority expansion candidate → APPROVAL_REQUIRED → AWS attack attempts fail → laptop fresh reauth exact approval만 성공.
 
-non-protected candidate → auto promotion → report → regression injection → rollback.
+### H Ordinary code self-change
 
-## I Laptop repo execution
+versioned code candidate → deploy strategy → in-flight Run survive/drain → regression → exact rollback.
 
-AWS Work 생성 → laptop offline 동안 durable 대기 → online → workspace resolve → worker execution.
+### I Laptop execution
 
-## J Priority yield
+AWS Work → laptop offline durable wait → online → workspace integrity/dirty check → worker execution → ArtifactRef.
 
-background researcher 실행 → hard commitment user Work → safe boundary yield → user Work 우선.
+### J Priority
 
-## 필수 관찰
+background Run → hard commitment user Work → pending dispatch/preemption policy → unsafe mutation kill 없음.
 
-각 scenario에서:
+### K Report/time
 
-- Goal/Work/Run identity
-- Event provenance
-- report visibility
-- restart behavior
-- secret leakage 없음
+restart/DST/late Event → logical period identity와 revision semantics 유지.
 
-을 함께 확인.
+### L Backup/restore
+
+AWS backup → isolated restore → application state + durable reconciliation → same semantic identities.
+
+## Every scenario asserts
+
+- Request/Goal/Work/Run identities
+- Event/provenance
+- ExecutionRef location
+- ArtifactRef/hash
+- restart/unknown state behavior
+- secret leakage negative scan
+- report visibility when applicable

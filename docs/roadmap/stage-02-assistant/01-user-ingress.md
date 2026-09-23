@@ -1,28 +1,20 @@
 # Stage 2.1 — User Ingress
 
 ## Status
-
-- 상태: **선행작업 대기**
+- 상태: 선행작업 대기
 - 선행조건: Stage 1 완료
-- 지금 시작 가능: **아니오**
+- 지금 시작 가능: 아니오
 
-## Goal
+## Packets
+| 순서 | 작업 | 선행조건 |
+|---:|---|---|
+| 2.1A | Request / Delivery Schema | Stage 1 |
+| 2.1B | Web / API Ingress | 2.1A |
+| 2.1C | Discord / CLI Ingress | 2.1A |
+| 2.1D | Attachment & Escalation Policy | 2.1A |
+| 2.1E | Acceptance | 2.1A~D |
 
-Web, Discord, CLI/API가 같은 중앙 Goal/Work authority로 들어오게 한다.
+파일은 [01-user-ingress/](01-user-ingress/) 하위에 둔다.
 
-## Scope
-
-- authenticated Web request ingress
-- Discord local-vs-central escalation
-- CLI/API ingress
-- duplicate delivery deduplication
-- original user message/provenance 보존
-- client마다 별도 task/history 섬을 만들지 않음
-
-Discord는 모든 대화를 중앙에 보내지 않는다.
-
-## Done When
-
-1. 서로 다른 ingress가 같은 Request/Goal/Work contract 사용
-2. duplicate request가 duplicate mutation을 만들지 않음
-3. local conversation은 필요 없이 중앙 Work를 만들지 않음
+## Exit
+모든 ingress가 canonical Request/Delivery contract를 사용하고 duplicate delivery, attachment, escalation, API compatibility가 실제 PostgreSQL에서 검증되어야 한다.

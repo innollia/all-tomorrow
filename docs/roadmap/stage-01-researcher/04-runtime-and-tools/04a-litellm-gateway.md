@@ -8,47 +8,56 @@
 
 ## 목적
 
-All Tomorrow 전용 LiteLLM HTTP client를 새로 만들지 않고 PydanticAI model/provider 계층을 LiteLLM Proxy에 연결한다.
+PydanticAI provider/model 계층을 LiteLLM Proxy에 연결하고 00B에서 확정한 retry/usage/privacy contract를 구현한다.
 
-## 구조
+## Path
 
-All Tomorrow Researcher
-→ PydanticAI
-→ OpenAI-compatible provider/base URL
+Researcher
+→ AgentExecutionPort/PydanticAI
+→ OpenAI-compatible model/provider
 → LiteLLM Proxy
-→ providers/models
-
-LiteLLM은 model invocation gateway이고 Goal/Work orchestration authority가 아니다.
+→ provider/model
 
 ## 구현
 
-- LiteLLM proxy config example
-- env 기반 base URL/key
-- PydanticAI provider/model construction
-- All Tomorrow logical ModelRoute → gateway model alias 변환
-- usage/cost/model metadata를 가능한 범위에서 OTel/provenance로 연결
+- exact LiteLLM/PydanticAI version
+- proxy config example
+- env/secret injection
+- logical ModelRoute → gateway alias
+- usage/cost/model/latency provenance
+- retry owner policy 적용
+- timeout/error normalization
+- OTel propagation
 
-PydanticAI와 LiteLLM이 제공하는 retry/fallback을 무작정 겹치지 않는다. 어느 층이 어떤 실패를 처리하는지 정한다.
+All Tomorrow core에 provider SDK branch를 추가하지 않는다.
 
-## Custom Adapter 허용 조건
+## Retry
 
-Stage 0 spike에서 실제 gap이 증명될 때만 얇은 adapter를 추가한다.
+00B retry table을 그대로 구현한다.
 
-예:
-- 필요한 usage metadata가 표준 response에서 빠짐
-- logical route policy를 주입할 안정적인 seam이 없음
+- primary owner 외 retry disabled/bounded
+- total retry budget이 layer 중첩으로 곱해지지 않는 test
+- rate limit/model timeout/provider unavailable을 서로 구분
+- exhausted 결과를 Run evidence로 남김
 
-"나중에 필요할 것 같음"은 custom LiteLLMClient 생성 사유가 아니다.
+## Privacy/secret
 
-## Secret
+- provider key는 Proxy runtime이 소유
+- Work/Event/prompt artifact에 key/header 금지
+- raw prompt/response logging production default off
+- canary scan으로 실제 설정 검증
 
-provider key는 가능하면 LiteLLM runtime이 소유한다.
+## Requirements
 
-All Tomorrow event/work payload에 raw key/header 저장 금지.
+| ID | 요구 | 검증 |
+|---|---|---|
+| 04A-01 | PydanticAI→LiteLLM 실제 호출 | integration |
+| 04A-02 | provider branch 없음 | architecture |
+| 04A-03 | retry count가 policy ceiling 초과 안 함 | failure fixture |
+| 04A-04 | usage unknown을 0으로 위조하지 않음 | response fixture |
+| 04A-05 | secret/raw prompt gateway/telemetry leak 없음 | canary |
+| 04A-06 | custom client가 필요하면 실제 gap evidence+ADR 존재 | review gate |
 
 ## 완료조건
 
-1. PydanticAI agent가 LiteLLM Proxy를 통해 호출
-2. provider SDK branching이 All Tomorrow core에 없음
-3. secret leakage test 통과
-4. custom client가 없다면 그것을 정상적인 성공으로 취급
+PydanticAI가 Proxy를 통해 실제 모델을 호출하고 retry/usage/privacy가 00B/00D contract와 일치해야 한다.

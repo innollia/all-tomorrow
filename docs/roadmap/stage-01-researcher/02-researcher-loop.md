@@ -4,44 +4,49 @@
 
 - 상태: **선행작업 대기**
 - 지금 시작 가능: **아니오**
-- 선행조건: 01 완료 + Stage 0에서 agent/model substrate 확정
+- 선행조건: 01 완료 + Stage 0 agent/model substrate 확정
 
-이 파일은 02 작업의 local index다. 하위 packet 세부는 Stage 0 완료 시 최종 조정한다.
+## Flow
 
-## 구현 방향
-
-Observation
+ObservationSnapshot
 → PydanticAI Researcher agent
-→ typed Decision
-→ All Tomorrow semantic materialization
-→ durable execution/provenance
+→ discriminated Typed Decision
+→ validated semantic materialization
+→ lineage/dedup/budget
+→ Run/provenance/outcome
 
-PydanticAI가 agent/model/tool/MCP plumbing을 담당한다.
+## Ownership
 
-All Tomorrow가 소유:
-- observation snapshot 구성
-- 어떤 Goal/Work를 생성할지의 domain materialization
-- lineage/budget/dedup의 사용자 의미
+All Tomorrow:
+
+- bounded observation/cursor
+- Goal/Work/Question/Proposal materialization
+- lineage/dedup/budget
+- evidence/source ownership
 - metacognition provenance
 
-PydanticAI가 소유하지 않는 것:
-- canonical Goal/Work DB
-- project source ownership
-- authority expansion policy
+PydanticAI:
+
+- agent/model/tool interaction mechanics
+- typed model validation seam
+- MCP/toolset plumbing
+
+canonical DB, source ownership, authority expansion policy는 PydanticAI가 소유하지 않는다.
 
 ## Packet Status
 
 | 순서 | 작업 | 상태 | 지금 시작 가능 | 선행조건 |
 |---:|---|---|---:|---|
 | 02A | Observation Snapshot | 선행작업 대기 | 아니오 | 01 |
-| 02B | Researcher Agent & Typed Decision | 선행작업 대기 | 아니오 | 02A + model wiring |
+| 02B | Researcher Agent & Typed Decision | 선행작업 대기 | 아니오 | 02A + 04A |
 | 02C | Decision Materialization | 선행작업 대기 | 아니오 | 02B |
 | 02D | Lineage / Budget / Dedup | 선행작업 대기 | 아니오 | 02C |
-| 02E | Researcher Failure Acceptance | 선행작업 대기 | 아니오 | 02A~02D |
+| 02E | Researcher Acceptance | 선행작업 대기 | 아니오 | 02A~02D |
 
-## 하지 말 것
+## 금지
 
-- 새 agent framework 작성
-- provider별 model client 작성
-- Pydantic Graph를 쓴다는 이유로 모든 domain flow를 graph node로 변환
-- 메타인지 전체를 하나의 serial agent graph로 강제
+- 새 agent framework
+- provider별 client branch
+- 모든 domain flow를 Pydantic Graph에 강제
+- serial meta-agent 하나로 모든 metacognition 강제
+- activity/Work 생성량을 autonomous value로 간주

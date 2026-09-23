@@ -6,43 +6,68 @@
 - 선행조건: 06B 전체 통과
 - 지금 시작 가능: **아니오**
 
-## Stage close 전에 반드시 확인
+## Required evidence
 
-### Tests
+### L0
 
-- `python -m pytest -q`
-- live PostgreSQL integration
-- acceptance suite
-- worker adapter regression
-- secret leakage tests
+- unit/contract/eval/architecture tests
 
-### Operations
+### L1
 
-- AWS restart/reboot recovery
-- LiteLLM unavailable behavior
+- real PostgreSQL
+- selected durable backend
+- model/tool gateway
+- concurrency/dedup/budget
+- report/storage
+
+### L2
+
+- process kill/restart
+- V1→V2 history
+- NEED_USER
+- external side-effect ambiguity
+
+### L3
+
+- AWS reboot
+- backup/restore
+- actual deployment/rollback
+- laptop approval attack fixtures
+
+필수 lane이 skip/not-run이면 close 불가.
+
+## Operations
+
+- exact deployed versions recorded
+- health/readiness
+- secret/data inventory
+- retention/backup
+- deployment rollback
 - laptop offline behavior
-- laptop approval reauth
-- daily report generation
+- daily report time policy
 
-### Documentation
+## Documentation
 
-AGENTS.md 규칙에 따라 같은 변경에서:
+같은 변경에서:
 
-- 모든 하위 packet 상태 갱신
-- 01/02/03/04/05 parent 상태 갱신
-- Stage 1 index 갱신
-- `docs/roadmap.md` Stage 1 → 개발완료
-- Stage 2 → 시작안했음 / 지금 시작 가능=예
-- Current Position 업데이트
+- 하위 packet status
+- 01~05 parent
+- Stage 1 index
+- docs/roadmap.md
+- architecture/ADR
+- Current Position
+- downstream Stage 2 plan invalidation/review marker
 
-### 금지
+## Close prohibition
 
-아래가 하나라도 사실이면 Stage 1 완료 처리하지 않는다.
+하나라도 사실이면 완료 처리하지 않는다.
 
-- researcher가 restart에 state를 잃음
-- autonomous Goal이 mock에만 존재
-- self-improvement가 production에 실제 promotion되지 않음
-- protected change를 AWS credential로 우회 가능
-- daily report가 Event dump일 뿐 의미 복원 불가
-- high-priority user Work가 background에 막힘
-- user explicit choice가 inferred preference로 silently 대체됨
+- restart에서 researcher state 손실
+- autonomous outcome이 mock/activity에만 존재
+- code promotion이 실제 deployment/versioning을 거치지 않음
+- protected change AWS 우회 가능
+- report가 source-backed 복원을 못함
+- user priority가 resource dispatch에 반영 안 됨
+- explicit choice가 inferred preference로 바뀜
+- required L2/L3 test가 not-run
+- data/secret/artifact contract 미검증

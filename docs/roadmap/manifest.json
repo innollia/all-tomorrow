@@ -1,0 +1,1661 @@
+{
+  "schema_version": 1,
+  "contract_version": "2026-09-20",
+  "status_values": [
+    "개발중",
+    "개발완료",
+    "시작안했음",
+    "선행작업 대기"
+  ],
+  "contracts": {
+    "plan_verification": "docs/roadmap/plan-verification-contract.md",
+    "domain": "docs/roadmap/domain-contracts.md",
+    "control_plane": "docs/roadmap/control-plane-contracts.md",
+    "failure_recovery": "docs/roadmap/failure-recovery-contract.md",
+    "delivery_consistency": "docs/roadmap/delivery-consistency-contract.md",
+    "data_security_artifact": "docs/roadmap/data-security-artifact-contract.md",
+    "operations_security": "docs/roadmap/operations-security-contract.md"
+  },
+  "packets": [
+    {
+      "packet_id": "S0",
+      "path": "docs/roadmap/stage-00-assembly/index.md",
+      "parent_id": null,
+      "stage": 0,
+      "status": "개발중",
+      "prerequisites": [],
+      "requirement_prefix": "S0-",
+      "required_evidence_levels": []
+    },
+    {
+      "packet_id": "S0-00A",
+      "path": "docs/roadmap/stage-00-assembly/00a-substrate-spike.md",
+      "parent_id": "S0",
+      "stage": 0,
+      "status": "개발중",
+      "prerequisites": [],
+      "requirement_prefix": "S0-00A-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S0-00A1",
+      "path": "docs/roadmap/stage-00-assembly/00a-1-common-harness.md",
+      "parent_id": "S0-00A",
+      "stage": 0,
+      "status": "시작안했음",
+      "prerequisites": [],
+      "requirement_prefix": "S0-00A1-",
+      "required_evidence_levels": [
+        "L0"
+      ]
+    },
+    {
+      "packet_id": "S0-00A2",
+      "path": "docs/roadmap/stage-00-assembly/00a-2-dbos-spike.md",
+      "parent_id": "S0-00A",
+      "stage": 0,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0-00A1"
+      ],
+      "requirement_prefix": "S0-00A2-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S0-00A3",
+      "path": "docs/roadmap/stage-00-assembly/00a-3-restate-spike.md",
+      "parent_id": "S0-00A",
+      "stage": 0,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0-00A1"
+      ],
+      "requirement_prefix": "S0-00A3-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S0-00A4",
+      "path": "docs/roadmap/stage-00-assembly/00a-4-gateway-spike.md",
+      "parent_id": "S0-00A",
+      "stage": 0,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0-00A1"
+      ],
+      "requirement_prefix": "S0-00A4-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S0-00A5",
+      "path": "docs/roadmap/stage-00-assembly/00a-5-selection.md",
+      "parent_id": "S0-00A",
+      "stage": 0,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0-00A2",
+        "S0-00A3",
+        "S0-00A4"
+      ],
+      "requirement_prefix": "S0-00A5-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S0-00B",
+      "path": "docs/roadmap/stage-00-assembly/00b-ownership-contracts.md",
+      "parent_id": "S0",
+      "stage": 0,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0-00A"
+      ],
+      "requirement_prefix": "S0-00B-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S0-00B1",
+      "path": "docs/roadmap/stage-00-assembly/00b-ownership-contracts/00b-1-domain-identity-state.md",
+      "parent_id": "S0-00B",
+      "stage": 0,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0-00A"
+      ],
+      "requirement_prefix": "S0-00B1-",
+      "required_evidence_levels": [
+        "L0"
+      ]
+    },
+    {
+      "packet_id": "S0-00B2",
+      "path": "docs/roadmap/stage-00-assembly/00b-ownership-contracts/00b-2-adapter-ports-errors.md",
+      "parent_id": "S0-00B",
+      "stage": 0,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0-00B1",
+        "S0-00A5"
+      ],
+      "requirement_prefix": "S0-00B2-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S0-00B3",
+      "path": "docs/roadmap/stage-00-assembly/00b-ownership-contracts/00b-3-delivery-reconciliation.md",
+      "parent_id": "S0-00B",
+      "stage": 0,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0-00B1"
+      ],
+      "requirement_prefix": "S0-00B3-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S0-00B4",
+      "path": "docs/roadmap/stage-00-assembly/00b-ownership-contracts/00b-4-retry-timeouts-budget.md",
+      "parent_id": "S0-00B",
+      "stage": 0,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0-00B2",
+        "S0-00A5"
+      ],
+      "requirement_prefix": "S0-00B4-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S0-00B5",
+      "path": "docs/roadmap/stage-00-assembly/00b-ownership-contracts/00b-5-tool-worker-authorization.md",
+      "parent_id": "S0-00B",
+      "stage": 0,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0-00B2",
+        "S0-00A5"
+      ],
+      "requirement_prefix": "S0-00B5-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S0-00B6",
+      "path": "docs/roadmap/stage-00-assembly/00b-ownership-contracts/00b-6-acceptance.md",
+      "parent_id": "S0-00B",
+      "stage": 0,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0-00B1",
+        "S0-00B2",
+        "S0-00B3",
+        "S0-00B4",
+        "S0-00B5"
+      ],
+      "requirement_prefix": "S0-00B6-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S0-00C",
+      "path": "docs/roadmap/stage-00-assembly/00c-failure-walking-skeleton.md",
+      "parent_id": "S0",
+      "stage": 0,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0-00A",
+        "S0-00B"
+      ],
+      "requirement_prefix": "S0-00C-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S0-00D",
+      "path": "docs/roadmap/stage-00-assembly/00d-observability-eval-ci.md",
+      "parent_id": "S0",
+      "stage": 0,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0-00C"
+      ],
+      "requirement_prefix": "S0-00D-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S0-00E",
+      "path": "docs/roadmap/stage-00-assembly/00e-architecture-lock.md",
+      "parent_id": "S0",
+      "stage": 0,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0-00A",
+        "S0-00B",
+        "S0-00C",
+        "S0-00D"
+      ],
+      "requirement_prefix": "S0-00E-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S1",
+      "path": "docs/roadmap/stage-01-researcher/index.md",
+      "parent_id": null,
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0"
+      ],
+      "requirement_prefix": "S1-",
+      "required_evidence_levels": []
+    },
+    {
+      "packet_id": "S1-01",
+      "path": "docs/roadmap/stage-01-researcher/01-durable-kernel.md",
+      "parent_id": "S1",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0"
+      ],
+      "requirement_prefix": "S1-01-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S1-02",
+      "path": "docs/roadmap/stage-01-researcher/02-researcher-loop.md",
+      "parent_id": "S1",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-01"
+      ],
+      "requirement_prefix": "S1-02-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S1-03",
+      "path": "docs/roadmap/stage-01-researcher/03-evaluation-self-improvement.md",
+      "parent_id": "S1",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-02"
+      ],
+      "requirement_prefix": "S1-03-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S1-04",
+      "path": "docs/roadmap/stage-01-researcher/04-runtime-and-tools.md",
+      "parent_id": "S1",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0"
+      ],
+      "requirement_prefix": "S1-04-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S1-05",
+      "path": "docs/roadmap/stage-01-researcher/05-report-and-priority.md",
+      "parent_id": "S1",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-01",
+        "S1-02",
+        "S1-04"
+      ],
+      "requirement_prefix": "S1-05-",
+      "required_evidence_levels": [
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S1-06",
+      "path": "docs/roadmap/stage-01-researcher/06-acceptance.md",
+      "parent_id": "S1",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-01",
+        "S1-02",
+        "S1-03",
+        "S1-04",
+        "S1-05"
+      ],
+      "requirement_prefix": "S1-06-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S2",
+      "path": "docs/roadmap/stage-02-assistant/index.md",
+      "parent_id": null,
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1"
+      ],
+      "requirement_prefix": "S2-",
+      "required_evidence_levels": []
+    },
+    {
+      "packet_id": "S2-21",
+      "path": "docs/roadmap/stage-02-assistant/01-user-ingress.md",
+      "parent_id": "S2",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1"
+      ],
+      "requirement_prefix": "S2-21-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S2-21A",
+      "path": "docs/roadmap/stage-02-assistant/01-user-ingress/01a-request-delivery-schema.md",
+      "parent_id": "S2-21",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1"
+      ],
+      "requirement_prefix": "S2-21A-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S2-21B",
+      "path": "docs/roadmap/stage-02-assistant/01-user-ingress/01b-web-api-ingress.md",
+      "parent_id": "S2-21",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-21A"
+      ],
+      "requirement_prefix": "S2-21B-",
+      "required_evidence_levels": [
+        "L1",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S2-21C",
+      "path": "docs/roadmap/stage-02-assistant/01-user-ingress/01c-discord-cli-ingress.md",
+      "parent_id": "S2-21",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-21A"
+      ],
+      "requirement_prefix": "S2-21C-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S2-21D",
+      "path": "docs/roadmap/stage-02-assistant/01-user-ingress/01d-attachments-escalation.md",
+      "parent_id": "S2-21",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-21A"
+      ],
+      "requirement_prefix": "S2-21D-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S2-21E",
+      "path": "docs/roadmap/stage-02-assistant/01-user-ingress/01e-acceptance.md",
+      "parent_id": "S2-21",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-21A",
+        "S2-21B",
+        "S2-21C",
+        "S2-21D"
+      ],
+      "requirement_prefix": "S2-21E-",
+      "required_evidence_levels": [
+        "L1",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S2-22",
+      "path": "docs/roadmap/stage-02-assistant/02-remote-control.md",
+      "parent_id": "S2",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-21",
+        "S1-04"
+      ],
+      "requirement_prefix": "S2-22-",
+      "required_evidence_levels": [
+        "L1",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S2-22A",
+      "path": "docs/roadmap/stage-02-assistant/02-remote-control/02a-auth-session.md",
+      "parent_id": "S2-22",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-21"
+      ],
+      "requirement_prefix": "S2-22A-",
+      "required_evidence_levels": [
+        "L1",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S2-22B",
+      "path": "docs/roadmap/stage-02-assistant/02-remote-control/02b-control-api.md",
+      "parent_id": "S2-22",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-22A",
+        "S2-21"
+      ],
+      "requirement_prefix": "S2-22B-",
+      "required_evidence_levels": [
+        "L1",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S2-22C",
+      "path": "docs/roadmap/stage-02-assistant/02-remote-control/02c-backup-restore.md",
+      "parent_id": "S2-22",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-22A",
+        "S1-04"
+      ],
+      "requirement_prefix": "S2-22C-",
+      "required_evidence_levels": [
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S2-22D",
+      "path": "docs/roadmap/stage-02-assistant/02-remote-control/02d-outbound-delivery.md",
+      "parent_id": "S2-22",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-22A"
+      ],
+      "requirement_prefix": "S2-22D-",
+      "required_evidence_levels": [
+        "L1",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S2-23",
+      "path": "docs/roadmap/stage-02-assistant/03-request-execution.md",
+      "parent_id": "S2",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-21",
+        "S1-01"
+      ],
+      "requirement_prefix": "S2-23-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S2-23A",
+      "path": "docs/roadmap/stage-02-assistant/03-request-execution/03a-context-pack.md",
+      "parent_id": "S2-23",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-21"
+      ],
+      "requirement_prefix": "S2-23A-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S2-23B",
+      "path": "docs/roadmap/stage-02-assistant/03-request-execution/03b-run-cancel-replan.md",
+      "parent_id": "S2-23",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-01",
+        "S2-21"
+      ],
+      "requirement_prefix": "S2-23B-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S2-23C",
+      "path": "docs/roadmap/stage-02-assistant/03-request-execution/03c-question-artifact.md",
+      "parent_id": "S2-23",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-23B"
+      ],
+      "requirement_prefix": "S2-23C-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S2-23D",
+      "path": "docs/roadmap/stage-02-assistant/03-request-execution/03d-repair-operator.md",
+      "parent_id": "S2-23",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-23B",
+        "S2-22B"
+      ],
+      "requirement_prefix": "S2-23D-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S2-24",
+      "path": "docs/roadmap/stage-02-assistant/04-routing-cross-system.md",
+      "parent_id": "S2",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-23"
+      ],
+      "requirement_prefix": "S2-24-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S2-24A",
+      "path": "docs/roadmap/stage-02-assistant/04-routing-cross-system/04a-resource-registry.md",
+      "parent_id": "S2-24",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-23"
+      ],
+      "requirement_prefix": "S2-24A-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S2-24B",
+      "path": "docs/roadmap/stage-02-assistant/04-routing-cross-system/04b-selection-policy.md",
+      "parent_id": "S2-24",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-24A"
+      ],
+      "requirement_prefix": "S2-24B-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S2-24C",
+      "path": "docs/roadmap/stage-02-assistant/04-routing-cross-system/04c-fallback-cross-system.md",
+      "parent_id": "S2-24",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-24A",
+        "S2-24B"
+      ],
+      "requirement_prefix": "S2-24C-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S2-24D",
+      "path": "docs/roadmap/stage-02-assistant/04-routing-cross-system/04d-acceptance.md",
+      "parent_id": "S2-24",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-24A",
+        "S2-24B",
+        "S2-24C"
+      ],
+      "requirement_prefix": "S2-24D-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S2-25",
+      "path": "docs/roadmap/stage-02-assistant/05-acceptance.md",
+      "parent_id": "S2",
+      "stage": 2,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-21",
+        "S2-22",
+        "S2-23",
+        "S2-24"
+      ],
+      "requirement_prefix": "S2-25-",
+      "required_evidence_levels": [
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S3",
+      "path": "docs/roadmap/stage-03-manager/index.md",
+      "parent_id": null,
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2"
+      ],
+      "requirement_prefix": "S3-",
+      "required_evidence_levels": []
+    },
+    {
+      "packet_id": "S3-31",
+      "path": "docs/roadmap/stage-03-manager/01-personal-operations.md",
+      "parent_id": "S3",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2"
+      ],
+      "requirement_prefix": "S3-31-",
+      "required_evidence_levels": [
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S3-31A",
+      "path": "docs/roadmap/stage-03-manager/01-personal-operations/01a-owner-adapters.md",
+      "parent_id": "S3-31",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2"
+      ],
+      "requirement_prefix": "S3-31A-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S3-31B",
+      "path": "docs/roadmap/stage-03-manager/01-personal-operations/01b-school-artifact-pipeline.md",
+      "parent_id": "S3-31",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-31A",
+        "S2-23C"
+      ],
+      "requirement_prefix": "S3-31B-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S3-31C",
+      "path": "docs/roadmap/stage-03-manager/01-personal-operations/01c-personal-query-brief.md",
+      "parent_id": "S3-31",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-31A",
+        "S2-22D"
+      ],
+      "requirement_prefix": "S3-31C-",
+      "required_evidence_levels": [
+        "L1",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S3-31D",
+      "path": "docs/roadmap/stage-03-manager/01-personal-operations/01d-acceptance.md",
+      "parent_id": "S3-31",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-31A",
+        "S3-31B",
+        "S3-31C"
+      ],
+      "requirement_prefix": "S3-31D-",
+      "required_evidence_levels": [
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S3-32",
+      "path": "docs/roadmap/stage-03-manager/02-triggers-and-knowledge.md",
+      "parent_id": "S3",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-31",
+        "S2-23"
+      ],
+      "requirement_prefix": "S3-32-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S3-32A",
+      "path": "docs/roadmap/stage-03-manager/02-triggers-and-knowledge/02a-trigger-store-scheduler.md",
+      "parent_id": "S3-32",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-31"
+      ],
+      "requirement_prefix": "S3-32A-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S3-32B",
+      "path": "docs/roadmap/stage-03-manager/02-triggers-and-knowledge/02b-webhook-polling-watchers.md",
+      "parent_id": "S3-32",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-32A"
+      ],
+      "requirement_prefix": "S3-32B-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S3-32C",
+      "path": "docs/roadmap/stage-03-manager/02-triggers-and-knowledge/02c-lesson-persistence-evaluation.md",
+      "parent_id": "S3-32",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-31"
+      ],
+      "requirement_prefix": "S3-32C-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S3-32D",
+      "path": "docs/roadmap/stage-03-manager/02-triggers-and-knowledge/02d-lesson-reuse-outcome.md",
+      "parent_id": "S3-32",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-32C"
+      ],
+      "requirement_prefix": "S3-32D-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S3-32E",
+      "path": "docs/roadmap/stage-03-manager/02-triggers-and-knowledge/02e-acceptance.md",
+      "parent_id": "S3-32",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-32A",
+        "S3-32B",
+        "S3-32C",
+        "S3-32D"
+      ],
+      "requirement_prefix": "S3-32E-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S3-33",
+      "path": "docs/roadmap/stage-03-manager/03-discovery-and-resources.md",
+      "parent_id": "S3",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-24",
+        "S3-32"
+      ],
+      "requirement_prefix": "S3-33-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S3-33A",
+      "path": "docs/roadmap/stage-03-manager/03-discovery-and-resources/03a-discovery-sandbox.md",
+      "parent_id": "S3-33",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S2-24"
+      ],
+      "requirement_prefix": "S3-33A-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S3-33B",
+      "path": "docs/roadmap/stage-03-manager/03-discovery-and-resources/03b-resource-ledger.md",
+      "parent_id": "S3-33",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-32"
+      ],
+      "requirement_prefix": "S3-33B-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S3-33C",
+      "path": "docs/roadmap/stage-03-manager/03-discovery-and-resources/03c-multi-executor-workspace.md",
+      "parent_id": "S3-33",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-33B",
+        "S2-24"
+      ],
+      "requirement_prefix": "S3-33C-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S3-33D",
+      "path": "docs/roadmap/stage-03-manager/03-discovery-and-resources/03d-acceptance.md",
+      "parent_id": "S3-33",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-33A",
+        "S3-33B",
+        "S3-33C"
+      ],
+      "requirement_prefix": "S3-33D-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S3-34",
+      "path": "docs/roadmap/stage-03-manager/04-long-horizon.md",
+      "parent_id": "S3",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-32",
+        "S3-33"
+      ],
+      "requirement_prefix": "S3-34-",
+      "required_evidence_levels": [
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S3-34A",
+      "path": "docs/roadmap/stage-03-manager/04-long-horizon/04a-work-graph.md",
+      "parent_id": "S3-34",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-32"
+      ],
+      "requirement_prefix": "S3-34A-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S3-34B",
+      "path": "docs/roadmap/stage-03-manager/04-long-horizon/04b-milestone-artifact-progress.md",
+      "parent_id": "S3-34",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-34A"
+      ],
+      "requirement_prefix": "S3-34B-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S3-34C",
+      "path": "docs/roadmap/stage-03-manager/04-long-horizon/04c-multiday-runtime.md",
+      "parent_id": "S3-34",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-34A",
+        "S3-34B",
+        "S3-33"
+      ],
+      "requirement_prefix": "S3-34C-",
+      "required_evidence_levels": [
+        "L2",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S3-34D",
+      "path": "docs/roadmap/stage-03-manager/04-long-horizon/04d-feedback-followup.md",
+      "parent_id": "S3-34",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-34B"
+      ],
+      "requirement_prefix": "S3-34D-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S3-34E",
+      "path": "docs/roadmap/stage-03-manager/04-long-horizon/04e-acceptance.md",
+      "parent_id": "S3-34",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-34A",
+        "S3-34B",
+        "S3-34C",
+        "S3-34D"
+      ],
+      "requirement_prefix": "S3-34E-",
+      "required_evidence_levels": [
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S3-35",
+      "path": "docs/roadmap/stage-03-manager/05-acceptance.md",
+      "parent_id": "S3",
+      "stage": 3,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S3-31",
+        "S3-32",
+        "S3-33",
+        "S3-34"
+      ],
+      "requirement_prefix": "S3-35-",
+      "required_evidence_levels": [
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S1-04F",
+      "path": "docs/roadmap/stage-01-researcher/04-runtime-and-tools/04f-artifact-store.md",
+      "parent_id": "S1-04",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0",
+        "S1-01"
+      ],
+      "requirement_prefix": "S1-04F-",
+      "required_evidence_levels": [
+        "L1",
+        "L3"
+      ],
+      "target_requirement_prefix": "S1-04F-"
+    },
+    {
+      "packet_id": "S1-04G",
+      "path": "docs/roadmap/stage-01-researcher/04-runtime-and-tools/04g-secrets-operations-security.md",
+      "parent_id": "S1-04",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0",
+        "S1-04D"
+      ],
+      "requirement_prefix": "S1-04G-",
+      "required_evidence_levels": [
+        "L1",
+        "L3"
+      ],
+      "target_requirement_prefix": "S1-04G-"
+    },
+    {
+      "packet_id": "S1-01A",
+      "path": "docs/roadmap/stage-01-researcher/01-durable-kernel/01a-schema-migration.md",
+      "parent_id": "S1-01",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0"
+      ],
+      "requirement_prefix": "01A-",
+      "target_requirement_prefix": "S1-01A-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S1-01B",
+      "path": "docs/roadmap/stage-01-researcher/01-durable-kernel/01b-domain-and-store.md",
+      "parent_id": "S1-01",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-01A"
+      ],
+      "requirement_prefix": "01B-",
+      "target_requirement_prefix": "S1-01B-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S1-01C",
+      "path": "docs/roadmap/stage-01-researcher/01-durable-kernel/01c-durable-execution-bridge.md",
+      "parent_id": "S1-01",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-01B",
+        "S0-00E"
+      ],
+      "requirement_prefix": "01C-",
+      "target_requirement_prefix": "S1-01C-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S1-01D",
+      "path": "docs/roadmap/stage-01-researcher/01-durable-kernel/01d-run-linkage.md",
+      "parent_id": "S1-01",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-01B",
+        "S1-01C"
+      ],
+      "requirement_prefix": "01D-",
+      "target_requirement_prefix": "S1-01D-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S1-01E",
+      "path": "docs/roadmap/stage-01-researcher/01-durable-kernel/01e-live-db-verification.md",
+      "parent_id": "S1-01",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-01A",
+        "S1-01B",
+        "S1-01C",
+        "S1-01D"
+      ],
+      "requirement_prefix": "01E-",
+      "target_requirement_prefix": "S1-01E-",
+      "required_evidence_levels": [
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S1-02A",
+      "path": "docs/roadmap/stage-01-researcher/02-researcher-loop/02a-observation-snapshot.md",
+      "parent_id": "S1-02",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-01"
+      ],
+      "requirement_prefix": "02A-",
+      "target_requirement_prefix": "S1-02A-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S1-02B",
+      "path": "docs/roadmap/stage-01-researcher/02-researcher-loop/02b-researcher-wake.md",
+      "parent_id": "S1-02",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-02A",
+        "S1-04A"
+      ],
+      "requirement_prefix": "02B-",
+      "target_requirement_prefix": "S1-02B-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S1-02C",
+      "path": "docs/roadmap/stage-01-researcher/02-researcher-loop/02c-materialization.md",
+      "parent_id": "S1-02",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-02B"
+      ],
+      "requirement_prefix": "02C-",
+      "target_requirement_prefix": "S1-02C-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S1-02D",
+      "path": "docs/roadmap/stage-01-researcher/02-researcher-loop/02d-lineage-dedup-budget.md",
+      "parent_id": "S1-02",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-02C"
+      ],
+      "requirement_prefix": "02D-",
+      "target_requirement_prefix": "S1-02D-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S1-02E",
+      "path": "docs/roadmap/stage-01-researcher/02-researcher-loop/02e-acceptance.md",
+      "parent_id": "S1-02",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-02A",
+        "S1-02B",
+        "S1-02C",
+        "S1-02D"
+      ],
+      "requirement_prefix": "02E-",
+      "target_requirement_prefix": "S1-02E-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S1-03A",
+      "path": "docs/roadmap/stage-01-researcher/03-evaluation-self-improvement/03a-persistence.md",
+      "parent_id": "S1-03",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-02"
+      ],
+      "requirement_prefix": "03A-",
+      "target_requirement_prefix": "S1-03A-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S1-03B",
+      "path": "docs/roadmap/stage-01-researcher/03-evaluation-self-improvement/03b-mixed-evaluator.md",
+      "parent_id": "S1-03",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-03A"
+      ],
+      "requirement_prefix": "03B-",
+      "target_requirement_prefix": "S1-03B-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S1-03C",
+      "path": "docs/roadmap/stage-01-researcher/03-evaluation-self-improvement/03c-sandbox-experiment.md",
+      "parent_id": "S1-03",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-03A",
+        "S1-03B"
+      ],
+      "requirement_prefix": "03C-",
+      "target_requirement_prefix": "S1-03C-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S1-03D",
+      "path": "docs/roadmap/stage-01-researcher/03-evaluation-self-improvement/03d-promotion-rollback.md",
+      "parent_id": "S1-03",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-03C"
+      ],
+      "requirement_prefix": "03D-",
+      "target_requirement_prefix": "S1-03D-",
+      "required_evidence_levels": [
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S1-03E",
+      "path": "docs/roadmap/stage-01-researcher/03-evaluation-self-improvement/03e-protection-classification.md",
+      "parent_id": "S1-03",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-03A",
+        "S1-03C"
+      ],
+      "requirement_prefix": "03E-",
+      "target_requirement_prefix": "S1-03E-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S1-03F",
+      "path": "docs/roadmap/stage-01-researcher/03-evaluation-self-improvement/03f-acceptance.md",
+      "parent_id": "S1-03",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-03A",
+        "S1-03B",
+        "S1-03C",
+        "S1-03D",
+        "S1-03E"
+      ],
+      "requirement_prefix": "03F-",
+      "target_requirement_prefix": "S1-03F-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S1-04A",
+      "path": "docs/roadmap/stage-01-researcher/04-runtime-and-tools/04a-litellm-gateway.md",
+      "parent_id": "S1-04",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0"
+      ],
+      "requirement_prefix": "04A-",
+      "target_requirement_prefix": "S1-04A-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S1-04B",
+      "path": "docs/roadmap/stage-01-researcher/04-runtime-and-tools/04b-codex-worker.md",
+      "parent_id": "S1-04",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0"
+      ],
+      "requirement_prefix": "04B-",
+      "target_requirement_prefix": "S1-04B-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S1-04C",
+      "path": "docs/roadmap/stage-01-researcher/04-runtime-and-tools/04c-laptop-workspace.md",
+      "parent_id": "S1-04",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0"
+      ],
+      "requirement_prefix": "04C-",
+      "target_requirement_prefix": "S1-04C-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S1-04D",
+      "path": "docs/roadmap/stage-01-researcher/04-runtime-and-tools/04d-aws-runtime.md",
+      "parent_id": "S1-04",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S0",
+        "S1-01",
+        "S1-04A"
+      ],
+      "requirement_prefix": "04D-",
+      "target_requirement_prefix": "S1-04D-",
+      "required_evidence_levels": [
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S1-04E",
+      "path": "docs/roadmap/stage-01-researcher/04-runtime-and-tools/04e-approval-authority.md",
+      "parent_id": "S1-04",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-03",
+        "S1-04D"
+      ],
+      "requirement_prefix": "04E-",
+      "target_requirement_prefix": "S1-04E-",
+      "required_evidence_levels": [
+        "L1",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S1-05A",
+      "path": "docs/roadmap/stage-01-researcher/05-report-and-priority/05a-report-store.md",
+      "parent_id": "S1-05",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-02"
+      ],
+      "requirement_prefix": "05A-",
+      "target_requirement_prefix": "S1-05A-",
+      "required_evidence_levels": [
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S1-05B",
+      "path": "docs/roadmap/stage-01-researcher/05-report-and-priority/05b-report-composer.md",
+      "parent_id": "S1-05",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-05A",
+        "S1-04A"
+      ],
+      "requirement_prefix": "05B-",
+      "target_requirement_prefix": "S1-05B-",
+      "required_evidence_levels": [
+        "L0",
+        "L1"
+      ]
+    },
+    {
+      "packet_id": "S1-05C",
+      "path": "docs/roadmap/stage-01-researcher/05-report-and-priority/05c-priority-policy.md",
+      "parent_id": "S1-05",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-01",
+        "S1-02"
+      ],
+      "requirement_prefix": "05C-",
+      "target_requirement_prefix": "S1-05C-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L2"
+      ]
+    },
+    {
+      "packet_id": "S1-05D",
+      "path": "docs/roadmap/stage-01-researcher/05-report-and-priority/05d-report-trigger-and-access.md",
+      "parent_id": "S1-05",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-05A",
+        "S1-05B",
+        "S1-04D"
+      ],
+      "requirement_prefix": "05D-",
+      "target_requirement_prefix": "S1-05D-",
+      "required_evidence_levels": [
+        "L1",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S1-05E",
+      "path": "docs/roadmap/stage-01-researcher/05-report-and-priority/05e-acceptance.md",
+      "parent_id": "S1-05",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-05A",
+        "S1-05B",
+        "S1-05C",
+        "S1-05D"
+      ],
+      "requirement_prefix": "05E-",
+      "target_requirement_prefix": "S1-05E-",
+      "required_evidence_levels": [
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S1-06A",
+      "path": "docs/roadmap/stage-01-researcher/06-acceptance/06a-test-fixtures.md",
+      "parent_id": "S1-06",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-01",
+        "S1-02",
+        "S1-03",
+        "S1-04",
+        "S1-05"
+      ],
+      "requirement_prefix": "06A-",
+      "target_requirement_prefix": "S1-06A-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S1-06B",
+      "path": "docs/roadmap/stage-01-researcher/06-acceptance/06b-end-to-end.md",
+      "parent_id": "S1-06",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-06A"
+      ],
+      "requirement_prefix": "06B-",
+      "target_requirement_prefix": "S1-06B-",
+      "required_evidence_levels": [
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
+    {
+      "packet_id": "S1-06C",
+      "path": "docs/roadmap/stage-01-researcher/06-acceptance/06c-stage-close.md",
+      "parent_id": "S1-06",
+      "stage": 1,
+      "status": "선행작업 대기",
+      "prerequisites": [
+        "S1-06B"
+      ],
+      "requirement_prefix": "06C-",
+      "target_requirement_prefix": "S1-06C-",
+      "required_evidence_levels": [
+        "L0",
+        "L1",
+        "L2",
+        "L3"
+      ]
+    }
+  ]
+}

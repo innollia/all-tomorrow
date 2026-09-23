@@ -5,53 +5,70 @@
 - 상태: **선행작업 대기**
 - 지금 시작 가능: **아니오**
 - 선행조건: 01B + 01C
+- contracts: ../../domain-contracts.md, ../../plan-verification-contract.md
 
 ## 목적
 
-기존 Run/PipelineRuntime 자산을 버리지 않으면서 새 durable/agent substrate와 연결한다.
+기존 PipelineRuntime 자산과 새 Run/durable/agent substrate를 연결하되 identity와 recovery authority를 중복하지 않는다.
 
-## 역할 구분
+## Canonical roles
 
-- Work: All Tomorrow semantic unit
-- Run: Work의 logical execution attempt이자 cross-store idempotency identity
-- ExecutionRef: durable backend execution
-- Agent run: PydanticAI의 한 agent interaction
-- PipelineRuntime: 기존 deterministic/versioned recipe 실행 기록
+- Work: semantic unit
+- Run: Work의 logical execution attempt + idempotency identity
+- ExecutionRef: Run의 external durable execution
+- AgentInvocation: PydanticAI interaction provenance
+- PipelineRuntime execution: deterministic/versioned recipe의 내부 실행 기록
 
-Work와 Run은 분리한다. 첫 DBOS adapter에서는 run_id를 external workflow ID로 재사용해 idempotent start를 얻되, backend 자체 status/schema를 Run domain으로 복제하지 않는다.
+"legacy run"이라는 모호한 표현 대신 기존 PipelineRuntime ID는 pipeline_execution_id처럼 별도 provenance ref로 취급한다.
 
-## 기존 PipelineRuntime
+## PipelineRuntime disposition
 
-즉시 삭제하지 않는다.
+00E ADR에서 maintain / compatibility-only / retire 중 하나를 확정한다.
 
-Stage 0 결과에 따라:
-- deterministic recipe가 유용하면 DurableExecutionPort 안에서 하나의 executor로 유지
-- researcher의 agentic decision path는 PydanticAI를 우선
-- retry/recovery ownership은 DBOS와 중복시키지 않음
+maintain인 경우:
 
-PipelineRuntime 내부 retry가 남는 경우 그 retry는 bounded node-level policy일 뿐 durable process recovery가 아니다.
+- DurableExecutionPort 안의 bounded executor/component로 사용 가능
+- researcher agentic decision path를 강제하지 않음
+- process crash recovery/retry ownership을 durable backend와 중복하지 않음
+- 내부 node retry는 selected retry policy 안의 bounded local operation일 뿐 durable recovery가 아님
 
 ## Provenance
 
-All Tomorrow trace에서 최소 연결:
+최소 연결:
+
+- goal_id
 - work_id
-- execution backend/id/version
-- legacy run_id가 있으면 run_id
+- run_id
+- ExecutionRef backend/id/version
+- pipeline_execution_id optional
 - PydanticAI/OTel span ref
 - worker/tool request id
+- ArtifactRef/result refs
 
 ## NEED_USER
 
-기존 user_questions table은 사용자 UI/answer authorization projection으로 유지할 수 있다.
+canonical Question contract를 사용한다.
 
-그러나 durable suspension/recovery는 backend message/event primitive를 사용한다.
+- Question projection은 UI/authorization 의미
+- backend wait/signal은 durable mechanism
+- question_id ↔ signal_id 연결
+- answer persistence 후 signal
+- duplicate answer/signal idempotent
+- restart 중 같은 질문 record 재생성 금지
+- terminal/cancelled Work에 late answer가 와도 새 실행을 암묵 생성하지 않음
 
-질문 projection과 durable signal의 연결은 idempotent해야 한다.
+기존 user_questions table이 이 contract를 만족하면 migration으로 확장하고, 만족하지 못하면 새 schema를 만든다. 선택 자체는 01D 구현 전에 확정하며 02C로 미루지 않는다.
+
+## Requirement / verification
+
+| ID | 요구 | 검증 | Level |
+|---|---|---|---|
+| 01D-01 | Work→여러 Run→각 ExecutionRef lineage | integration | L1 |
+| 01D-02 | PipelineRuntime regression 보존 또는 ADR대로 retire | regression/ADR | L0/L1 |
+| 01D-03 | researcher가 PipelineRuntime type에 강제 종속되지 않음 | architecture test | L0 |
+| 01D-04 | NEED_USER restart + duplicate answer/signal 안전 | process restart integration | L2 |
+| 01D-05 | 전체 provenance graph 연결 가능 | trace/store assertion | L1 |
 
 ## 완료조건
 
-1. Work 하나가 여러 실행 시도를 참조 가능
-2. 기존 PipelineRuntime regression 보존
-3. researcher path가 custom PipelineRuntime에 강제 종속되지 않음
-4. NEED_USER restart가 backend durable primitive로 통과
-5. trace에서 모든 external execution을 연결 가능
+기존 실행 자산을 보존할 범위가 명시되고, Run/Question/provenance identity가 새 durable substrate와 충돌 없이 연결되어야 한다.

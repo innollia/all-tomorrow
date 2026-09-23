@@ -1,31 +1,19 @@
 # Stage 2.2 — Remote Control Surface
 
 ## Status
+- 상태: 선행작업 대기
+- 선행조건: 2.1 + Stage 1 runtime
+- 지금 시작 가능: 아니오
 
-- 상태: **선행작업 대기**
-- 선행조건: Stage 2.1 + Stage 1 runtime
-- 지금 시작 가능: **아니오**
+## Packets
+| 순서 | 작업 | 선행조건 |
+|---:|---|---|
+| 2.2A | Authentication & Session | 2.1 |
+| 2.2B | Store-backed Control API | 2.2A + 2.1 |
+| 2.2C | Backup / Restore | Stage1 AWS + 2.2A |
+| 2.2D | Outbound Delivery Surface | 2.2A |
 
-## Goal
+파일은 [02-remote-control/](02-remote-control/) 하위.
 
-AWS의 중앙 runtime을 실제 어느 기기에서나 접근 가능한 control surface로 만든다.
-
-## Scope
-
-- HTTPS
-- authenticated Web access
-- secure session
-- store-backed Goal/Work/Run view
-- pending question/answer
-- artifact/result link
-- health/readiness
-- persistent PostgreSQL
-- restart recovery
-- backup/restore 최소 검증
-- secret separation
-
-현재 표시용 prototype WebState를 production authority로 사용하지 않는다.
-
-## Done When
-
-노트북 밖 기기에서 로그인 → Work 제출 → 상태 추적 → 질문 응답 → 결과 확인이 restart를 견딘다.
+## Exit
+remote HTTPS control, auth/session isolation, backup/restore, outbound delivery가 canonical state와 연결되어야 한다.

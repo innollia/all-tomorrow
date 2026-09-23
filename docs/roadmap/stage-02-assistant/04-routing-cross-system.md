@@ -1,38 +1,19 @@
-# Stage 2.4 — Routing and Cross-System Action
+# Stage 2.4 — Routing & Cross-System Action
 
 ## Status
+- 상태: 선행작업 대기
+- 선행조건: 2.3
+- 지금 시작 가능: 아니오
 
-- 상태: **선행작업 대기**
-- 선행조건: Stage 2.3 완료
-- 지금 시작 가능: **아니오**
+## Packets
+| 순서 | 작업 | 선행조건 |
+|---:|---|---|
+| 2.4A | Resource Registry | 2.3 |
+| 2.4B | Selection Policy | 2.4A |
+| 2.4C | Fallback & Cross-System Mutation | 2.4A + 2.4B |
+| 2.4D | Acceptance | 2.4A~C |
 
-## Goal
+파일은 [04-routing-cross-system/](04-routing-cross-system/) 하위.
 
-사용자 요청을 적절한 worker/model/resource/project로 보내고, 한 interface의 요청이 다른 project의 실제 mutation으로 이어지게 한다.
-
-## Scope
-
-- worker capability/health
-- permission/risk metadata
-- provider/model metadata
-- budget/cost telemetry
-- selection provenance
-- fallback/replan
-- LiteLLM + Antigravity/OpenCode/Codex 실제 요청 경로
-- cross-project resolution
-- source-owner-aware mutation
-
-Registry 내부의 고정 sort를 최종 selection policy로 취급하지 않는다.
-
-## Example
-
-Web/Manager에서 Eve project 문제 제기
-→ project:eve resolve
-→ repository/runtime Work
-→ 적절한 worker 실행
-→ 수정/검증
-→ 같은 중앙 trace로 결과 반환
-
-## Done When
-
-provider/worker failure에도 Goal/provenance를 유지해 fallback 또는 replan하고, 다른 project의 실제 Work까지 이어진다.
+## Exit
+capability/authority/health/cost 기반 selection과 failure fallback/cross-source mutation이 provider 이름별 core branch 없이 동작해야 한다.

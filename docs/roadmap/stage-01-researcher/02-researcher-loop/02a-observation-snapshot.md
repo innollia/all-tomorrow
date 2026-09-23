@@ -5,115 +5,87 @@
 - 상태: **선행작업 대기**
 - 지금 시작 가능: **아니오**
 - 선행조건: 01 Durable Kernel 완료
-- 완료 후 열림: 02B Researcher Wake
+- 완료 후 열림: 02B
+- contracts: ../../domain-contracts.md, ../../plan-verification-contract.md
 
 ## 목적
 
-Researcher가 매번 DB 전체를 덤프받지 않고, 현재 상황을 판단하기 위한 bounded observation snapshot을 만든다.
-
-## 수정 파일
-
-- 새 파일: `src/all_tomorrow/researcher.py`
-- 새 파일: `src/all_tomorrow/observation.py`
-- 수정: `src/all_tomorrow/storage/work_store.py`
-- 수정: `src/all_tomorrow/storage/postgres.py`
-- 새 테스트: `tests/test_observation.py`
+Researcher가 DB 전체를 덤프받지 않고 bounded, reproducible observation range를 읽게 한다.
 
 ## ObservationSnapshot
 
-dataclass 최소 필드:
+최소:
 
 - snapshot_id
 - created_at
-- trigger_origin
+- trigger_origin/ref
 - user_id
 - project_id optional
 - active_goal_refs
 - open_work_refs
 - recent_run_refs
-- recent_event_refs
+- event_range: lower_cursor exclusive / upper_cursor inclusive
 - pending_question_refs
-- recent_evaluation_refs
-- recent_system_change_refs
+- recent_evaluation/proposal refs
+- recent_system_change refs
 - budget_summary
 - resource_summary
-- cursor/watermark
+- projection_version
 
-raw prompt/output 전체를 snapshot에 복제하지 않는다.
+raw prompt/output/secret를 snapshot metadata에 복제하지 않는다.
 
-## 조회 범위
-
-기본 조회는 bounded:
+## Bounded query
 
 - active Goal
 - PENDING/RUNNING/WAITING Work
-- 최근 N개 terminal Work/Run
-- 마지막 watermark 이후 Event
-- pending questions
-- 최근 evaluation/proposal refs
+- 최근 N terminal Work/Run
+- cursor 이후 Event 중 snapshot 생성 시점의 upper bound까지
+- pending Question
+- recent evaluation/proposal refs
 
-N과 lookback은 config로 두되 무한 history를 prompt에 넣지 않는다.
+N/lookback은 config version으로 기록한다. 무한 history를 prompt에 넣지 않는다.
 
-## Watermark
+## Cursor
 
-Researcher consumer별 watermark를 저장한다.
-
-새 migration:
-
-- `migrations/0004_researcher.sql`
-
-table:
-
-`observer_cursors`
+observer_cursors:
 
 - observer_id
 - user_id
 - last_event_at
 - last_event_id
+- revision
 - updated_at
-- PRIMARY KEY(observer_id, user_id)
+- PK(observer_id,user_id)
 
-Event time 동률을 고려해 occurred_at + event_id 두 값을 cursor로 사용.
+occurred_at + event_id tuple로 ordering한다.
 
-## Store API
+snapshot 생성 시 current cursor와 max visible Event를 읽어 immutable range를 만든다.
+cursor는 decision/materialization이 durable하게 끝난 뒤 expected revision/CAS로 advance한다.
 
-- `build_observation_snapshot(...)`
-- `get_observer_cursor(...)`
-- `advance_observer_cursor(...)`
+## Concurrent wake
 
-cursor advance는 researcher decision이 durable하게 기록된 뒤에만 수행한다.
+동일 observer_id/user_id의 model call 중복을 줄이기 위해 PostgreSQL advisory lock 또는 동등한 DB-scoped short lock을 사용한다.
 
-## 자기관찰
+- lock 획득 실패 시 같은 cursor range를 별도 처리하지 않고 이미 진행 중 상태로 종료/재시도
+- process crash 시 DB session 종료로 lock 자동 해제
+- 장기 lease/heartbeat subsystem을 새로 만들지 않음
+- cursor CAS는 최종 duplicate protection으로 유지
 
-다음 Event도 일반 Event처럼 포함 가능:
+## Self observation
 
-- researcher.woke
-- researcher.noop
-- researcher.decision
-- goal.autonomous_created
-- improvement.proposed
-- evaluation.completed
-- promotion.applied
-- rollback.applied
+researcher.woke/noop/decision, autonomous Goal/Work, proposal/evaluation/promotion/rollback Event도 일반 Event처럼 다음 range에 포함될 수 있다.
 
-별도 meta-meta store를 만들지 않는다.
+## Requirements
 
-## 하지 말 것
-
-- 모든 Event를 매 wake마다 읽기
-- raw user prompt/secret를 snapshot metadata로 복제
-- vector DB 추가
-- 문제 유형 classifier 추가
-
-## 테스트
-
-- watermark 이후 Event만 조회
-- 같은 timestamp Event 누락 없음
-- active/open state 포함
-- terminal history bounded
-- researcher 자신의 이전 Event도 다음 snapshot에 포함
-- secret/raw payload 유출 없음
+| ID | 요구 | 검증 | Level |
+|---|---|---|---|
+| 02A-01 | same timestamp Event 누락 없음 | cursor ordering test | L1 |
+| 02A-02 | terminal history bounded | property test | L0 |
+| 02A-03 | snapshot range 재현 가능 | same cursor fixture | L1 |
+| 02A-04 | concurrent wake가 same range model call을 중복 시작하지 않음 | concurrent DB test | L1 |
+| 02A-05 | crash 후 lock 해제 + cursor 미진행 | child process test | L2 |
+| 02A-06 | raw secret/content가 snapshot metadata에 복제되지 않음 | canary test | L1 |
 
 ## 완료조건
 
-Researcher가 현재와 최근 변화만 bounded snapshot으로 읽고, 다음 wake에서 자기 자신의 이전 판단도 다시 볼 수 있음.
+현재와 최근 변화만 bounded range로 읽으며 concurrent/crash 상황에서도 range 누락·중복 mutation의 원인이 되지 않아야 한다.

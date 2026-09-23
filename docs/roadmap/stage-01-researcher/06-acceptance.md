@@ -5,31 +5,44 @@
 - 상태: **선행작업 대기**
 - 지금 시작 가능: **아니오**
 - 선행조건: 01~05 완료
+- contract: ../plan-verification-contract.md
 
-## Acceptance 축
+## Environment gate matrix
 
-Stage 1 완료는 기능 데모만으로 판정하지 않는다.
+| Area | 최소 level |
+|---|---|
+| domain/schema/evaluator pure rules | L0 |
+| PostgreSQL/durable/model gateway integration | L1 |
+| process kill/restart/version replay | L2 |
+| AWS reboot/backup/remote runtime | L3 |
+| laptop Approval Authority security boundary | L3 |
 
-필수:
+낮은 level mock으로 높은 level requirement를 대체하지 않는다.
+
+## Required axes
+
 - real PostgreSQL
+- selected durable backend
 - process kill/restart
 - duplicate start/idempotency
-- NEED_USER 중단·재개
-- model gateway 장애
+- NEED_USER restart
+- model gateway outage
 - worker timeout
-- application version upgrade 중 in-flight work
-- OTel trace/provenance linkage
+- V1→V2 in-flight strategy
+- OTel/provenance
 - eval regression
-- ordinary self-change rollback
-- protected change laptop boundary
-- backend 내부 상태를 지워 읽지 않고도 All Tomorrow domain 의미 설명 가능
+- sandbox/promotion/rollback
+- protected laptop authority
+- report/time/priority
+- backend 내부 상태 없이 Goal/Work/Run 의미 설명 가능
+- ArtifactRef/data retention/privacy contract
 
-## Backend Escape
+## Backend escape
 
-DBOS는 초기 implementation이지 제품 정의가 아니다.
+fake/alternate adapter contract suite가 selected backend internal type leakage를 탐지해야 한다.
+두 번째 backend production 배포는 필수 아님.
 
-DurableExecutionPort의 fake/alternate adapter contract test를 통과해야 한다.
+## Stage completion rule
 
-Stage 1을 개발완료 처리하기 위해 Hatchet/Temporal을 실제 production 배포할 필요는 없다.
-
-mock/unit test만으로 Stage 1을 개발완료 처리하지 않는다.
+각 하위 packet requirement matrix와 06B scenario가 요구 evidence level로 모두 닫혀야 한다.
+"전체 pytest 통과" 하나만으로 Stage 완료를 주장하지 않는다.

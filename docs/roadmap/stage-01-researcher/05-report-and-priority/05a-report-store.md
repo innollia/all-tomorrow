@@ -8,53 +8,58 @@
 
 ## 목적
 
-Event dump가 아니라 사용자에게 보여줄 일일 운영 요약의 durable source를 만든다.
+Event dump가 아니라 bounded source-backed operational report projection을 durable하게 저장한다.
 
-## 수정 파일
+## Report identity
 
-- 새 migration: `migrations/0006_reports.sql`
-- 새 파일: `src/all_tomorrow/reports.py`
-- 새 파일: `src/all_tomorrow/storage/report_store.py`
-- 수정: `src/all_tomorrow/storage/postgres.py`
-- 새 테스트: `tests/test_reports.py`
+reports:
 
-## reports table
-
-- report_id PK
+- report_id
 - user_id
-- period_start
-- period_end
+- logical_period_id
+- timezone
+- period_start_utc / period_end_utc
+- projection_version
+- input_watermark/hash
+- revision
+- supersedes_report_id optional
 - status: DRAFT / FINAL
-- summary text
-- sections jsonb
-- source_refs jsonb
-- created_at
+- summary
+- sections
+- source_refs
+- created_at / finalized_at
 
-unique:
+idempotency key:
+user_id + logical_period_id + projection_version + input_watermark/hash
 
-- user_id + period_start + period_end + version 또는 report_idempotency_key
+FINAL report는 immutable하다.
+FINAL 이후 late source Event가 해당 period에 포함되어야 하면 기존 row를 덮지 않고 새 revision을 만들고 supersedes_report_id로 연결한다.
 
-## ReportInput projection
+## Projection input
 
-조회 대상:
-
-- autonomous Goal 생성/상태 변화
-- autonomous Work 상태 변화
-- research 결과 refs
-- improvement proposed/promoted/rejected/rolled_back
+- autonomous/user Goal 상태 변화
+- Work/Run 결과
+- research ArtifactRefs
+- improvement proposed/promoted/rejected/rollback
 - protected pending proposals
-- pending user questions
+- pending Questions
 - resource/cost summary
-- user-priority preemption events
+- priority/yield events
 
-raw Event 전체를 report에 붙이지 않는다.
+raw Event 전체나 raw prompt를 report row에 복제하지 않는다.
 
-## Idempotency
+## Unknown
 
-같은 period를 반복 생성해도 duplicate final report를 무한히 만들지 않는다.
+cost/result가 unknown이면 UNKNOWN으로 보존한다. 0/empty로 변환하지 않는다.
 
-source watermark/version으로 동일 입력이면 기존 report 반환 가능.
+## Requirements
+
+- 같은 exact input watermark 재생성 → same report/ref
+- late event → revision, prior FINAL immutable
+- source refs가 owner/access scope를 유지
+- report row에서 raw secret/content canary 부재
+- restart 후 report identity/revision 보존
 
 ## 완료조건
 
-하루치 상태를 bounded source refs와 함께 durable report record로 저장 가능.
+동일 입력에 idempotent하고 late evidence에도 history를 덮어쓰지 않는 durable report projection이어야 한다.

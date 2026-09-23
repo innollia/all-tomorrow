@@ -8,76 +8,107 @@
 
 ## 목적
 
-protected boundary를 넓히지 않는 평가 통과 변경을 자동 production promotion하고, 회귀 시 이전 version으로 되돌린다.
+ordinary ACCEPT candidate를 target 종류에 맞는 안전한 deployment transaction으로 promotion하고 regression 시 immutable previous version으로 rollback한다.
 
-## 수정 파일
+## Common PromotionTarget contract
 
-- 새 파일: `src/all_tomorrow/promotion.py`
-- 수정: `src/all_tomorrow/evaluation.py`
-- 수정: `src/all_tomorrow/storage/postgres.py`
-- 새 테스트: `tests/test_promotion.py`
+- inspect_current() -> immutable ref/hash
+- validate_candidate(candidate_ref)
+- plan(candidate_ref, current_ref) -> DeploymentPlan
+- apply(plan) -> DeploymentRef
+- verify(deployment_ref)
+- rollback(previous_ref, deployment_ref)
+- observe(deployment_ref, monitoring_policy)
 
-## PromotionTarget adapter
+core는 target filesystem/provider detail을 모른다.
 
-interface:
+## Target classes
 
-- inspect_current()
-- validate_candidate()
-- apply(candidate_ref)
-- verify()
-- rollback(previous_ref)
+### Prompt/config
 
-구현 후보:
+- immutable version create
+- alias/reference switch
+- smoke evaluation
+- atomic/current ref 확인
+- previous alias/ref rollback
 
-- versioned prompt/config
-- pipeline version
-- code/repository deploy adapter
+### Pipeline/policy
 
-core promotion service는 target별 filesystem detail을 모름.
+- schema/contract compatibility 검증
+- active Run과 version binding 확인
+- immutable version activation
+- previous version rollback
+
+### Code/repository deploy
+
+prompt promotion과 같은 수준으로 단순 apply하지 않는다.
+
+필수 deployment plan:
+
+- commit/artifact hash
+- dependency lock
+- migration compatibility
+- in-flight durable execution compatibility
+- new process/version start
+- readiness/smoke
+- traffic/active alias switch
+- old version drain 또는 00E strategy
+- rollback 가능 여부
+- irreversible DB migration이 있으면 ordinary auto-promotion 금지 또는 별도 protected/migration rail
 
 ## Promotion flow
 
 1. proposal ACCEPT
-2. protection classification 확인
-3. ordinary만 proceed
-4. current target ref/hash 재확인
-5. candidate apply
-6. smoke verify
-7. proposal PROMOTED + Event
-8. monitoring window 등록
+2. protection classification
+3. frozen candidate/criteria hash 재검증
+4. current baseline hash 재확인
+5. stale면 STALE + 재평가
+6. target-specific plan validate
+7. apply
+8. smoke/verify
+9. PROMOTED Event
+10. monitoring policy 시작
 
-apply 중 baseline이 proposal 생성 시점과 달라졌으면 stale proposal로 중단하고 재평가.
+partial apply가 발생하면 성공으로 기록하지 않고 rollback/repair state로 남긴다.
 
-## Rollback trigger
+## Monitoring policy
 
-초기 자동 rollback 신호:
+target마다 explicit config/ref가 필수다.
 
-- explicit deploy/smoke failure
-- clear monitored regression
-- repeated critical failure threshold
+- minimum observation count and/or duration
+- metrics/evidence to collect
+- hard rollback signals
+- tolerance/debounce
+- UNKNOWN handling
 
-ambiguous quality decline는 곧바로 rollback하지 않고 evaluation Work 생성 가능.
+숨은 default window를 두지 않는다. 정책이 없으면 automatic promotion 불가다.
 
-rollback:
+테스트 fixture에서는 작은 deterministic count를 사용해도 production config와 분리한다.
 
-- exact previous_ref로 복귀
-- proposal ROLLED_BACK
-- rollback Event
-- 원인 investigation Work 후보
+## Rollback
 
-## 보고
+automatic hard triggers:
 
-ordinary promotion/rollback은 05 report 입력으로 Event 남김.
+- deploy/readiness failure
+- hard invariant regression
+- predeclared critical threshold 반복 초과
 
-## 테스트
+ambiguous quality decline → NEED_MORE_EVIDENCE/investigation, 즉시 rollback 여부는 policy.
 
-- accepted ordinary change promotion
-- stale baseline blocks
-- apply failure rollback
-- verify failure rollback
-- repeated rollback idempotency
-- protected proposal promotion reject
+rollback은 exact previous immutable ref로 복귀하고 idempotent해야 한다.
+
+## Requirements
+
+| ID | 요구 | 검증 | Level |
+|---|---|---|---|
+| 03D-01 | stale baseline blocks | race fixture | L1 |
+| 03D-02 | prompt/config atomic switch+rollback | integration | L1 |
+| 03D-03 | code deploy preserves/drains in-flight Run | process/version test | L2/L3 |
+| 03D-04 | apply/verify failure rollback | negative integration | L1/L2 |
+| 03D-05 | monitoring policy 없으면 auto-promote 실패 | unit |
+| 03D-06 | repeated rollback idempotent | integration |
+| 03D-07 | protected/unknown classification auto apply 불가 | negative |
 
 ## 완료조건
 
-평가 통과 ordinary change가 사람 승인 없이 적용 가능하고 exact previous version으로 rollback 가능.
+ordinary target마다 실제 deployment semantics가 정의되고 code deployment가 단순 file replace로 축소되지 않으며 exact rollback과 in-flight compatibility를 증명해야 한다.

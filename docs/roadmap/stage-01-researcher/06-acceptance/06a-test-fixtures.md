@@ -8,28 +8,55 @@
 
 ## 목적
 
-acceptance를 사람이 눈으로 demo 보고 통과시키지 않고 reproducible fixture로 만든다.
+Stage 1 acceptance를 reproducible fixture + environment profile로 만든다.
 
-## 추가 파일
+## Fixture groups
 
-- `tests/acceptance/conftest.py`
-- `tests/acceptance/fixtures/`
-- `tests/acceptance/test_stage1_researcher.py`
-- `tests/acceptance/test_stage1_self_improvement.py`
-- `tests/acceptance/test_stage1_authority.py`
+### Semantic/domain
 
-## Fixture 원칙
+- unknown-problem events without hidden cause label
+- autonomous opportunity
+- user feedback conflict
+- low/high commitment
+- unknown cost
+- late report Event
 
-- mock LLM fixture와 real integration mode 분리
-- unlabeled trouble fixture는 "이건 quota 문제" 같은 답을 metadata에 미리 넣지 않음
-- user feedback conflict fixture
-- ordinary self-change fixture
-- protected boundary change fixture
-- laptop offline fixture
-- high-priority user Work fixture
+### Failure
 
-## 통과 규칙
+- crash barriers
+- duplicate start/signal/materialization
+- external mutation invocation/applied counters
+- gateway outage
+- worker timeout
+- V1 persisted history
 
-unit mock만 통과했다고 Stage 1 완료로 표시하지 않는다.
+### Security/data
 
-PostgreSQL 실제 integration + AWS-like restart + laptop authority boundary를 포함.
+- secret canaries
+- protected candidate
+- unknown protection impact
+- approval replay/expiry/hash mismatch
+- artifact hash substitution
+- user A/B access
+
+## Environment profiles
+
+- unit
+- local-live: PostgreSQL + selected substrate
+- crash-live: child processes
+- deployed: AWS runtime
+- authority: laptop + AWS attacker fixture
+
+test runner output은 어떤 profile이 실행/skip/not-run 되었는지 명시한다.
+필수 profile not-run은 Stage success가 아니다.
+
+## Wrong implementation fixtures
+
+최소 대표 실패 구현을 검증:
+
+- duplicate effect
+- Work-level single ExecutionRef
+- caller-supplied correlation replay
+- ordinary-by-unknown protection
+- mutable candidate approval
+- missing metric=0

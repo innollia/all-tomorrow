@@ -1,59 +1,103 @@
-# 01B — Goal/Work Domain and Store
+# 01B — Goal/Work/Run Domain and Store
 
 ## Status
 
 - 상태: **선행작업 대기**
 - 지금 시작 가능: **아니오**
 - 선행조건: 01A
+- contracts: ../../domain-contracts.md, ../../plan-verification-contract.md
 
 ## 목적
 
-Goal/Work를 외부 workflow engine과 독립된 All Tomorrow domain으로 구현한다.
+Goal/Work/Run을 selected workflow engine과 독립된 All Tomorrow domain으로 구현한다.
 
-## Domain
+## Domain records
 
-GoalRecord와 WorkRecord는 사용자·프로젝트 의미만 표현한다.
+- GoalRecord: 장기 objective와 semantic status
+- WorkRecord: Goal을 진전시키는 semantic unit
+- RunRecord: Work의 logical execution attempt
+- ExecutionRef: Run에 연결되는 external durable execution ref
 
-WorkRecord에는 외부 실행을 연결하기 위한 ExecutionRef를 둘 수 있다.
+WorkRecord에 단일 ExecutionRef를 두지 않는다.
 
-ExecutionRef:
-- backend
-- execution_id
-- version optional
+## Store responsibilities
 
-ExecutionRef는 DBOS handle/status 객체가 아니다.
+### GoalWorkStore
 
-## Store 책임
+- create/get/update/list Goal
+- create/get/update/list Work
+- semantic transition
+- lineage/source refs
+- transition + provenance Event atomicity
 
-WorkStateStore:
-- create/get/update goal
-- create/get/list/update work
-- attach_execution_ref
-- semantic transition + provenance event
+### Outcome/Event store
 
-optimistic revision과 state transition/event atomicity는 application DB에서 유지한다.
+- CompletionEvidence/OutcomeRecord append
+- target Goal/Work/Run linkage
+- immutable evidence refs
+- Event append-only domain path
 
-## 하지 말 것
+### Delivery/Question store
 
-이 store에 다음 method를 추가하지 않는다.
+- cross-store Delivery intent create/update
+- REPAIR_REQUIRED query
+- Question create/answer/supersede/cancel
+- answer + signal Delivery intent atomic
 
-- claim_next_work
-- heartbeat_work
-- requeue_expired_work
-- lease owner 검사
-- backend retry counter
+### Source/Project store
 
-그것은 DurableExecutionPort 구현이 사용하는 substrate 책임이다.
+- canonical project/source refs와 freshness/access metadata
+- 기존 project/source subsystem이 있으면 그 API를 확장하고 병렬 registry를 만들지 않음
+
+### RunStore
+
+- create STARTING Run
+- get/list Run by Work
+- attach_execution_ref(run_id, expected_revision, ref)
+- transition Run
+- find STARTING/no-ref reconciliation candidates
+- record explicit unknown/repair evidence
+
+RunStore가 backend system table을 직접 조회/수정하지 않는다.
+
+## Concurrency
+
+- optimistic revision 또는 DB row lock으로 lost update 방지
+- semantic transition은 expected current state/revision을 검사
+- ExecutionRef attach는 compare-and-set
+- 다른 ref가 이미 붙은 경우 overwrite하지 않고 invariant violation
+- duplicate create에는 idempotency key/unique constraint가 있는 operation만 재사용
+
+## State machine
+
+../../domain-contracts.md의 Work/Run state semantics를 사용한다.
+
+특히:
+
+- Run 실패가 Work를 자동 FAILED로 만들지 않음
+- terminal Work/Run을 조용히 되살리지 않음
+- cancellation requested와 completed를 구분
+- WAITING은 backend status 복사가 아님
 
 ## Priority
 
-All Tomorrow Priority P0~P6는 semantic policy다.
+P0~P6은 semantic policy다.
+backend numeric priority/range를 domain enum에 넣지 않는다.
 
-adapter가 backend enqueue priority로 매핑한다. backend numeric range나 queue representation을 domain enum에 노출하지 않는다.
+## Requirement / verification
+
+| ID | 요구 | 검증 | Level |
+|---|---|---|---|
+| 01B-01 | backend import 없이 Goal/Work/Run CRUD | domain/store test | L0/L1 |
+| 01B-02 | Work 1:N Run | integration | L1 |
+| 01B-03 | transition + Event atomic | forced transaction failure | L1 |
+| 01B-04 | concurrent revision 충돌이 lost update를 만들지 않음 | concurrent transaction test | L1 |
+| 01B-05 | ExecutionRef conflicting attach fail closed | CAS race test | L1 |
+| 01B-06 | backend internal type/status가 domain에 없음 | architecture fitness | L0 |
+| 01B-07 | CompletionEvidence 없는 Work/Goal success transition 거부 | domain/store test | L0/L1 |
+| 01B-08 | Event 일반 write path append-only | store permission/contract | L1 |
+| 01B-09 | Question answer + signal Delivery intent atomic | transaction test | L1 |
 
 ## 완료조건
 
-1. Goal/Work를 durable backend 없이 저장/조회 가능
-2. DBOS를 import하지 않는 domain/store test 존재
-3. ExecutionRef만으로 외부 실행과 연결 가능
-4. semantic transition과 provenance event가 atomic
+Goal/Work/Run semantic state와 provenance를 실제 PostgreSQL에서 안전하게 유지하고, external execution 없이도 domain 의미를 완전히 설명할 수 있어야 한다.

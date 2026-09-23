@@ -1,35 +1,19 @@
 # Stage 3.1 — Personal Operations
 
 ## Status
-
-- 상태: **선행작업 대기**
+- 상태: 선행작업 대기
 - 선행조건: Stage 2 완료
-- 지금 시작 가능: **아니오**
+- 지금 시작 가능: 아니오
 
-## Goal
+## Packets
+| 순서 | 작업 | 선행조건 |
+|---:|---|---|
+| 3.1A | Owner Adapters & Source Precedence | Stage 2 |
+| 3.1B | School Artifact Pipeline | 3.1A + Stage2 Artifact |
+| 3.1C | Personal Query & Brief Projection | 3.1A + Trigger/Outbound surface |
+| 3.1D | Acceptance | 3.1A~C |
 
-연구원/비서 위에 school, schedule, task, personal context를 owner-aware하게 연결한다.
+파일: [01-personal-operations/](01-personal-operations/)
 
-## Scope
-
-### School material
-
-print/photo/PDF
-→ artifact
-→ extraction/classification
-→ school/Manager owner 저장 또는 ref
-→ actionable Work
-
-### Personal query
-
-"뭐 해야 돼?" 같은 질의에서 중앙 project state와 Manager-owned personal state를 조립한다.
-
-### Daily personal brief
-
-일정, 학교, 할 일, project, researcher 결과를 읽고 적절한 시점에 proactive brief를 전달한다.
-
-특정 assistant scheduler를 미리 하드코딩하지 않는다.
-
-## Done When
-
-school material과 personal state가 새 중앙 정본으로 무차별 복제되지 않으면서 실제 Work와 brief로 연결된다.
+## Exit
+personal/school owner truth와 central Work가 SourceRef/ArtifactRef로 연결되고 stale/conflict/proactive delivery가 명시적이어야 한다.

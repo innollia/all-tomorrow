@@ -9,6 +9,8 @@
 
 목적은 새 framework를 만드는 것이 아니다. 이미 존재하는 GitHub 프로젝트를 실제로 이어 붙여 All Tomorrow가 직접 소유해야 하는 최소 경계만 남긴다.
 
+00B 이후 계획은 `../plan-verification-contract.md`, `../domain-contracts.md`, `../failure-recovery-contract.md`, `../data-security-artifact-contract.md`를 공통 계약으로 사용한다. 계획 구체화 감사는 `../plan-hardening-audit-2026-09-20.md`에 기록한다.
+
 ## 현재 우선 조합
 
 공통 조각:
