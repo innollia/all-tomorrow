@@ -11,6 +11,10 @@ from all_tomorrow.domain.errors import (
     TerminalReviveError,
     WorkExecutionRefForbiddenError,
 )
+from all_tomorrow.domain.artifacts import (
+    ArtifactRef,
+    compute_content_hash,
+)
 from all_tomorrow.domain.events import EventRecord
 from all_tomorrow.domain.ids import (
     ArtifactId,
@@ -70,6 +74,8 @@ __all__ = [
     "ACTIVE_RUN_STATUSES",
     "ActiveRunLimitExceededError",
     "ArtifactId",
+    "ArtifactRef",
+    "compute_content_hash",
     "CanonicalError",
     "CompletionEvidence",
     "DeliveryId",

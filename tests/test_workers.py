@@ -825,7 +825,8 @@ class TestRealCliSmoke:
             [npx, "-y", "opencode-ai", "run", "--help"],
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=60,
+            shell=(os.name == "nt"),
         )
         assert result.returncode == 0
         combined = result.stdout + result.stderr
