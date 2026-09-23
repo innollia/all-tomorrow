@@ -566,10 +566,17 @@ async def test_postgres_store_atomic_outbox_commits_domain_and_outbox_in_transac
         intent.updated_at,
     )
 
-    mock_cursor = AsyncMock()
-    mock_cursor.fetchone.return_value = db_row
+    async def execute_side_effect(query: str, params=None):
+        cur = AsyncMock()
+        if "SELECT delivery_id" in query and "FOR UPDATE" in query:
+            cur.fetchone.return_value = None  # Key not yet in DB
+        elif "INSERT INTO delivery_records" in query and "RETURNING" in query:
+            cur.fetchone.return_value = db_row  # Inserted new row returned
+        else:
+            cur.fetchone.return_value = None
+        return cur
 
-    mock_pool, mock_connection = _create_mock_pool(mock_cursor)
+    mock_pool, mock_connection = _create_mock_pool(execute_side_effect)
     store = PostgresStore("postgresql://fake:5432/test", pool=mock_pool)
 
     domain_mutations = []
@@ -744,4 +751,102 @@ async def test_postgres_store_atomic_outbox_detects_conflict_on_divergent_payloa
 
     with pytest.raises(DeliveryCASConflictError, match="already exists with different destination or subjects"):
         await store.atomic_outbox_transaction(divergent_intent, noop_domain)
+
+
+@pytest.mark.asyncio
+async def test_postgres_store_atomic_outbox_rejects_expired_existing_idempotency_key() -> None:
+    """S0-00B3-05: When existing idempotency key in DB has expired, reuse is rejected with IdempotencyKeyExpiredError."""
+    from datetime import timedelta
+
+    past = utc_now() - timedelta(hours=1)
+    expired_db_row = (
+        "del_expired_db",
+        "RUN_START",
+        {"run_id": "run_1"},
+        "fake_durable",
+        "idmp_expired_key",
+        "global",
+        "standard",
+        past,  # Expired in DB!
+        {},
+        "DELIVERED",
+        1,
+        3,
+        1,
+        None,
+        None,
+        None,
+        past,
+        past,
+    )
+
+    mock_cursor = AsyncMock()
+    mock_cursor.fetchone.return_value = expired_db_row
+    mock_pool, mock_connection = _create_mock_pool(mock_cursor)
+    store = PostgresStore("postgresql://fake:5432/test", pool=mock_pool)
+
+    intent = DeliveryRecord(
+        delivery_id=DeliveryId("del_reuse_attempt"),
+        kind=DeliveryKind.RUN_START,
+        subject_refs={"run_id": "run_1"},
+        destination_adapter="fake_durable",
+        idempotency_key="idmp_expired_key",
+        payload={},
+        valid_until=utc_now() + timedelta(hours=24),
+    )
+
+    async def noop_domain(conn):
+        return None
+
+    with pytest.raises(IdempotencyKeyExpiredError, match="expired at"):
+        await store.atomic_outbox_transaction(intent, noop_domain)
+
+
+@pytest.mark.asyncio
+async def test_postgres_store_preserves_last_error_on_retrieval() -> None:
+    """S0-00B3: Stored last_error is properly deserialized into CanonicalError on get_delivery and outbox retrieval."""
+    from all_tomorrow.domain.errors import CanonicalError, ErrorCategory
+
+    raw_error = {
+        "category": "UNAVAILABLE",
+        "code": "network_down",
+        "retryability": True,
+        "ambiguity": False,
+        "safe_message": "Network cut off",
+    }
+
+    db_row = (
+        "del_err_1",
+        "RUN_START",
+        {"run_id": "run_err"},
+        "fake_durable",
+        "idmp_err_key",
+        "global",
+        "standard",
+        None,
+        {},
+        "FAILED",
+        1,
+        3,
+        1,
+        raw_error,  # last_error
+        None,
+        None,
+        utc_now(),
+        utc_now(),
+    )
+
+    mock_cursor = AsyncMock()
+    mock_cursor.fetchone.return_value = db_row
+    mock_pool, mock_connection = _create_mock_pool(mock_cursor)
+    store = PostgresStore("postgresql://fake:5432/test", pool=mock_pool)
+
+    delivery = await store.get_delivery("del_err_1")
+    assert delivery is not None
+    assert delivery.last_error is not None
+    assert isinstance(delivery.last_error, CanonicalError)
+    assert delivery.last_error.category == ErrorCategory.UNAVAILABLE
+    assert delivery.last_error.code == "network_down"
+    assert delivery.last_error.safe_message == "Network cut off"
+
 
