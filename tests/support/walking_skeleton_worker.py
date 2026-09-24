@@ -1,4 +1,4 @@
-"""Real independent worker process for Walking Skeleton scenarios (C-01, C-02, C-03, etc.).
+"""Real independent worker process for Walking Skeleton scenarios (C-01, C-02, C-03, C-04, C-05, C-07).
 
 Runs:
 PydanticAI agent → LiteLLM / fixture → DBOS step / workflow → mutation fixture
@@ -6,15 +6,20 @@ Supports distinct injected failure points:
 - BEFORE_MODEL_CALL (exit 78)
 - AFTER_MUTATION_SIDE_EFFECT (exit 77)
 - WHILE_WAITING_USER (wait for signal and output marker)
+- C-04: Commit Run STARTING then crash (exit 75) before external start
+- C-05: External start in DBOS then crash (exit 76) before local ref attach
+- C-07: Hang worker past timeout
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
 import time
 from pathlib import Path
 
+import psycopg
 from dbos import DBOS, SetWorkflowID
 
 from all_tomorrow.harness.types import ExecutionIdentity, FailPoint, HarnessInput, HarnessOutput, TraceContext
@@ -141,6 +146,143 @@ def main() -> None:
             print(f"resumed_pid={os.getpid()}", flush=True)
             write_output(output)
             return
+
+        if phase == "c04_crash":
+            with psycopg.connect(os.environ["AT_TEST_POSTGRES_URL"]) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS public.at_runs (
+                            run_id TEXT PRIMARY KEY,
+                            work_id TEXT NOT NULL,
+                            status TEXT NOT NULL,
+                            execution_ref JSONB,
+                            attempt_number INT NOT NULL DEFAULT 1,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )
+                        """
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO public.at_runs (run_id, work_id, status, execution_ref, attempt_number)
+                        VALUES (%s, %s, 'STARTING', NULL, 1)
+                        ON CONFLICT (run_id) DO UPDATE SET status = 'STARTING'
+                        """,
+                        (identity.run_id, identity.work_id),
+                    )
+                conn.commit()
+            print(f"c04_barrier_starting_pid={os.getpid()}", flush=True)
+            os._exit(75)
+
+        if phase == "c04_reconcile":
+            from all_tomorrow.adapters.dbos_adapter import DBOSDurableAdapter
+            from all_tomorrow.delivery import DeliveryReconciler, DeliveryRecord, DeliveryKind, format_idempotency_key
+            adapter = DBOSDurableAdapter(system_database_url=os.environ["AT_TEST_POSTGRES_URL"])
+            reconciler = DeliveryReconciler(adapter)
+            delivery = DeliveryRecord(
+                delivery_id=f"dlv_{identity.run_id}",
+                kind=DeliveryKind.RUN_START,
+                subject_refs={"run_id": identity.run_id, "work_id": identity.work_id},
+                destination_adapter="dbos",
+                idempotency_key=format_idempotency_key("run", "start", identity.run_id),
+                payload={"workflow_name": "ws_workflow", "workflow_payload": payload},
+            )
+            asyncio.run(reconciler.reconcile(delivery))
+            ref = asyncio.run(adapter.find_by_run_id(identity.run_id))
+            ref_dict = {
+                "backend": ref.backend,
+                "execution_id": ref.execution_id,
+                "execution_version": ref.execution_version,
+                "attached_at": ref.attached_at.isoformat() if ref.attached_at else None,
+                "metadata": ref.metadata,
+            } if ref else None
+            with psycopg.connect(os.environ["AT_TEST_POSTGRES_URL"]) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE public.at_runs
+                        SET status = 'RUNNING', execution_ref = %s, updated_at = NOW()
+                        WHERE run_id = %s
+                        """,
+                        (psycopg.types.json.Jsonb(ref_dict) if ref_dict else None, identity.run_id),
+                    )
+                conn.commit()
+            print(f"c04_reconciled_pid={os.getpid()} execution_id={ref.execution_id if ref else None}", flush=True)
+            return
+
+        if phase == "c05_crash":
+            exec_id = f"dbos_{identity.run_id}"
+            with psycopg.connect(os.environ["AT_TEST_POSTGRES_URL"]) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS public.at_runs (
+                            run_id TEXT PRIMARY KEY,
+                            work_id TEXT NOT NULL,
+                            status TEXT NOT NULL,
+                            execution_ref JSONB,
+                            attempt_number INT NOT NULL DEFAULT 1,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )
+                        """
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO public.at_runs (run_id, work_id, status, execution_ref, attempt_number)
+                        VALUES (%s, %s, 'STARTING', NULL, 1)
+                        ON CONFLICT (run_id) DO UPDATE SET status = 'STARTING'
+                        """,
+                        (identity.run_id, identity.work_id),
+                    )
+                conn.commit()
+            with SetWorkflowID(exec_id):
+                DBOS.start_workflow(run, payload)
+            # Barrier: external start exists in DBOS, but execution_ref is NOT attached in at_runs!
+            print(f"c05_barrier_external_started_pid={os.getpid()}", flush=True)
+            os._exit(76)
+
+        if phase == "c05_reconcile":
+            from all_tomorrow.adapters.dbos_adapter import DBOSDurableAdapter
+            from all_tomorrow.delivery import DeliveryReconciler, DeliveryRecord, DeliveryKind, format_idempotency_key
+            adapter = DBOSDurableAdapter(system_database_url=os.environ["AT_TEST_POSTGRES_URL"])
+            reconciler = DeliveryReconciler(adapter)
+            delivery = DeliveryRecord(
+                delivery_id=f"dlv_{identity.run_id}",
+                kind=DeliveryKind.RUN_START,
+                subject_refs={"run_id": identity.run_id, "work_id": identity.work_id},
+                destination_adapter="dbos",
+                idempotency_key=format_idempotency_key("run", "start", identity.run_id),
+                payload={"workflow_name": "ws_workflow", "workflow_payload": payload},
+            )
+            asyncio.run(reconciler.reconcile(delivery))
+            ref = asyncio.run(adapter.find_by_run_id(identity.run_id))
+            ref_dict = {
+                "backend": ref.backend,
+                "execution_id": ref.execution_id,
+                "execution_version": ref.execution_version,
+                "attached_at": ref.attached_at.isoformat() if ref.attached_at else None,
+                "metadata": ref.metadata,
+            } if ref else None
+            with psycopg.connect(os.environ["AT_TEST_POSTGRES_URL"]) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE public.at_runs
+                        SET status = 'RUNNING', execution_ref = %s, updated_at = NOW()
+                        WHERE run_id = %s
+                        """,
+                        (psycopg.types.json.Jsonb(ref_dict) if ref_dict else None, identity.run_id),
+                    )
+                conn.commit()
+            print(f"c05_reconciled_pid={os.getpid()} execution_id={ref.execution_id if ref else None}", flush=True)
+            return
+
+        if phase == "c07_hang":
+            print(f"hanging_worker_pid={os.getpid()}", flush=True)
+            while True:
+                time.sleep(1)
 
         with SetWorkflowID(workflow_id):
             output = run(payload)

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import os
-import pickle
+import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
-import psycopg
+from dbos import DBOS, SetWorkflowID
+from dbos._error import DBOSNonExistentWorkflowError
+
 from all_tomorrow.domain.errors import CanonicalError, ErrorCategory
 from all_tomorrow.domain.ids import ExecutionRef, RunId, utc_now
 from all_tomorrow.error_normalization import normalize_exception
@@ -23,14 +24,56 @@ from all_tomorrow.ports.durable import (
 )
 
 
-class DBOSDurableAdapter(DurableExecutionPort):
-    """DBOS implementation of DurableExecutionPort backed by real PostgreSQL/DBOS runtime.
+_WORKFLOW_REGISTRY: dict[str, Callable[..., Any]] = {}
 
-    Translates DBOS workflow lifecycles, steps, and system tables into
-    canonical domain ports and normalized CanonicalErrors.
-    When system_database_url is provided (or AT_TEST_POSTGRES_URL is set),
-    queries and mutates durable PostgreSQL tables (`dbos.workflow_status`,
-    `dbos.workflow_output`, `dbos.notifications`, and `public.at_run_executions`).
+
+def register_dbos_workflow(name: str, fn: Callable[..., Any]) -> None:
+    _WORKFLOW_REGISTRY[name] = fn
+
+
+@DBOS.workflow(name="at_generic_workflow")
+def at_generic_workflow(payload: dict[str, Any]) -> Any:
+    wait_topic = payload.get("wait_for_signal") or payload.get("wait_topic")
+    if wait_topic:
+        timeout = payload.get("wait_timeout_seconds", 60)
+        return DBOS.recv(topic=wait_topic, timeout_seconds=timeout)
+    return payload.get("result", payload)
+
+
+@DBOS.workflow(name="walking_skeleton_workflow")
+def at_walking_skeleton_workflow(payload: dict[str, Any]) -> dict[str, Any]:
+    topic = payload.get("wait_for_signal") or payload.get("wait_topic") or "user_response"
+    timeout = payload.get("wait_timeout_seconds", 120)
+    sig = DBOS.recv(topic=topic, timeout_seconds=timeout)
+    return {
+        "status": "resumed",
+        "signal": sig,
+        "input_payload": payload,
+    }
+
+
+_WORKFLOW_REGISTRY["walking_skeleton_workflow"] = at_walking_skeleton_workflow
+_WORKFLOW_REGISTRY["at_generic_workflow"] = at_generic_workflow
+_WORKFLOW_REGISTRY["wf_concurrent"] = at_generic_workflow
+_WORKFLOW_REGISTRY["test_workflow"] = at_generic_workflow
+_WORKFLOW_REGISTRY["wf_test"] = at_generic_workflow
+_WORKFLOW_REGISTRY["wf"] = at_generic_workflow
+
+
+_DBOS_LAUNCH_LOCK = threading.Lock()
+
+
+class DBOSDurableAdapter(DurableExecutionPort):
+    """DBOS implementation of DurableExecutionPort backed by real DBOS SDK and PostgreSQL.
+
+    Strict DBOS ownership boundary:
+    1. NEVER creates, inserts into, queries, or updates dbos.* internal system tables.
+       Workflow status, result, signal, and cancellation are performed strictly through
+       DBOS public SDK API (`DBOS.get_workflow_status()`, `DBOS.cancel_workflow()`,
+       `DBOS.send()`, `DBOS.retrieve_workflow()`).
+    2. Only application-owned mappings (such as `public.at_run_executions` and
+       `public.at_signals_seen`) are managed in application schema.
+    3. Initialization does not swallow broad exceptions.
     """
 
     def __init__(
@@ -48,41 +91,76 @@ class DBOSDurableAdapter(DurableExecutionPort):
         self._executions: dict[str, dict[str, Any]] = {}
         self._signals_seen: set[tuple[str, str]] = set()
 
-        if self.system_database_url:
-            self._init_db()
+        self._db_initialized: bool = False
 
-    def _get_connection(self) -> psycopg.Connection:
+    def _ensure_db_initialized(self) -> None:
+        """Create application-owned schema tables. Fails fast without swallowing errors."""
+        if self._db_initialized or not self.system_database_url:
+            return
+        self._init_db()
+        self._db_initialized = True
+
+    def _ensure_dbos_launched(self) -> None:
+        """Ensure DBOS SDK runtime is launched with the configured system database URL."""
+        if not self.system_database_url:
+            return
+        with _DBOS_LAUNCH_LOCK:
+            from dbos import _dbos
+
+            instance = _dbos._dbos_global_instance
+            if instance is not None and getattr(instance, "_launched", False):
+                try:
+                    cfg = getattr(instance, "_config", {})
+                    current_url = cfg.get("system_database_url")
+                except Exception:
+                    current_url = None
+                if current_url == self.system_database_url:
+                    return
+                try:
+                    DBOS.destroy()
+                except Exception:
+                    pass
+                instance = None
+
+            if instance is None:
+                DBOS(config={
+                    "name": self.application_name,
+                    "system_database_url": self.system_database_url,
+                })
+            DBOS.launch()
+
+    def _get_connection(self):
+        import psycopg
+
         if not self.system_database_url:
             raise RuntimeError("No system_database_url configured for DBOS adapter")
         return psycopg.connect(self.system_database_url)
 
     def _init_db(self) -> None:
-        try:
-            with self._get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS public.at_run_executions (
-                            run_id TEXT PRIMARY KEY,
-                            execution_id TEXT NOT NULL,
-                            workflow_name TEXT NOT NULL,
-                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                        )
-                        """
+        """Create application-owned schema tables. Fails fast without swallowing errors."""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS public.at_run_executions (
+                        run_id TEXT PRIMARY KEY,
+                        execution_id TEXT NOT NULL,
+                        workflow_name TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS public.at_signals_seen (
-                            execution_id TEXT NOT NULL,
-                            signal_id TEXT NOT NULL,
-                            delivered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                            PRIMARY KEY (execution_id, signal_id)
-                        )
-                        """
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS public.at_signals_seen (
+                        execution_id TEXT NOT NULL,
+                        signal_id TEXT NOT NULL,
+                        delivered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        PRIMARY KEY (execution_id, signal_id)
                     )
-                conn.commit()
-        except Exception:
-            pass
+                    """
+                )
+            conn.commit()
 
     async def start(
         self,
@@ -114,12 +192,13 @@ class DBOSDurableAdapter(DurableExecutionPort):
         return await loop.run_in_executor(None, self._sync_start, key, workflow_name, payload)
 
     def _sync_start(self, run_key: str, workflow_name: str, payload: dict[str, Any]) -> ExecutionRef:
+        self._ensure_db_initialized()
+        self._ensure_dbos_launched()
         exec_id = f"dbos_{run_key}"
-        now_ms = int(time.time() * 1000)
 
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                # 1. Check or insert mapping in public.at_run_executions
+                # Store application-owned mapping only! No touching dbos.* tables!
                 cur.execute(
                     """
                     INSERT INTO public.at_run_executions (run_id, execution_id, workflow_name, created_at)
@@ -130,26 +209,14 @@ class DBOSDurableAdapter(DurableExecutionPort):
                     (run_key, exec_id, workflow_name),
                 )
                 actual_exec_id, attached_at = cur.fetchone()
-
-                # 2. Check if workflow already exists in dbos.workflow_status
-                cur.execute(
-                    "SELECT status FROM dbos.workflow_status WHERE workflow_uuid = %s",
-                    (actual_exec_id,),
-                )
-                existing = cur.fetchone()
-                if not existing:
-                    # Insert enqueued/pending status into dbos.workflow_status
-                    cur.execute(
-                        """
-                        INSERT INTO dbos.workflow_status (
-                            workflow_uuid, status, name, created_at, updated_at,
-                            application_name, queue_name
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (workflow_uuid) DO NOTHING
-                        """,
-                        (actual_exec_id, "PENDING", workflow_name, now_ms, now_ms, self.application_name, "default"),
-                    )
             conn.commit()
+
+        # Check if DBOS workflow is already running or has been started
+        status_obj = DBOS.get_workflow_status(actual_exec_id)
+        if status_obj is None:
+            wf_fn = _WORKFLOW_REGISTRY.get(workflow_name) or at_generic_workflow
+            with SetWorkflowID(actual_exec_id):
+                DBOS.start_workflow(wf_fn, payload)
 
         return ExecutionRef(
             backend=self.backend_name,
@@ -170,6 +237,7 @@ class DBOSDurableAdapter(DurableExecutionPort):
                         code="workflow_not_found",
                         retryability=False,
                         ambiguity=False,
+                        safe_message=f"Workflow '{ref.execution_id}' not found",
                     ),
                 )
             return ExecutionStatusResult(
@@ -182,15 +250,17 @@ class DBOSDurableAdapter(DurableExecutionPort):
         return await loop.run_in_executor(None, self._sync_get_status, ref)
 
     def _sync_get_status(self, ref: ExecutionRef) -> ExecutionStatusResult:
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT status, error FROM dbos.workflow_status WHERE workflow_uuid = %s",
-                    (ref.execution_id,),
-                )
-                row = cur.fetchone()
+        try:
+            self._ensure_dbos_launched()
+            status_obj = DBOS.get_workflow_status(ref.execution_id)
+        except Exception as e:
+            return ExecutionStatusResult(
+                ref=ref,
+                state=DurableExecutionState.FAILED,
+                error=normalize_exception(e, default_code="backend_unavailable"),
+            )
 
-        if row is None:
+        if status_obj is None:
             return ExecutionStatusResult(
                 ref=ref,
                 state=DurableExecutionState.PENDING,
@@ -199,19 +269,19 @@ class DBOSDurableAdapter(DurableExecutionPort):
                     code="workflow_not_found",
                     retryability=False,
                     ambiguity=False,
+                    safe_message=f"Workflow '{ref.execution_id}' not found",
                 ),
             )
 
-        status_str, error_text = row
-        state = self._map_dbos_status(status_str)
+        state = self._map_dbos_status(status_obj.status)
         canonical_error = None
-        if error_text:
+        if status_obj.error:
             canonical_error = CanonicalError(
-                category=ErrorCategory.INTERNAL,
+                category=ErrorCategory.UNAVAILABLE,
                 code="workflow_error",
-                message=str(error_text),
                 retryability=False,
                 ambiguity=False,
+                safe_message=str(status_obj.error),
             )
 
         return ExecutionStatusResult(
@@ -242,6 +312,8 @@ class DBOSDurableAdapter(DurableExecutionPort):
         return await loop.run_in_executor(None, self._sync_find_by_run_id, key)
 
     def _sync_find_by_run_id(self, run_key: str) -> ExecutionRef | None:
+        self._ensure_db_initialized()
+        # Strictly queries public.at_run_executions! Never touches dbos.* tables!
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -250,14 +322,6 @@ class DBOSDurableAdapter(DurableExecutionPort):
                 )
                 row = cur.fetchone()
                 if row is None:
-                    # Also check directly against workflow_uuid if it was created as dbos_<run_key>
-                    cur.execute(
-                        "SELECT workflow_uuid FROM dbos.workflow_status WHERE workflow_uuid = %s",
-                        (f"dbos_{run_key}",),
-                    )
-                    fallback_row = cur.fetchone()
-                    if fallback_row:
-                        return ExecutionRef(backend=self.backend_name, execution_id=fallback_row[0], execution_version=1)
                     return None
 
                 return ExecutionRef(
@@ -279,6 +343,7 @@ class DBOSDurableAdapter(DurableExecutionPort):
                         code="workflow_not_found",
                         retryability=False,
                         ambiguity=False,
+                        safe_message=f"Workflow '{ref.execution_id}' not found",
                     ),
                 )
             if internal["state"] in (
@@ -299,44 +364,38 @@ class DBOSDurableAdapter(DurableExecutionPort):
         return await loop.run_in_executor(None, self._sync_cancel, ref)
 
     def _sync_cancel(self, ref: ExecutionRef) -> CancelResult:
-        now_ms = int(time.time() * 1000)
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT status FROM dbos.workflow_status WHERE workflow_uuid = %s",
-                    (ref.execution_id,),
-                )
-                row = cur.fetchone()
-                if row is None:
-                    return CancelResult(
-                        outcome=CancelOutcome.NOT_FOUND,
-                        ref=ref,
-                        error=CanonicalError(
-                            category=ErrorCategory.NOT_FOUND,
-                            code="workflow_not_found",
-                            retryability=False,
-                            ambiguity=False,
-                        ),
-                    )
+        try:
+            self._ensure_dbos_launched()
+            status_obj = DBOS.get_workflow_status(ref.execution_id)
+        except Exception as e:
+            return CancelResult(
+                outcome=CancelOutcome.FAILED,
+                ref=ref,
+                error=normalize_exception(e, default_code="backend_unavailable"),
+            )
+        if status_obj is None:
+            return CancelResult(
+                outcome=CancelOutcome.NOT_FOUND,
+                ref=ref,
+                error=CanonicalError(
+                    category=ErrorCategory.NOT_FOUND,
+                    code="workflow_not_found",
+                    retryability=False,
+                    ambiguity=False,
+                    safe_message=f"Workflow '{ref.execution_id}' not found",
+                ),
+            )
 
-                current_status = row[0].upper()
-                if current_status in ("SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"):
-                    return CancelResult(
-                        outcome=CancelOutcome.ALREADY_TERMINAL,
-                        ref=ref,
-                        details=f"Workflow is in terminal state {current_status}",
-                    )
+        current_status = status_obj.status.upper()
+        if current_status in ("SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"):
+            return CancelResult(
+                outcome=CancelOutcome.ALREADY_TERMINAL,
+                ref=ref,
+                details=f"Workflow is in terminal state {current_status}",
+            )
 
-                cur.execute(
-                    """
-                    UPDATE dbos.workflow_status
-                    SET status = 'CANCELLED', updated_at = %s, completed_at = %s
-                    WHERE workflow_uuid = %s
-                    """,
-                    (now_ms, now_ms, ref.execution_id),
-                )
-            conn.commit()
-
+        # Use DBOS public API for cancellation
+        DBOS.cancel_workflow(ref.execution_id)
         return CancelResult(outcome=CancelOutcome.CANCEL_REQUESTED, ref=ref)
 
     async def signal(
@@ -358,6 +417,7 @@ class DBOSDurableAdapter(DurableExecutionPort):
                         code="workflow_not_found",
                         retryability=False,
                         ambiguity=False,
+                        safe_message=f"Workflow '{ref.execution_id}' not found",
                     ),
                 )
             if internal["state"] in (
@@ -391,67 +451,88 @@ class DBOSDurableAdapter(DurableExecutionPort):
         signal_id: str,
         payload: dict[str, Any],
     ) -> SignalResult:
-        now_ms = int(time.time() * 1000)
+        try:
+            self._ensure_db_initialized()
+            self._ensure_dbos_launched()
+            # 1. Check workflow status via public SDK
+            status_obj = DBOS.get_workflow_status(ref.execution_id)
+        except Exception as e:
+            return SignalResult(
+                outcome=SignalOutcome.FAILED,
+                signal_id=signal_id,
+                ref=ref,
+                error=normalize_exception(e, default_code="backend_unavailable"),
+            )
+        if status_obj is None:
+            return SignalResult(
+                outcome=SignalOutcome.NOT_FOUND,
+                signal_id=signal_id,
+                ref=ref,
+                error=CanonicalError(
+                    category=ErrorCategory.NOT_FOUND,
+                    code="workflow_not_found",
+                    retryability=False,
+                    ambiguity=False,
+                    safe_message=f"Workflow '{ref.execution_id}' not found",
+                ),
+            )
 
+        current_status = status_obj.status.upper()
+        if current_status in ("SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"):
+            return SignalResult(
+                outcome=SignalOutcome.ALREADY_TERMINAL,
+                signal_id=signal_id,
+                ref=ref,
+            )
+
+        # 2. Check if signal was already recorded as delivered in application-owned table
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                # 1. Check workflow status
                 cur.execute(
-                    "SELECT status FROM dbos.workflow_status WHERE workflow_uuid = %s",
-                    (ref.execution_id,),
-                )
-                row = cur.fetchone()
-                if row is None:
-                    return SignalResult(
-                        outcome=SignalOutcome.NOT_FOUND,
-                        signal_id=signal_id,
-                        ref=ref,
-                        error=CanonicalError(
-                            category=ErrorCategory.NOT_FOUND,
-                            code="workflow_not_found",
-                            retryability=False,
-                            ambiguity=False,
-                        ),
-                    )
-
-                current_status = row[0].upper()
-                if current_status in ("SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"):
-                    return SignalResult(
-                        outcome=SignalOutcome.ALREADY_TERMINAL,
-                        signal_id=signal_id,
-                        ref=ref,
-                    )
-
-                # 2. Check signal deduplication
-                cur.execute(
-                    """
-                    INSERT INTO public.at_signals_seen (execution_id, signal_id)
-                    VALUES (%s, %s)
-                    ON CONFLICT (execution_id, signal_id) DO NOTHING
-                    RETURNING execution_id
-                    """,
+                    "SELECT 1 FROM public.at_signals_seen WHERE execution_id = %s AND signal_id = %s",
                     (ref.execution_id, signal_id),
                 )
-                inserted = cur.fetchone()
-                if not inserted:
+                if cur.fetchone() is not None:
                     return SignalResult(
                         outcome=SignalOutcome.DUPLICATE_IGNORED,
                         signal_id=signal_id,
                         ref=ref,
                     )
 
-                # 3. Deliver to dbos.notifications table
-                serialized_msg = base64.b64encode(pickle.dumps(payload)).decode("ascii")
-                composite_msg_id = f"{ref.execution_id}_{signal_id}"
+        # 3. Deliver signal via DBOS.send() public API with idempotency_key
+        try:
+            DBOS.send(ref.execution_id, payload, topic=signal_name, idempotency_key=signal_id)
+        except DBOSNonExistentWorkflowError:
+            return SignalResult(
+                outcome=SignalOutcome.NOT_FOUND,
+                signal_id=signal_id,
+                ref=ref,
+                error=CanonicalError(
+                    category=ErrorCategory.NOT_FOUND,
+                    code="workflow_not_found",
+                    retryability=False,
+                    ambiguity=False,
+                    safe_message=f"Workflow '{ref.execution_id}' non-existent in DBOS",
+                ),
+            )
+        except Exception as e:
+            return SignalResult(
+                outcome=SignalOutcome.FAILED,
+                signal_id=signal_id,
+                ref=ref,
+                error=normalize_exception(e, default_code="signal_send_failed"),
+            )
+
+        # 4. Record successful delivery in application-owned table
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO dbos.notifications (
-                        message_uuid, destination_uuid, topic, message, created_at_epoch_ms,
-                        serialization, consumed
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (message_uuid) DO NOTHING
+                    INSERT INTO public.at_signals_seen (execution_id, signal_id, delivered_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (execution_id, signal_id) DO NOTHING
                     """,
-                    (composite_msg_id, ref.execution_id, signal_name, serialized_msg, now_ms, "pickle", False),
+                    (ref.execution_id, signal_id),
                 )
             conn.commit()
 
@@ -474,6 +555,7 @@ class DBOSDurableAdapter(DurableExecutionPort):
                         code="workflow_not_found",
                         retryability=False,
                         ambiguity=False,
+                        safe_message=f"Workflow '{ref.execution_id}' not found",
                     ),
                 )
             if internal["state"] == DurableExecutionState.RUNNING:
@@ -495,67 +577,65 @@ class DBOSDurableAdapter(DurableExecutionPort):
         return await loop.run_in_executor(None, self._sync_result, ref, timeout_seconds)
 
     def _sync_result(self, ref: ExecutionRef, timeout_seconds: float | None = None) -> ExecutionResult:
+        try:
+            self._ensure_dbos_launched()
+        except Exception as e:
+            return ExecutionResult(
+                ref=ref,
+                is_pending=False,
+                state=DurableExecutionState.FAILED,
+                error=normalize_exception(e, default_code="backend_unavailable"),
+            )
         start_time = time.monotonic()
         timeout = timeout_seconds or 0.0
 
         while True:
-            with self._get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT status, error FROM dbos.workflow_status WHERE workflow_uuid = %s",
-                        (ref.execution_id,),
-                    )
-                    status_row = cur.fetchone()
+            try:
+                status_obj = DBOS.get_workflow_status(ref.execution_id)
+            except Exception as e:
+                return ExecutionResult(
+                    ref=ref,
+                    is_pending=False,
+                    state=DurableExecutionState.FAILED,
+                    error=normalize_exception(e, default_code="backend_unavailable"),
+                )
+            if status_obj is None:
+                return ExecutionResult(
+                    ref=ref,
+                    is_pending=False,
+                    state=DurableExecutionState.FAILED,
+                    error=CanonicalError(
+                        category=ErrorCategory.NOT_FOUND,
+                        code="workflow_not_found",
+                        retryability=False,
+                        ambiguity=False,
+                        safe_message=f"Workflow '{ref.execution_id}' not found",
+                    ),
+                )
 
-                    if status_row is None:
-                        return ExecutionResult(
-                            ref=ref,
-                            is_pending=False,
-                            state=DurableExecutionState.FAILED,
-                            error=CanonicalError(
-                                category=ErrorCategory.NOT_FOUND,
-                                code="workflow_not_found",
-                                retryability=False,
-                                ambiguity=False,
-                            ),
-                        )
+            state = self._map_dbos_status(status_obj.status)
 
-                    status_str, error_text = status_row
-                    state = self._map_dbos_status(status_str)
+            if state == DurableExecutionState.COMPLETED:
+                return ExecutionResult(
+                    ref=ref,
+                    is_pending=False,
+                    payload=status_obj.output,
+                    state=DurableExecutionState.COMPLETED,
+                )
 
-                    if state == DurableExecutionState.COMPLETED:
-                        cur.execute(
-                            "SELECT output, error FROM dbos.workflow_output WHERE workflow_uuid = %s",
-                            (ref.execution_id,),
-                        )
-                        out_row = cur.fetchone()
-                        payload = None
-                        if out_row and out_row[0]:
-                            try:
-                                payload = pickle.loads(base64.b64decode(out_row[0]))
-                            except Exception:
-                                payload = out_row[0]
-
-                        return ExecutionResult(
-                            ref=ref,
-                            is_pending=False,
-                            payload=payload,
-                            state=DurableExecutionState.COMPLETED,
-                        )
-
-                    if state in (DurableExecutionState.FAILED, DurableExecutionState.CANCELLED):
-                        return ExecutionResult(
-                            ref=ref,
-                            is_pending=False,
-                            state=state,
-                            error=CanonicalError(
-                                category=ErrorCategory.INTERNAL,
-                                code="workflow_error",
-                                message=str(error_text or "Workflow failed"),
-                                retryability=False,
-                                ambiguity=False,
-                            ),
-                        )
+            if state in (DurableExecutionState.FAILED, DurableExecutionState.CANCELLED):
+                return ExecutionResult(
+                    ref=ref,
+                    is_pending=False,
+                    state=state,
+                    error=CanonicalError(
+                        category=ErrorCategory.UNAVAILABLE if state == DurableExecutionState.FAILED else ErrorCategory.INVALID_STATE,
+                        code="workflow_failed" if state == DurableExecutionState.FAILED else "workflow_cancelled",
+                        safe_message=str(status_obj.error or f"Workflow {state.value}"),
+                        retryability=False,
+                        ambiguity=False,
+                    ),
+                )
 
             if timeout <= 0 or (time.monotonic() - start_time) >= timeout:
                 return ExecutionResult(

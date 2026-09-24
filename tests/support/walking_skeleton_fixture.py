@@ -5,14 +5,24 @@ Records:
 - invocation_count
 - applied_effect_count
 - committed_value
+- committed_hash
 - first_request_id
 - last_request_id
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from typing import Any
 import psycopg
+
+
+class AmbiguousMutationError(RuntimeError):
+    """Raised when an automated retry is attempted on a non-retryable ambiguous mutation."""
+
+
+def compute_value_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 class DurableExternalMutationFixture:
@@ -32,9 +42,12 @@ class DurableExternalMutationFixture:
                         invocation_count INTEGER NOT NULL DEFAULT 0,
                         applied_effect_count INTEGER NOT NULL DEFAULT 0,
                         committed_value TEXT NOT NULL,
+                        committed_hash TEXT NOT NULL DEFAULT '',
                         first_request_id TEXT NOT NULL,
                         last_request_id TEXT NOT NULL
-                    )
+                    );
+                    ALTER TABLE public.walking_skeleton_mutation_probe
+                        ADD COLUMN IF NOT EXISTS committed_hash TEXT NOT NULL DEFAULT '';
                     """
                 )
             conn.commit()
@@ -45,7 +58,17 @@ class DurableExternalMutationFixture:
         value: str,
         request_id: str,
     ) -> dict[str, Any]:
-        """Applies mutation idempotently."""
+        """Applies mutation idempotently (default replay-safe)."""
+        return self.apply_replay_safe(idempotency_key, value, request_id)
+
+    def apply_replay_safe(
+        self,
+        idempotency_key: str,
+        value: str,
+        request_id: str,
+    ) -> dict[str, Any]:
+        """Replay-safe semantics: invocation_count >= 1, but applied_effect_count == 1."""
+        val_hash = compute_value_hash(value)
         if not self.fixture_url:
             if idempotency_key not in self._in_memory:
                 self._in_memory[idempotency_key] = {
@@ -53,6 +76,7 @@ class DurableExternalMutationFixture:
                     "invocation_count": 1,
                     "applied_effect_count": 1,
                     "committed_value": value,
+                    "committed_hash": val_hash,
                     "first_request_id": request_id,
                     "last_request_id": request_id,
                 }
@@ -68,16 +92,16 @@ class DurableExternalMutationFixture:
                     """
                     INSERT INTO public.walking_skeleton_mutation_probe (
                         idempotency_key, invocation_count, applied_effect_count,
-                        committed_value, first_request_id, last_request_id
+                        committed_value, committed_hash, first_request_id, last_request_id
                     )
-                    VALUES (%s, 1, 1, %s, %s, %s)
+                    VALUES (%s, 1, 1, %s, %s, %s, %s)
                     ON CONFLICT (idempotency_key) DO UPDATE SET
                         invocation_count = walking_skeleton_mutation_probe.invocation_count + 1,
                         last_request_id = EXCLUDED.last_request_id
                     RETURNING idempotency_key, invocation_count, applied_effect_count,
-                              committed_value, first_request_id, last_request_id
+                              committed_value, committed_hash, first_request_id, last_request_id
                     """,
-                    (idempotency_key, value, request_id, request_id),
+                    (idempotency_key, value, val_hash, request_id, request_id),
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -87,9 +111,74 @@ class DurableExternalMutationFixture:
             "invocation_count": row[1],
             "applied_effect_count": row[2],
             "committed_value": row[3],
-            "first_request_id": row[4],
-            "last_request_id": row[5],
+            "committed_hash": row[4],
+            "first_request_id": row[5],
+            "last_request_id": row[6],
         }
+
+    def reconcile_before_retry(
+        self,
+        idempotency_key: str,
+        value: str,
+        request_id: str,
+    ) -> tuple[bool, dict[str, Any]]:
+        """Reconcile-before-retry semantics:
+        Queries existing state first. If effect is already committed, returns without re-applying.
+        Returns (reconciled_existing: bool, record: dict).
+        """
+        existing = self.get_record(idempotency_key)
+        if existing is not None:
+            # Effect already present: reconcile without reapplying effect
+            # Record the retry invocation count
+            if not self.fixture_url:
+                self._in_memory[idempotency_key]["invocation_count"] += 1
+                self._in_memory[idempotency_key]["last_request_id"] = request_id
+                return True, dict(self._in_memory[idempotency_key])
+
+            with psycopg.connect(self.fixture_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE public.walking_skeleton_mutation_probe
+                        SET invocation_count = invocation_count + 1,
+                            last_request_id = %s
+                        WHERE idempotency_key = %s
+                        RETURNING idempotency_key, invocation_count, applied_effect_count,
+                                  committed_value, committed_hash, first_request_id, last_request_id
+                        """,
+                        (request_id, idempotency_key),
+                    )
+                    row = cur.fetchone()
+                conn.commit()
+            return True, {
+                "idempotency_key": row[0],
+                "invocation_count": row[1],
+                "applied_effect_count": row[2],
+                "committed_value": row[3],
+                "committed_hash": row[4],
+                "first_request_id": row[5],
+                "last_request_id": row[6],
+            }
+
+        # Not present: apply effect
+        return False, self.apply_replay_safe(idempotency_key, value, request_id)
+
+    def apply_non_retryable(
+        self,
+        idempotency_key: str,
+        value: str,
+        request_id: str,
+    ) -> dict[str, Any]:
+        """Non-retryable ambiguous semantics:
+        Automatic second application is strictly forbidden.
+        If called when record already exists, raises AmbiguousMutationError!
+        """
+        existing = self.get_record(idempotency_key)
+        if existing is not None:
+            raise AmbiguousMutationError(
+                f"Non-retryable ambiguous effect already exists for key '{idempotency_key}'. Automatic second effect forbidden."
+            )
+        return self.apply_replay_safe(idempotency_key, value, request_id)
 
     def get_record(self, idempotency_key: str) -> dict[str, Any] | None:
         if not self.fixture_url:
@@ -101,7 +190,7 @@ class DurableExternalMutationFixture:
                 cur.execute(
                     """
                     SELECT idempotency_key, invocation_count, applied_effect_count,
-                           committed_value, first_request_id, last_request_id
+                           committed_value, committed_hash, first_request_id, last_request_id
                     FROM public.walking_skeleton_mutation_probe
                     WHERE idempotency_key = %s
                     """,
@@ -115,6 +204,7 @@ class DurableExternalMutationFixture:
             "invocation_count": row[1],
             "applied_effect_count": row[2],
             "committed_value": row[3],
-            "first_request_id": row[4],
-            "last_request_id": row[5],
+            "committed_hash": row[4],
+            "first_request_id": row[5],
+            "last_request_id": row[6],
         }

@@ -20,9 +20,17 @@ async def completion(request: Request):
     body = await request.json()
     functions = {t["function"]["name"]: t["function"] for t in body.get("tools", [])}
     has_tool_result = any(m["role"] == "tool" for m in body["messages"])
+    echo = next((name for name in functions if "echo_canary" in name), None)
     identify = next((name for name in functions if "identify" in name), None)
     output = next((name for name in functions if name == "final_result"), None)
-    if identify and not has_tool_result:
+    if echo and not has_tool_result:
+        tool_in = "default-canary-input"
+        for m in body.get("messages", []):
+            content_str = str(m.get("content", ""))
+            if "canary-tool-in:" in content_str:
+                tool_in = content_str.split("canary-tool-in:")[1].split()[0]
+        name, args = echo, {"value": tool_in}
+    elif identify and not has_tool_result:
         name, args = identify, {}
     elif output:
         name, args = output, {
