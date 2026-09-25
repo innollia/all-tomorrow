@@ -92,7 +92,18 @@ def normalize_exception(
         )
 
     # 4. Connection / Availability issues (NOT NOT_FOUND)
-    if isinstance(exc, (ConnectionRefusedError, ConnectionResetError, ConnectionError)) or "connection" in exc_type_name.lower():
+    cause_msg = str(exc.__cause__) if exc.__cause__ else ""
+    cause_name = type(exc.__cause__).__name__ if exc.__cause__ else ""
+    if (
+        isinstance(exc, (ConnectionRefusedError, ConnectionResetError, ConnectionError))
+        or "connect" in exc_type_name.lower()
+        or "connect" in msg.lower()
+        or (exc.__cause__ is not None and (
+            isinstance(exc.__cause__, (ConnectionRefusedError, ConnectionResetError, ConnectionError))
+            or "connect" in cause_name.lower()
+            or "connect" in cause_msg.lower()
+        ))
+    ):
         return CanonicalError(
             category=ErrorCategory.UNAVAILABLE,
             code="service_unavailable",

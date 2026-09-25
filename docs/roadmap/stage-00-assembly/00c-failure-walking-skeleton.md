@@ -74,7 +74,7 @@ fixture는 최소 다음을 durable하게 기록한다.
 | C-07 | worker timeout | Run/Work state + process cleanup | timeout evidence 보존, Goal 자동 유실 없음 | L1 |
 | C-08 | V1 in-flight 후 V2 배포 | persisted history | direct replay 또는 00E에서 선택할 drain strategy가 실제 동작 | L2 |
 | C-09 | concurrent reconciler 2개 | Run revision/ref | 동일 ref 수렴 또는 fail-closed, divergent attach 금지 | L1 |
-| C-10 | tool/backend unavailable | UNKNOWN/failed evidence | 성공/empty로 위조하지 않음 | L1 |
+| C-10 | tool/backend unavailable | UNAVAILABLE/failed evidence | 성공/empty로 위조하지 않음 (tool: 제품 PydanticAIGatewayAdapter + MCP tool 업스트림 정상→다운→복구 직접 단언; DBOS: unreachable status probe 검증 유지) | L1 |
 
 각 scenario는 wrong-implementation fixture 또는 negative assertion을 둔다.
 

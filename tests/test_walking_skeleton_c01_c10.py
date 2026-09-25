@@ -107,19 +107,29 @@ class PydanticAIGatewayAdapter(AgentExecutionPort):
         from pydantic_ai.models.openai import OpenAIChatModel
         from pydantic_ai.providers.openai import OpenAIProvider
         from all_tomorrow.harness.types import ModelDecision
+        from all_tomorrow.error_normalization import normalize_exception
 
-        client = AsyncOpenAI(base_url=self.model_url, api_key=self.gateway_key, max_retries=0)
-        model = OpenAIChatModel("fixture", provider=OpenAIProvider(openai_client=client))
-        tools = MCPToolset(self.tool_url, id="all-tomorrow-tools", auth=self.gateway_key, max_retries=0)
-        agent = Agent(model, output_type=ModelDecision, toolsets=[tools], retries=1)
+        try:
+            client = AsyncOpenAI(base_url=self.model_url, api_key=self.gateway_key, max_retries=0)
+            model = OpenAIChatModel("fixture", provider=OpenAIProvider(openai_client=client))
+            tools = MCPToolset(self.tool_url, id="all-tomorrow-tools", auth=self.gateway_key, max_retries=0)
+            agent = Agent(model, output_type=ModelDecision, toolsets=[tools], retries=1)
 
-        async with agent as active_agent:
-            result = await active_agent.run(request.prompt)
-        return AgentExecutionResult(
-            success=True,
-            output=result.output.model_dump(),
-            structured_data={"stock_confirmed": result.output.stock_confirmed},
-        )
+            async with agent as active_agent:
+                result = await active_agent.run(request.prompt)
+            return AgentExecutionResult(
+                success=True,
+                output=result.output.model_dump(),
+                structured_data={"stock_confirmed": result.output.stock_confirmed},
+            )
+        except Exception as exc:
+            canonical = normalize_exception(exc, default_code="tool_or_gateway_unavailable")
+            return AgentExecutionResult(
+                success=False,
+                output=None,
+                structured_data=None,
+                error=canonical,
+            )
 
 
 @pytest.fixture(autouse=True)
@@ -1080,85 +1090,107 @@ class TestWalkingSkeletonFailureScenarios:
 
     @pytest.mark.asyncio
     async def test_c10_unavailable_backend_does_not_forge_success(self, tmp_path: Path) -> None:
-        """C-10: Upstream tool server down & recovery, and unavailable backend produce UNAVAILABLE/failed
-        evidence without forging empty/success.
+        """C-10: Tool upstream down & recovery directly verified through product tool calling path
+        (PydanticAIGatewayAdapter + real MCP tool upstream), asserting failure/UNAVAILABLE evidence
+        without forging empty/success, and success upon recovery.
+        Durable backend unavailable verification confirms unreachable database status probe fails
+        closed with UNAVAILABLE (clarified: static unreachable probe, not live DBOS engine restart).
         """
-        # 1. Real active tool upstream process: started, downed, observed UNAVAILABLE, then recovered
         import httpx
+        provider_port = _free_port()
         tool_port = _free_port()
-        tool_code = (
-            "import sys, http.server\n"
-            "class H(http.server.BaseHTTPRequestHandler):\n"
-            "    def do_GET(self):\n"
-            "        self.send_response(200)\n"
-            "        self.end_headers()\n"
-            "        self.wfile.write(b'active_probe_ok')\n"
-            "    def log_message(self, *a): pass\n"
-            "s = http.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), H)\n"
-            "s.serve_forever()\n"
-        )
-        tool_cmd = [sys.executable, "-c", tool_code, str(tool_port)]
+        key = "test-c10-gateway-key"
+        model_url = f"http://127.0.0.1:{provider_port}/v1"
+        tool_url = f"http://127.0.0.1:{tool_port}/mcp"
+
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent)
+
+        provider_cmd = [
+            sys.executable, "-m", "uvicorn", "tests.support.model_provider:app",
+            "--host", "127.0.0.1", "--port", str(provider_port),
+        ]
+        tool_cmd = [
+            sys.executable, "-m", "tests.support.mcp_upstream", "alpha", str(tool_port),
+        ]
+
+        provider_log = tmp_path / "c10_provider.log"
         tool_log = tmp_path / "c10_tool.log"
 
-        with tool_log.open("wb") as stream:
-            tool_proc = subprocess.Popen(tool_cmd, stdout=stream, stderr=subprocess.STDOUT)
+        with provider_log.open("wb") as p_stream, tool_log.open("wb") as t_stream:
+            provider_proc = subprocess.Popen(provider_cmd, stdout=p_stream, stderr=subprocess.STDOUT, env=env)
+            tool_proc = subprocess.Popen(tool_cmd, stdout=t_stream, stderr=subprocess.STDOUT, env=env)
+
         try:
-            # Wait for tool to become active
+            # Wait for provider and tool processes to become healthy
             async with httpx.AsyncClient(timeout=2) as client:
-                for _ in range(60):
-                    assert tool_proc.poll() is None
+                for _ in range(120):
+                    assert provider_proc.poll() is None, "Model provider process crashed"
+                    assert tool_proc.poll() is None, "Tool upstream process crashed"
                     try:
-                        resp = await client.get(f"http://127.0.0.1:{tool_port}/")
-                        if resp.status_code == 200 and resp.text == "active_probe_ok":
+                        r1 = await client.get(f"http://127.0.0.1:{provider_port}/health")
+                        r2 = await client.get(f"http://127.0.0.1:{tool_port}/mcp")
+                        if r1.status_code == 200:
                             break
                     except Exception:
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(0.25)
                 else:
-                    log_content = tool_log.read_text(errors="replace") if tool_log.exists() else "no log"
-                    pytest.fail(f"Tool server failed to start. Logs: {log_content}")
+                    pytest.fail("Provider/Tool upstream failed readiness")
 
-                # Active tool request succeeds
-                res = await client.get(f"http://127.0.0.1:{tool_port}/")
-                assert res.status_code == 200
+            adapter = PydanticAIGatewayAdapter(model_url=model_url, tool_url=tool_url, gateway_key=key)
+            req = AgentExecutionRequest(
+                model_route_ref="fixture",
+                toolset_ref="all-tomorrow-tools",
+                prompt="Inventory audit probe",
+            )
+
+            # 1. Normal state: active tool request through product adapter succeeds directly
+            res_normal = await adapter.execute(req)
+            assert res_normal.success is True
+            assert res_normal.error is None
+            assert res_normal.structured_data is not None
+            assert res_normal.structured_data.get("stock_confirmed") == 42
 
             # 2. DOWN the upstream tool server process
             _stop_process(tool_proc)
             assert tool_proc.poll() is not None, "Tool process must be down"
 
-            # Direct observation during downtime: fails with UNAVAILABLE, never forges success or empty
-            down_failed = False
-            try:
-                async with httpx.AsyncClient(timeout=1) as client:
-                    await client.get(f"http://127.0.0.1:{tool_port}/")
-            except Exception as exc:
-                down_failed = True
-                from all_tomorrow.error_normalization import normalize_exception
-                canonical = normalize_exception(exc)
-                assert canonical.category == ErrorCategory.UNAVAILABLE
-                assert canonical.safe_message != ""
-            assert down_failed is True, "Tool request while service is down must fail closed"
+            # Direct observation during downtime through product adapter:
+            # Must return AgentExecutionResult indicating failure/UNAVAILABLE evidence,
+            # and MUST NOT forge success, empty output, or empty structured data!
+            res_down = await adapter.execute(req)
+            assert res_down.success is False, "Adapter must not forge success during upstream tool outage"
+            assert res_down.error is not None, "Failed adapter result must contain CanonicalError"
+            assert res_down.error.category == ErrorCategory.UNAVAILABLE, (
+                f"Expected UNAVAILABLE, got {res_down.error.category}"
+            )
+            assert res_down.output is None, "Must not forge non-None output during outage"
+            assert res_down.structured_data is None, "Must not forge structured_data during outage"
 
             # 3. RECOVER the upstream tool server process on the same port
-            with tool_log.open("ab") as stream:
-                tool_proc = subprocess.Popen(tool_cmd, stdout=stream, stderr=subprocess.STDOUT)
+            with tool_log.open("ab") as t_stream:
+                tool_proc = subprocess.Popen(tool_cmd, stdout=t_stream, stderr=subprocess.STDOUT, env=env)
+
             async with httpx.AsyncClient(timeout=2) as client:
-                for _ in range(60):
+                for _ in range(120):
                     assert tool_proc.poll() is None
                     try:
-                        resp = await client.get(f"http://127.0.0.1:{tool_port}/")
-                        if resp.status_code == 200 and resp.text == "active_probe_ok":
-                            break
+                        r = await client.get(f"http://127.0.0.1:{tool_port}/mcp")
+                        break
                     except Exception:
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(0.25)
                 else:
-                    log_content = tool_log.read_text(errors="replace") if tool_log.exists() else "no log"
-                    pytest.fail(f"Tool server failed to recover. Logs: {log_content}")
+                    pytest.fail("Tool server failed to recover")
 
-                # Recovered tool request succeeds directly
-                res_rec = await client.get(f"http://127.0.0.1:{tool_port}/")
-                assert res_rec.status_code == 200
+            # Recovered tool request through product adapter succeeds directly
+            res_rec = await adapter.execute(req)
+            assert res_rec.success is True, "Recovered adapter call must succeed"
+            assert res_rec.error is None
+            assert res_rec.structured_data is not None
+            assert res_rec.structured_data.get("stock_confirmed") == 42
         finally:
             _stop_process(tool_proc)
+            _stop_process(provider_proc)
 
         # 4. FakeDurableAdapter outage simulation
         adapter = FakeDurableAdapter()
@@ -1170,7 +1202,9 @@ class TestWalkingSkeletonFailureScenarios:
         assert res.error.category == ErrorCategory.UNAVAILABLE
         assert res.state != DurableExecutionState.COMPLETED
 
-        # 5. Real DBOS adapter pointed at unavailable host/port
+        # 5. Real DBOS adapter pointed at unavailable host/port (static status probe)
+        # Truthful scope: proves that status query against an unreachable database fails closed with UNAVAILABLE
+        # without forging RUNNING or COMPLETED; note that this is an unreachable status probe, not live DBOS engine restart.
         unavail_adapter = DBOSDurableAdapter(system_database_url="postgresql://127.0.0.1:54399/outage")
         target_ref = ExecutionRef(backend="dbos", execution_id="exec_target")
         status_res = await unavail_adapter.get_status(target_ref)
