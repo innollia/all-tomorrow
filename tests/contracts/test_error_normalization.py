@@ -89,3 +89,36 @@ class TestErrorNormalization:
 
         err_evidence = normalize_exception(MissingCompletionEvidenceError("Missing evidence"))
         assert err_evidence.category == ErrorCategory.INVALID_STATE
+
+    def test_connection_keyword_does_not_misclassify_input_or_lookup_errors(self) -> None:
+        """CRITICAL: Exceptions with 'connect' substring in message must NOT be misclassified as UNAVAILABLE.
+
+        e.g., ValueError("Invalid connection string") -> INVALID_INPUT
+              KeyError("connect") -> NOT_FOUND
+              TypeError("connect() takes 1 argument") -> INVALID_INPUT
+        """
+        err_val = normalize_exception(ValueError("Invalid connection string format: missing port"))
+        assert err_val.category == ErrorCategory.INVALID_INPUT
+        assert err_val.category != ErrorCategory.UNAVAILABLE
+
+        err_key = normalize_exception(KeyError("connect"))
+        assert err_key.category == ErrorCategory.NOT_FOUND
+        assert err_key.category != ErrorCategory.UNAVAILABLE
+
+        err_type = normalize_exception(TypeError("connect() missing 1 required argument"))
+        assert err_type.category == ErrorCategory.INVALID_INPUT
+        assert err_type.category != ErrorCategory.UNAVAILABLE
+
+        # Real connection errors with typed structure or cause MUST still be UNAVAILABLE
+        class ConnectError(Exception):
+            pass
+
+        err_direct_conn = normalize_exception(ConnectError("Connection failed"))
+        assert err_direct_conn.category == ErrorCategory.UNAVAILABLE
+        assert err_direct_conn.retryability is True
+
+        wrapper = RuntimeError("Wrapper")
+        wrapper.__cause__ = ConnectError("Underlying drop")
+        err_wrapped_conn = normalize_exception(wrapper)
+        assert err_wrapped_conn.category == ErrorCategory.UNAVAILABLE
+        assert err_wrapped_conn.retryability is True

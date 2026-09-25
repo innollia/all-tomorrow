@@ -56,6 +56,7 @@ from all_tomorrow.domain import (
     transition_run,
     transition_work,
 )
+from all_tomorrow.adapters.pydantic_ai import PydanticAIGatewayAdapter
 from all_tomorrow.domain.artifacts import ArtifactRef, compute_content_hash
 from all_tomorrow.harness.types import ExecutionIdentity, FailPoint, HarnessInput, TraceContext
 from all_tomorrow.orchestration.walking_skeleton import WalkingSkeletonOrchestrator
@@ -92,44 +93,6 @@ def _stop_process(process: subprocess.Popen[bytes] | None) -> None:
             process.wait(timeout=5)
 
 
-class PydanticAIGatewayAdapter(AgentExecutionPort):
-    """Real Agent port executing through LiteLLM Proxy / PydanticAI / MCP tools."""
-
-    def __init__(self, model_url: str, tool_url: str, gateway_key: str) -> None:
-        self.model_url = model_url
-        self.tool_url = tool_url
-        self.gateway_key = gateway_key
-
-    async def execute(self, request: AgentExecutionRequest) -> AgentExecutionResult:
-        from openai import AsyncOpenAI
-        from pydantic_ai import Agent
-        from pydantic_ai.mcp import MCPToolset
-        from pydantic_ai.models.openai import OpenAIChatModel
-        from pydantic_ai.providers.openai import OpenAIProvider
-        from all_tomorrow.harness.types import ModelDecision
-        from all_tomorrow.error_normalization import normalize_exception
-
-        try:
-            client = AsyncOpenAI(base_url=self.model_url, api_key=self.gateway_key, max_retries=0)
-            model = OpenAIChatModel("fixture", provider=OpenAIProvider(openai_client=client))
-            tools = MCPToolset(self.tool_url, id="all-tomorrow-tools", auth=self.gateway_key, max_retries=0)
-            agent = Agent(model, output_type=ModelDecision, toolsets=[tools], retries=1)
-
-            async with agent as active_agent:
-                result = await active_agent.run(request.prompt)
-            return AgentExecutionResult(
-                success=True,
-                output=result.output.model_dump(),
-                structured_data={"stock_confirmed": result.output.stock_confirmed},
-            )
-        except Exception as exc:
-            canonical = normalize_exception(exc, default_code="tool_or_gateway_unavailable")
-            return AgentExecutionResult(
-                success=False,
-                output=None,
-                structured_data=None,
-                error=canonical,
-            )
 
 
 @pytest.fixture(autouse=True)
@@ -1138,24 +1101,43 @@ class TestWalkingSkeletonFailureScenarios:
                     pytest.fail("Provider/Tool upstream failed readiness")
 
             adapter = PydanticAIGatewayAdapter(model_url=model_url, tool_url=tool_url, gateway_key=key)
+            durable_port = FakeDurableAdapter()
+            delivery_store = DeliveryStore()
+            artifact_store = LocalArtifactStore(tmp_path / "artifacts_c10")
+            orch = WalkingSkeletonOrchestrator(
+                durable_port=durable_port,
+                agent_port=adapter,
+                delivery_store=delivery_store,
+                artifact_store=artifact_store,
+            )
+            g, w = await orch.initiate_goal_and_work(user_id="user_c10", goal_title="C10 Outage Goal", work_title="C10 Work")
+            run_rec, _ = await orch.create_starting_run(w.work_id)
+            orch.cas_attach_execution_ref(run_rec.run_id, ExecutionRef(backend="fake_durable", execution_id="c10_run_exec"))
+
             req = AgentExecutionRequest(
                 model_route_ref="fixture",
                 toolset_ref="all-tomorrow-tools",
                 prompt="Inventory audit probe",
             )
 
-            # 1. Normal state: active tool request through product adapter succeeds directly
+            # 1. Normal state: active tool request through product adapter & orchestrator succeeds directly
             res_normal = await adapter.execute(req)
             assert res_normal.success is True
             assert res_normal.error is None
             assert res_normal.structured_data is not None
             assert res_normal.structured_data.get("stock_confirmed") == 42
 
+            orch_res_normal = await orch.execute_agent_step(run_rec.run_id, prompt="Inventory audit probe")
+            assert orch_res_normal.success is True
+            assert orch_res_normal.error is None
+            assert orch_res_normal.structured_data is not None
+            assert orch_res_normal.structured_data.get("stock_confirmed") == 42
+
             # 2. DOWN the upstream tool server process
             _stop_process(tool_proc)
             assert tool_proc.poll() is not None, "Tool process must be down"
 
-            # Direct observation during downtime through product adapter:
+            # Direct observation during downtime through product adapter and orchestrator assembly:
             # Must return AgentExecutionResult indicating failure/UNAVAILABLE evidence,
             # and MUST NOT forge success, empty output, or empty structured data!
             res_down = await adapter.execute(req)
@@ -1166,6 +1148,13 @@ class TestWalkingSkeletonFailureScenarios:
             )
             assert res_down.output is None, "Must not forge non-None output during outage"
             assert res_down.structured_data is None, "Must not forge structured_data during outage"
+
+            orch_res_down = await orch.execute_agent_step(run_rec.run_id, prompt="Inventory audit probe")
+            assert orch_res_down.success is False, "Orchestrator must not forge success during upstream tool outage"
+            assert orch_res_down.error is not None
+            assert orch_res_down.error.category == ErrorCategory.UNAVAILABLE
+            assert orch_res_down.output is None
+            assert orch_res_down.structured_data is None
 
             # 3. RECOVER the upstream tool server process on the same port
             with tool_log.open("ab") as t_stream:
@@ -1182,12 +1171,18 @@ class TestWalkingSkeletonFailureScenarios:
                 else:
                     pytest.fail("Tool server failed to recover")
 
-            # Recovered tool request through product adapter succeeds directly
+            # Recovered tool request through product adapter & orchestrator succeeds directly
             res_rec = await adapter.execute(req)
             assert res_rec.success is True, "Recovered adapter call must succeed"
             assert res_rec.error is None
             assert res_rec.structured_data is not None
             assert res_rec.structured_data.get("stock_confirmed") == 42
+
+            orch_res_rec = await orch.execute_agent_step(run_rec.run_id, prompt="Inventory audit probe")
+            assert orch_res_rec.success is True, "Recovered orchestrator step must succeed"
+            assert orch_res_rec.error is None
+            assert orch_res_rec.structured_data is not None
+            assert orch_res_rec.structured_data.get("stock_confirmed") == 42
         finally:
             _stop_process(tool_proc)
             _stop_process(provider_proc)

@@ -92,18 +92,37 @@ def normalize_exception(
         )
 
     # 4. Connection / Availability issues (NOT NOT_FOUND)
-    cause_msg = str(exc.__cause__) if exc.__cause__ else ""
-    cause_name = type(exc.__cause__).__name__ if exc.__cause__ else ""
-    if (
-        isinstance(exc, (ConnectionRefusedError, ConnectionResetError, ConnectionError))
-        or "connect" in exc_type_name.lower()
-        or "connect" in msg.lower()
-        or (exc.__cause__ is not None and (
-            isinstance(exc.__cause__, (ConnectionRefusedError, ConnectionResetError, ConnectionError))
-            or "connect" in cause_name.lower()
-            or "connect" in cause_msg.lower()
-        ))
-    ):
+    # Must be strictly typed/cause-based to prevent misclassifying user input or key lookup errors
+    # (e.g. ValueError("Invalid connection string") or KeyError("connect")) as UNAVAILABLE.
+    CONNECTION_ERROR_NAMES = (
+        "connecterror",
+        "connectionerror",
+        "connectionrefusederror",
+        "connectionreseterror",
+        "connectionabortederror",
+        "connecttimeout",
+        "networkerror",
+        "transporterror",
+    )
+    is_standard_data_exc = isinstance(exc, (ValueError, TypeError, KeyError))
+    cause = exc.__cause__ or exc.__context__
+    cause_name = type(cause).__name__.lower() if cause is not None else ""
+
+    is_conn_exc = (
+        not is_standard_data_exc
+        and (
+            isinstance(exc, (ConnectionError, BrokenPipeError))
+            or exc_type_name.lower() in CONNECTION_ERROR_NAMES
+            or (
+                cause is not None
+                and (
+                    isinstance(cause, (ConnectionError, BrokenPipeError))
+                    or cause_name in CONNECTION_ERROR_NAMES
+                )
+            )
+        )
+    )
+    if is_conn_exc:
         return CanonicalError(
             category=ErrorCategory.UNAVAILABLE,
             code="service_unavailable",
