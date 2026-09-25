@@ -48,11 +48,7 @@ class IdempotencyScope(StrEnum):
     GLOBAL = "GLOBAL"
 
 
-class RetentionClass(StrEnum):
-    SHORT_LIVED = "SHORT_LIVED"   # e.g., 1 hour
-    STANDARD = "STANDARD"         # e.g., 24 hours
-    EXTENDED = "EXTENDED"         # e.g., 7 days
-    PERMANENT = "PERMANENT"       # e.g., no TTL
+from all_tomorrow.domain.artifacts import RetentionClass
 
 
 RETENTION_TTL_MAP: dict[RetentionClass, timedelta | None] = {

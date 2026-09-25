@@ -191,6 +191,12 @@ class FakeDurableAdapter(DurableExecutionPort):
                     ambiguity=False,
                 ),
             )
+        if signal_id in internal.signals:
+            return SignalResult(
+                outcome=SignalOutcome.DUPLICATE_IGNORED,
+                signal_id=signal_id,
+                ref=ref,
+            )
         if internal.state in (
             DurableExecutionState.COMPLETED,
             DurableExecutionState.FAILED,
@@ -198,12 +204,6 @@ class FakeDurableAdapter(DurableExecutionPort):
         ):
             return SignalResult(
                 outcome=SignalOutcome.ALREADY_TERMINAL,
-                signal_id=signal_id,
-                ref=ref,
-            )
-        if signal_id in internal.signals:
-            return SignalResult(
-                outcome=SignalOutcome.DUPLICATE_IGNORED,
                 signal_id=signal_id,
                 ref=ref,
             )

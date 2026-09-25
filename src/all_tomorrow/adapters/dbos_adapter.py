@@ -429,6 +429,13 @@ class DBOSDurableAdapter(DurableExecutionPort):
                         safe_message=f"Workflow '{ref.execution_id}' not found",
                     ),
                 )
+            signal_pair = (ref.execution_id, signal_id)
+            if signal_pair in self._signals_seen:
+                return SignalResult(
+                    outcome=SignalOutcome.DUPLICATE_IGNORED,
+                    signal_id=signal_id,
+                    ref=ref,
+                )
             if internal["state"] in (
                 DurableExecutionState.COMPLETED,
                 DurableExecutionState.FAILED,
@@ -436,14 +443,6 @@ class DBOSDurableAdapter(DurableExecutionPort):
             ):
                 return SignalResult(
                     outcome=SignalOutcome.ALREADY_TERMINAL,
-                    signal_id=signal_id,
-                    ref=ref,
-                )
-
-            signal_pair = (ref.execution_id, signal_id)
-            if signal_pair in self._signals_seen:
-                return SignalResult(
-                    outcome=SignalOutcome.DUPLICATE_IGNORED,
                     signal_id=signal_id,
                     ref=ref,
                 )
@@ -486,14 +485,6 @@ class DBOSDurableAdapter(DurableExecutionPort):
                 ),
             )
 
-        current_status = status_obj.status.upper()
-        if current_status in ("SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"):
-            return SignalResult(
-                outcome=SignalOutcome.ALREADY_TERMINAL,
-                signal_id=signal_id,
-                ref=ref,
-            )
-
         # 2. Check if signal was already recorded as delivered in application-owned table
         with self._get_connection() as conn:
             with conn.cursor() as cur:
@@ -507,6 +498,15 @@ class DBOSDurableAdapter(DurableExecutionPort):
                         signal_id=signal_id,
                         ref=ref,
                     )
+
+        # 3. Check workflow terminal state
+        current_status = status_obj.status.upper()
+        if current_status in ("SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"):
+            return SignalResult(
+                outcome=SignalOutcome.ALREADY_TERMINAL,
+                signal_id=signal_id,
+                ref=ref,
+            )
 
         # 3. Deliver signal via DBOS.send() public API with idempotency_key
         try:

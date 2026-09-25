@@ -6,7 +6,13 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from all_tomorrow.delivery import RetentionClass
+class RetentionClass(StrEnum):
+    SHORT_LIVED = "SHORT_LIVED"   # e.g., 1 hour
+    STANDARD = "STANDARD"         # e.g., 24 hours
+    EXTENDED = "EXTENDED"         # e.g., 7 days
+    PERMANENT = "PERMANENT"       # e.g., no TTL
+
+
 from all_tomorrow.domain.ids import ArtifactId, new_artifact_id, utc_now
 
 
