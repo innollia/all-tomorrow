@@ -117,12 +117,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-          pip install pytest pytest-asyncio psycopg[binary] dbos fastmcp
+          pip install pytest pytest-asyncio psycopg[binary] dbos fastmcp opentelemetry-api opentelemetry-sdk
       - name: Run Local Integration Tests
         env:
           AT_TEST_POSTGRES_URL: postgresql://postgres:postgrespassword@localhost:5432/at_test
+          AT_TEST_FIXTURE_URL: postgresql://postgres:postgrespassword@localhost:5432/at_test
         run: |
-          pytest tests/test_postgres_store.py tests/test_delivery_store.py -v
+          python -c "from tests.test_live_common_d01 import _prepare_fixture; import os; _prepare_fixture(os.environ['AT_TEST_FIXTURE_URL'])"
+          pytest tests/test_postgres_store.py tests/test_delivery_store.py tests/test_dbos_runtime_probe.py -v
 
   crash-replay:
     name: "Lane: crash-replay"
@@ -151,12 +153,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-          pip install pytest pytest-asyncio psycopg[binary] dbos fastmcp opentelemetry-api opentelemetry-sdk
+          pip install pytest pytest-asyncio psycopg[binary] dbos fastmcp opentelemetry-api opentelemetry-sdk httpx uvicorn
       - name: Run Crash Replay Tests
         env:
           AT_TEST_POSTGRES_URL: postgresql://postgres:postgrespassword@localhost:5432/at_test
+          AT_TEST_FIXTURE_URL: postgresql://postgres:postgrespassword@localhost:5432/at_test
         run: |
-          pytest tests/test_upgrade_rail.py -v
+          python -c "from tests.test_live_common_d01 import _prepare_fixture; import os; _prepare_fixture(os.environ['AT_TEST_FIXTURE_URL'])"
+          pytest tests/test_walking_skeleton_c01_c10.py tests/test_upgrade_rail.py -v
+      - name: Upload Upgrade Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgrade-report
+          path: .artifacts/upgrade/upgrade_report.json
+          if-no-files-found: ignore
 
   deployed-smoke:
     name: "Lane: deployed-smoke"
@@ -164,7 +175,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     environment: protected-aws
     steps:
-      - name: Smoke verification in protected environment
+      - name: Manual gate - verify target environment
+        shell: bash
         run: |
-          echo "Running deployed-smoke in protected AWS boundary..."
-          echo "Status: verified"
+          echo "Status: BLOCKED"
+          echo "Reason: Actual AWS/laptop boundary environment is not configured on this runner."
+          echo "Per Stage 00D CI specification, unexecuted lanes must remain explicit not-run/blocked manual gates rather than forging success."
+          exit 1
