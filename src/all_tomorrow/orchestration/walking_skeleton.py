@@ -25,6 +25,7 @@ from all_tomorrow.domain.errors import (
     TerminalReviveError,
 )
 from all_tomorrow.domain.events import EventRecord
+from all_tomorrow.observability import CorrelationContext, TelemetryManager
 from all_tomorrow.domain.ids import (
     ExecutionRef,
     GoalId,
@@ -121,6 +122,7 @@ class WalkingSkeletonOrchestrator:
         database_url: str | None = None,
         tool_port: ToolExecutionPort | None = None,
         worker_port: WorkerExecutionPort | None = None,
+        telemetry: TelemetryManager | None = None,
     ) -> None:
         self.durable_port = durable_port
         self.agent_port = agent_port
@@ -130,6 +132,13 @@ class WalkingSkeletonOrchestrator:
         self.tool_port = tool_port
         self.worker_port = worker_port
         self.reconciler = DeliveryReconciler(durable_port)
+        self.telemetry = telemetry or (
+            TelemetryManager.get_or_create(os.environ.get("AT_TEST_OTEL_SPANS"))
+            if os.environ.get("AT_TEST_OTEL_SPANS")
+            else None
+        )
+        self.active_spans: dict[RunId, Any] = {}
+        self.correlation_contexts: dict[RunId, CorrelationContext] = {}
 
         # In-memory mirror for fast active test access
         self.goals: dict[GoalId, GoalRecord] = {}
@@ -355,6 +364,21 @@ class WalkingSkeletonOrchestrator:
             return run
 
         saved_run, committed_intent = await self.delivery_store.atomic_app_transaction(intent, _save_run)
+
+        if self.telemetry:
+            corr_ctx = CorrelationContext(
+                goal_id=str(work.goal_id),
+                work_id=str(work_id),
+                run_id=str(run_id),
+                trace_id=f"trace-{run_id}",
+            )
+            self.correlation_contexts[run_id] = corr_ctx
+            root_span = self.telemetry.start_root_span(
+                name="orchestrator_run",
+                context=corr_ctx,
+            )
+            self.active_spans[run_id] = root_span
+
         return saved_run, committed_intent
 
     def cas_attach_execution_ref(self, run_id: RunId, exec_ref: ExecutionRef) -> bool:
@@ -385,6 +409,10 @@ class WalkingSkeletonOrchestrator:
                         f"CAS conflict on run {run_id}: existing execution_id '{run.execution_ref.execution_id}' != '{exec_ref.execution_id}'"
                     )
                 self.runs[run_id] = transition_run(run, RunStatus.RUNNING, execution_ref=exec_ref)
+                if self.telemetry and run_id in self.correlation_contexts:
+                    self.correlation_contexts[run_id].execution_id = exec_ref.execution_id
+                    if run_id in self.active_spans:
+                        self.active_spans[run_id].set_attribute("all_tomorrow.execution_id", exec_ref.execution_id)
                 return True
             return False
 
@@ -408,6 +436,10 @@ class WalkingSkeletonOrchestrator:
                 if row is not None:
                     if run_id in self.runs:
                         self.runs[run_id] = transition_run(self.runs[run_id], RunStatus.RUNNING, execution_ref=exec_ref)
+                    if self.telemetry and run_id in self.correlation_contexts:
+                        self.correlation_contexts[run_id].execution_id = exec_ref.execution_id
+                        if run_id in self.active_spans:
+                            self.active_spans[run_id].set_attribute("all_tomorrow.execution_id", exec_ref.execution_id)
                     return True
 
                 cur.execute("SELECT execution_ref FROM public.at_runs WHERE run_id = %s", (str(run_id),))
@@ -563,12 +595,29 @@ class WalkingSkeletonOrchestrator:
         if run.status != RunStatus.RUNNING:
             raise InvalidStateTransitionError(f"Run must be RUNNING to execute agent step, got {run.status}")
 
-        req = AgentExecutionRequest(
-            model_route_ref=model_route,
-            toolset_ref=toolset,
-            prompt=prompt,
-        )
-        return await self.agent_port.execute(req)
+        agent_span = None
+        if self.telemetry and run_id in self.active_spans:
+            corr = self.correlation_contexts.get(run_id)
+            agent_span = self.telemetry.start_child_span(
+                name="agent_execution_step",
+                parent_span=self.active_spans[run_id],
+                context=corr,
+                extra_attributes={
+                    "all_tomorrow.model_route": model_route,
+                    "all_tomorrow.toolset_ref": toolset,
+                },
+            )
+
+        try:
+            req = AgentExecutionRequest(
+                model_route_ref=model_route,
+                toolset_ref=toolset,
+                prompt=prompt,
+            )
+            return await self.agent_port.execute(req)
+        finally:
+            if agent_span:
+                agent_span.end()
 
     async def suspend_need_user(
         self,
@@ -648,6 +697,23 @@ class WalkingSkeletonOrchestrator:
     ) -> ArtifactRef:
         ref = await self.artifact_store.store(content, media_type=media_type)
         self.artifacts[str(ref.artifact_id)] = ref
+
+        if self.telemetry and run_id in self.active_spans:
+            corr = self.correlation_contexts.get(run_id)
+            if corr:
+                corr.artifact_ref = str(ref.artifact_id)
+            art_span = self.telemetry.start_child_span(
+                name="record_artifact",
+                parent_span=self.active_spans[run_id],
+                context=corr,
+                extra_attributes={
+                    "all_tomorrow.artifact_id": str(ref.artifact_id),
+                    "all_tomorrow.media_type": media_type,
+                    "all_tomorrow.content_hash": ref.content_hash,
+                },
+            )
+            art_span.end()
+
         return ref
 
     async def complete_run_and_work(
@@ -658,6 +724,22 @@ class WalkingSkeletonOrchestrator:
     ) -> tuple[RunRecord, WorkRecord]:
         run = self.runs[run_id]
         work = self.works[run.work_id]
+
+        if self.telemetry and run_id in self.active_spans:
+            corr = self.correlation_contexts.get(run_id)
+            comp_span = self.telemetry.start_child_span(
+                name="complete_run",
+                parent_span=self.active_spans[run_id],
+                context=corr,
+                extra_attributes={
+                    "all_tomorrow.outcome_status": "SUCCEEDED",
+                    "all_tomorrow.criterion_ref": completion_evidence.criterion_ref,
+                },
+            )
+            comp_span.end()
+            root_span = self.active_spans.pop(run_id, None)
+            if root_span:
+                root_span.end()
 
         completed_run = transition_run(run, RunStatus.SUCCEEDED)
         self.runs[run_id] = completed_run
