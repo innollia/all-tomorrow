@@ -1,0 +1,20 @@
+model_list: []
+general_settings:
+  master_key: sk-local-gateway-probe
+  store_prompts_in_spend_logs: false
+  turn_off_message_logging: true
+litellm_settings:
+  callbacks: []
+mcp_servers:
+  alpha:
+    url: http://127.0.0.1:9191/mcp
+    transport: http
+    allow_all_keys: true
+  beta:
+    url: http://127.0.0.1:9192/mcp
+    transport: http
+    allow_all_keys: true
+  gamma:
+    url: http://127.0.0.1:9193/mcp
+    transport: http
+    allow_all_keys: true

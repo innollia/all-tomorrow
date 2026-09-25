@@ -1,0 +1,30 @@
+[
+  {
+    "scenario_id": "D04",
+    "candidate": "DBOS",
+    "version": "3.0.0",
+    "passed": false,
+    "manual_steps": ["Run tests/test_live_common_d01.py::test_dbos_live_common_d04_commit_then_kill in the 00A live lab"],
+    "custom_glue_loc": 19,
+    "adapter_loc": 107,
+    "processes_required": 2,
+    "persistent_state_systems": ["DBOS PostgreSQL system database", "external PostgreSQL fixture database"],
+    "recovery_notes": "The first worker exited 77 after the external commit but before the DBOS step returned; the second worker resumed the same workflow ID.",
+    "persisted_payload_notes": "External fixture showed calls=1/applications=1 before restart and calls=2/applications=1 after. DBOS workflow status became SUCCESS.",
+    "trace_notes": "The typed output retained the original correlation ID; a D04-specific OTel span was not captured."
+  },
+  {
+    "scenario_id": "D04",
+    "candidate": "Restate",
+    "version": "server 1.7.10 / SDK 1.0.5",
+    "passed": false,
+    "manual_steps": ["Run tests/test_live_common_d01.py::test_restate_live_common_d04_commit_then_kill in the 00A live lab"],
+    "custom_glue_loc": 19,
+    "adapter_loc": 81,
+    "processes_required": 3,
+    "persistent_state_systems": ["Restate journal/state directory", "external PostgreSQL fixture database"],
+    "recovery_notes": "The first handler exited 77 after external commit but before ctx.run returned; a new PID completed the original invocation.",
+    "persisted_payload_notes": "External fixture showed calls=1/applications=1 before restart and calls=2/applications=1 after. Restate output endpoint matched the completed typed result.",
+    "trace_notes": "The typed output retained the original correlation ID; a D04-specific OTel span was not captured."
+  }
+]

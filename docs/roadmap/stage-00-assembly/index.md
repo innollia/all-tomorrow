@@ -45,20 +45,20 @@ production durable engine은 하나만 채택한다.
 
 | 순서 | 작업 | 상태 | 지금 시작 가능 | 선행조건 | 파일 |
 |---:|---|---|---:|---|---|
-| 00A | Substrate Spike & Selection | 개발중 | 예 | 없음 | [00a](00a-substrate-spike.md) |
-| 00A-1 | Common Harness | 시작안했음 | 예 | 없음 | [00a-1](00a-1-common-harness.md) |
-| 00A-2 | DBOS Spike | 선행작업 대기 | 아니오 | 00A-1 | [00a-2](00a-2-dbos-spike.md) |
-| 00A-3 | Restate Spike | 선행작업 대기 | 아니오 | 00A-1 | [00a-3](00a-3-restate-spike.md) |
-| 00A-4 | Tool Gateway Spike | 선행작업 대기 | 아니오 | 00A-1 | [00a-4](00a-4-gateway-spike.md) |
-| 00A-5 | Selection Record | 선행작업 대기 | 아니오 | 00A-2~00A-4 | [00a-5](00a-5-selection.md) |
-| 00B | Ownership & Adapter Contracts | 선행작업 대기 | 아니오 | 00A | [00b](00b-ownership-contracts.md) |
-| 00C | Failure Walking Skeleton | 선행작업 대기 | 아니오 | 00A + 00B | [00c](00c-failure-walking-skeleton.md) |
-| 00D | Observability / Eval / CI Seam | 선행작업 대기 | 아니오 | 00C | [00d](00d-observability-eval-ci.md) |
+| 00A | Substrate Spike & Selection | 개발완료 | — | 없음 | [00a](00a-substrate-spike.md) |
+| 00A-1 | Common Harness | 개발완료 | — | 없음 | [00a-1](00a-1-common-harness.md) |
+| 00A-2 | DBOS Spike | 개발완료 | — | 00A-1 | [00a-2](00a-2-dbos-spike.md) |
+| 00A-3 | Restate Spike | 개발완료 | — | 00A-1 | [00a-3](00a-3-restate-spike.md) |
+| 00A-4 | Tool Gateway Spike | 개발완료 | — | 00A-1 | [00a-4](00a-4-gateway-spike.md) |
+| 00A-5 | Selection Record | 개발완료 | — | 00A-2~00A-4 | [00a-5](00a-5-selection.md) |
+| 00B | Ownership & Adapter Contracts | 개발완료 | — | 00A | [00b](00b-ownership-contracts.md) |
+| 00C | Failure Walking Skeleton | 개발완료 | — | 00A + 00B | [00c](00c-failure-walking-skeleton.md) |
+| 00D | Observability / Eval / CI Seam | 개발중 | 예 | 00C | [00d](00d-observability-eval-ci.md) |
 | 00E | Architecture Lock & Stage 1 Rewrite | 선행작업 대기 | 아니오 | 00A~00D | [00e](00e-architecture-lock.md) |
 
 ## 지금 시작할 작업
 
-[00A-1 Common Harness](00a-1-common-harness.md)만 시작한다.
+**00A, 00B, 00C 완료.** 00C Failure Walking Skeleton(C-01~C-10, real OS crash/restart, durable DBOS PostgreSQL backend, LiteLLM E2E, data retention canary isolation 5-canary/6-surface, C-07 제품 경로 supervisor timeout/evidence, C-09 독립 reconciler ThreadPool/DB barrier 기반 PostgreSQL CAS 실제 경합 및 관측 검증, C-10 제품 tool 어댑터 경로(PydanticAIGatewayAdapter + MCP tool 업스트림) 정상→다운→복구 통과 및 UNAVAILABLE evidence/위조 부재 직접 단언, DBOS unreachable status probe 검증 유지 및 범위 명시, DBOS SDK public API 정리, artifact probe)이 100% 통과하여 00D Observability / Eval / CI Seam을 시작할 수 있다. Stage 0 전체는 계속 개발중이며 Stage 1은 대기한다.
 
 00A-1이 끝나기 전에 DBOS/Restate implementation convenience에 맞춰 harness나 domain semantics를 바꾸지 않는다.
 

@@ -1,3 +1,15 @@
+from .artifact_store import (
+    ArtifactIntegrityError,
+    ArtifactStoreProtocol,
+    LocalArtifactStore,
+)
+from .delivery_store import (
+    DeliveryCASConflictError,
+    DeliveryCommitError,
+    DeliveryStore,
+    DeliveryStoreProtocol,
+    IdempotencyKeyExpiredError,
+)
 from .postgres import PostgresEventSink, PostgresStore
 from .run_store import (
     InMemoryRunStateStore,
@@ -19,6 +31,9 @@ from .run_store import (
 )
 
 __all__ = [
+    "ArtifactIntegrityError",
+    "ArtifactStoreProtocol",
+    "LocalArtifactStore",
     "InMemoryRunStateStore",
     "PostgresEventSink",
     "PostgresStore",

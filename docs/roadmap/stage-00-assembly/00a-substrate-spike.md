@@ -2,10 +2,10 @@
 
 ## Status
 
-- 상태: **개발중**
+- 상태: **개발완료**
 - 지금 시작 가능: **예**
 - 선행조건: 없음
-- 완료조건: 00A-1~00A-5 완료
+- 완료조건: 선택 중심 범위의 00A-1~00A-5 완료 (2026-09-20 사용자 지시)
 
 ## 목적
 
@@ -17,13 +17,15 @@
 
 | 순서 | 작업 | 상태 | 지금 시작 가능 | 선행조건 | 파일 |
 |---:|---|---|---:|---|---|
-| 00A-1 | Common Harness | 시작안했음 | 예 | 없음 | [00a-1](00a-1-common-harness.md) |
-| 00A-2 | DBOS Spike | 선행작업 대기 | 아니오 | 00A-1 | [00a-2](00a-2-dbos-spike.md) |
-| 00A-3 | Restate Spike | 선행작업 대기 | 아니오 | 00A-1 | [00a-3](00a-3-restate-spike.md) |
-| 00A-4 | Tool Gateway Spike | 선행작업 대기 | 아니오 | 00A-1 | [00a-4](00a-4-gateway-spike.md) |
-| 00A-5 | Selection Record | 선행작업 대기 | 아니오 | 00A-2~00A-4 | [00a-5](00a-5-selection.md) |
+| 00A-1 | Common Harness | 개발완료 | — | 없음 | [00a-1](00a-1-common-harness.md) |
+| 00A-2 | DBOS Spike | 개발완료 | — | 00A-1 | [00a-2](00a-2-dbos-spike.md) |
+| 00A-3 | Restate Spike | 개발완료 | — | 00A-1 | [00a-3](00a-3-restate-spike.md) |
+| 00A-4 | Tool Gateway Spike | 개발완료 | — | 00A-1 | [00a-4](00a-4-gateway-spike.md) |
+| 00A-5 | Selection Record | 개발완료 | — | 00A-2~00A-4 | [00a-5](00a-5-selection.md) |
 
 00A-1 이후 00A-2/3/4는 독립적으로 진행할 수 있다. 00A-5만 셋 모두를 기다린다.
+
+2026-09-20: [검증 범위를 후보 선택에 맞춰 축소](00a-live-gate-matrix.md)하고 **DBOS + LiteLLM을 선택**했다. 실제 결합 흐름이 통과했으며 [최종 선택·운영 계약](00a-5-selection.md)을 기준으로 00B를 시작할 수 있다. 과거 감사 기록은 역사적 기록으로 보존한다.
 
 ## 결정 축 분리
 
@@ -34,7 +36,7 @@
 
 LiteLLM MCP Gateway 실패 때문에 DBOS/Restate가 탈락하거나, durable backend 문제 때문에 gateway가 탈락하는 식으로 평가 축을 섞지 않는다.
 
-마지막 00A-5에서 선택된 durable backend와 선택된 gateway를 함께 연결해 compatibility를 한 번 더 확인한다.
+00A-5에서 선택된 durable backend와 gateway의 실제 사용 흐름을 확인했다. 모든 장애 조합의 재인증은 완료조건에서 제외했다.
 
 ## 공통 기반
 
@@ -58,7 +60,7 @@ LiteLLM MCP Gateway 실패 때문에 DBOS/Restate가 탈락하거나, durable ba
 | FastMCP | 4.0.5 |
 | LiteLLM | 1.101.0 |
 
-이 표는 production pin이 아니다. 각 spike 시작 시 exact version을 다시 확인하고 실험 결과에 사용한 version을 기록한다.
+이 표는 비교에 사용한 버전이다. 선택한 production pin은 00A-5 및 root lockfile을 따른다.
 
 ## 공통 원칙
 

@@ -813,16 +813,20 @@ class TestRealCliSmoke:
         assert "--output-format" in result.stdout or "--output-format" in result.stderr
 
     def test_opencode_cli_help_smoke(self) -> None:
-        npx = shutil.which("npx.cmd") or shutil.which("npx")
+        # A Windows PATH entry is visible in WSL, but .cmd files are not POSIX executables.
+        npx = (shutil.which("npx.cmd") or shutil.which("npx")) if os.name == "nt" else shutil.which("npx")
         if not npx:
             pytest.skip("npx/npx.cmd not found on PATH")
+        if os.name != "nt" and npx.startswith("/mnt/"):
+            pytest.skip("Only a Windows-mounted npx is available to this Linux test process")
 
         import subprocess
         result = subprocess.run(
             [npx, "-y", "opencode-ai", "run", "--help"],
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=60,
+            shell=(os.name == "nt"),
         )
         assert result.returncode == 0
         combined = result.stdout + result.stderr

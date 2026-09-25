@@ -11,6 +11,17 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from all_tomorrow.contracts import ContractError, Event, PipelineSpec, Project, UserQuestion, new_id, utc_now
+from all_tomorrow.domain.errors import CanonicalError, ErrorCategory
+from all_tomorrow.delivery import (
+    DeliveryId,
+    DeliveryKind,
+    DeliveryRecord,
+    DeliveryStatus,
+)
+from all_tomorrow.storage.delivery_store import (
+    DeliveryCASConflictError,
+    IdempotencyKeyExpiredError,
+)
 from all_tomorrow.storage.run_store import (
     QuestionRecord,
     RunConflictError,
@@ -38,6 +49,28 @@ def _json_default(value: Any) -> Any:
 
 def _jsonable(value: Any) -> Any:
     return json.loads(json.dumps(value, default=_json_default))
+
+
+def canonical_error_from_dict(data: dict[str, Any] | None) -> CanonicalError | None:
+    if not data or not isinstance(data, dict):
+        return None
+    category_val = data.get("category")
+    try:
+        category = ErrorCategory(category_val)
+    except ValueError:
+        category = ErrorCategory.INVARIANT_VIOLATION
+    return CanonicalError(
+        category=category,
+        code=data.get("code") or "unknown_error",
+        retryability=bool(data.get("retryability", False)),
+        ambiguity=bool(data.get("ambiguity", False)),
+        authority_security_relevance=bool(data.get("authority_security_relevance", False)),
+        safe_message=data.get("safe_message") or "",
+        external_ref=data.get("external_ref"),
+        evidence_refs=tuple(data.get("evidence_refs") or ()),
+        caused_by=data.get("caused_by"),
+        details=dict(data.get("details") or {}),
+    )
 
 
 class PostgresStore:
@@ -592,6 +625,165 @@ class PostgresStore:
                 )
 
     atomic_resume = resume_run
+
+    async def atomic_outbox_transaction(
+        self,
+        intent: DeliveryRecord,
+        domain_action: Any,
+    ) -> tuple[Any, DeliveryRecord]:
+        """S0-00B3-01: True atomic PostgreSQL application transaction + delivery outbox intent.
+
+        Guarantees:
+        - Domain mutation and outbox intent commit within a single database transaction.
+        - Idempotency key expiration is checked before commit.
+        - Canonical row is returned via RETURNING * so caller and DB always observe identical state.
+        - Conflicting destination or subjects for the same key raise DeliveryCASConflictError.
+        """
+        now = utc_now()
+        if intent.is_expired(now):
+            raise IdempotencyKeyExpiredError(
+                f"Cannot commit outbox intent with expired key (valid_until={intent.valid_until})"
+            )
+
+        async with self.pool.connection() as connection:
+            async with connection.transaction():
+                cursor = await connection.execute(
+                    """
+                    SELECT delivery_id, kind, subject_refs, destination_adapter,
+                           idempotency_key, idempotency_scope, retention_class, valid_until,
+                           payload, status, attempts, max_attempts, revision,
+                           last_error, next_attempt_at, delivered_at, created_at, updated_at
+                    FROM delivery_records
+                    WHERE idempotency_key = %s
+                    FOR UPDATE
+                    """,
+                    (intent.idempotency_key,),
+                )
+                existing_row = await cursor.fetchone()
+                if existing_row is not None:
+                    existing_valid_until = existing_row[7]
+                    if existing_valid_until is not None and now > existing_valid_until:
+                        raise IdempotencyKeyExpiredError(
+                            f"Idempotency key '{intent.idempotency_key}' expired at {existing_valid_until}"
+                        )
+                    # Semantic conflict check
+                    existing_dest = existing_row[3]
+                    existing_subjects = dict(existing_row[2] or {})
+                    if existing_dest != intent.destination_adapter or existing_subjects != intent.subject_refs:
+                        raise DeliveryCASConflictError(
+                            f"Idempotency key '{intent.idempotency_key}' already exists with different destination or subjects"
+                        )
+                    await connection.execute(
+                        """
+                        UPDATE delivery_records
+                        SET updated_at = now()
+                        WHERE idempotency_key = %s
+                        """,
+                        (intent.idempotency_key,),
+                    )
+                    row = existing_row
+                    domain_result = None
+                else:
+                    domain_result = await domain_action(connection)
+                    cursor = await connection.execute(
+                        """
+                        INSERT INTO delivery_records
+                            (delivery_id, kind, subject_refs, destination_adapter,
+                             idempotency_key, idempotency_scope, retention_class, valid_until,
+                             payload, status, attempts, max_attempts, revision,
+                             last_error, next_attempt_at, delivered_at, created_at, updated_at)
+                        VALUES
+                            (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING delivery_id, kind, subject_refs, destination_adapter,
+                                  idempotency_key, idempotency_scope, retention_class, valid_until,
+                                  payload, status, attempts, max_attempts, revision,
+                                  last_error, next_attempt_at, delivered_at, created_at, updated_at
+                        """,
+                        (
+                            str(intent.delivery_id),
+                            intent.kind.value,
+                            Jsonb(intent.subject_refs),
+                            intent.destination_adapter,
+                            intent.idempotency_key,
+                            intent.idempotency_scope,
+                            intent.retention_class,
+                            intent.valid_until,
+                            Jsonb(intent.payload),
+                            intent.status.value,
+                            intent.attempts,
+                            intent.max_attempts,
+                            intent.revision,
+                            Jsonb(_jsonable(intent.last_error)) if intent.last_error else None,
+                            intent.next_attempt_at,
+                            intent.delivered_at,
+                            intent.created_at,
+                            intent.updated_at,
+                        ),
+                    )
+                    row = await cursor.fetchone()
+                    if row is None:
+                        raise DeliveryCASConflictError(f"Failed to retrieve canonical delivery record for {intent.idempotency_key}")
+
+                canonical_record = DeliveryRecord(
+                    delivery_id=DeliveryId(row[0]),
+                    kind=DeliveryKind(row[1]),
+                    subject_refs=dict(row[2] or {}),
+                    destination_adapter=row[3],
+                    idempotency_key=row[4],
+                    idempotency_scope=row[5],
+                    retention_class=row[6],
+                    valid_until=row[7],
+                    payload=dict(row[8] or {}),
+                    status=DeliveryStatus(row[9]),
+                    attempts=row[10],
+                    max_attempts=row[11],
+                    revision=row[12],
+                    last_error=canonical_error_from_dict(row[13]),
+                    next_attempt_at=row[14],
+                    delivered_at=row[15],
+                    created_at=row[16],
+                    updated_at=row[17],
+                )
+
+                return domain_result, canonical_record
+
+    async def get_delivery(self, delivery_id: str) -> DeliveryRecord | None:
+        async with self.pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT delivery_id, kind, subject_refs, destination_adapter,
+                       idempotency_key, idempotency_scope, retention_class, valid_until,
+                       payload, status, attempts, max_attempts, revision,
+                       last_error, next_attempt_at, delivered_at, created_at, updated_at
+                FROM delivery_records
+                WHERE delivery_id = %s
+                """,
+                (delivery_id,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return DeliveryRecord(
+                delivery_id=DeliveryId(row[0]),
+                kind=DeliveryKind(row[1]),
+                subject_refs=dict(row[2] or {}),
+                destination_adapter=row[3],
+                idempotency_key=row[4],
+                idempotency_scope=row[5],
+                retention_class=row[6],
+                valid_until=row[7],
+                payload=dict(row[8] or {}),
+                status=DeliveryStatus(row[9]),
+                attempts=row[10],
+                max_attempts=row[11],
+                revision=row[12],
+                last_error=canonical_error_from_dict(row[13]),
+                next_attempt_at=row[14],
+                delivered_at=row[15],
+                created_at=row[16],
+                updated_at=row[17],
+            )
+
 
 
 class PostgresEventSink:

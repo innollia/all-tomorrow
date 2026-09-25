@@ -2,92 +2,21 @@
 
 ## Status
 
-- 상태: **시작안했음**
-- 지금 시작 가능: **예**
+- 상태: **개발완료**
 - 선행조건: 없음
+- 완료 기준: [2026-09-20 범위 조정](00a-live-gate-matrix.md)
 
-## 목적
+## 결과
 
-DBOS와 Restate에 완전히 같은 입력과 실패를 주기 위한 최소 walking-skeleton harness를 먼저 만든다.
+`HarnessInput`, `HarnessOutput`, Work/Run 식별자와 공통 외부 fixture로 두 후보의 typed read → PydanticAI → idempotent mutation → wait/signal 흐름을 비교했다. fixture는 호출 횟수와 실제 적용을 구분한다. 실제 프로세스 종료 및 재기동을 사용했다. 메모리 simulation 결과는 선택 근거에서 제외했다.
 
-후보별 편의를 위해 acceptance를 바꾸지 않는다.
+모델 저장 전/후 replay, 외부 commit 직후 중복 방지, Work/Run 분리, 승인 재개에 대한 핵심 오해를 해소했다. 후보별 프로세스 제어와 제품 API 호출은 support adapter에 있다. SDK 수준으로 runner를 다시 정리하거나 모든 기존 시험을 하나의 결과 스키마로 이식하는 작업은 선택에 영향을 주지 않으므로 완료조건에서 제외했다.
 
-## 구현 범위
+## 재현과 한계
 
-최소 skeleton:
+- 공통 흐름: `tests/test_live_common_d01.py`
+- 추가 lifecycle 관측: `tests/test_live_common_lifecycle.py`
+- 실제 스택 결합: `tests/test_combined_gateway_agent.py`
+- 선택 및 retry/data 계약: [00A-5](00a-5-selection.md)
 
-1. deterministic PydanticAI agent 또는 TestModel
-2. typed input/output
-3. 한 개의 read-only tool
-4. 한 개의 idempotency가 필요한 mutation tool stub
-5. durable wait/signal 지점
-6. timer/delay 지점
-7. execution identity
-8. OTel correlation ID
-9. process kill 지점을 명시적으로 주입할 수 있는 test hook
-
-실제 GitHub/Eve/filesystem mutation은 이 단계에서 붙이지 않는다.
-
-## Canonical Scenarios
-
-각 durable candidate에 동일하게 실행할 scenario ID를 고정한다.
-
-- D01 normal completion
-- D02 kill before model result persist
-- D03 kill after model result persist
-- D04 kill immediately after external side effect
-- D05 duplicate start with same execution identity
-- D06 user wait → process restart → signal → resume
-- D07 long timer/delay → restart → resume
-- D08 cancel
-- D09 backend temporary unavailable → reconnect
-- D10 old in-flight execution under ordinary application/dependency upgrade
-- D11 two logical Runs for one Work stay distinct
-- D12 OTel correlation survives recovery
-
-## Side-effect Fixture
-
-mutation tool은 외부 시스템 흉내를 내는 별도 fixture store에 다음을 남긴다.
-
-- idempotency key
-- call count
-- committed value
-- reconciliation lookup
-
-D04에서 duplicate mutation이 나면 durable candidate가 통과했다고 보지 않는다. durable retry만 믿지 말고 application-level idempotency/reconciliation seam을 검증한다.
-
-## Result Schema
-
-각 scenario 결과는 같은 구조로 남긴다.
-
-- scenario_id
-- candidate
-- version
-- pass/fail
-- manual steps
-- custom glue LOC
-- adapter LOC
-- processes required
-- persistent state systems
-- recovery notes
-- persisted payload notes
-- trace notes
-
-## Retry Matrix
-
-다음 층별 retry default를 조사하고 실제 설정을 기록한다.
-
-- provider SDK
-- LiteLLM model gateway
-- PydanticAI
-- durable backend
-- All Tomorrow semantic Work retry
-
-같은 failure에 두 층 이상이 독립 retry하지 않도록 테스트 설정을 명시한다.
-
-## 완료조건
-
-- 공통 harness가 특정 durable backend import 없이 존재
-- D01~D12를 같은 방식으로 실행할 수 있음
-- candidate adapter 외 코드는 DBOS/Restate 이름을 몰라도 됨
-- scenario result를 기계적으로 비교 가능
+D01~D12는 기존 실험의 식별자다. 전체 조합을 제품 신뢰성 인증으로 확대하지 않는다. 결과 파일의 옛 partial 상태는 당시 더 넓은 기준에 대한 상태다.

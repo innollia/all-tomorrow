@@ -1,0 +1,12 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies, substrate-review-required]
+  - package-ecosystem: pip
+    directory: /deploy/gateway
+    schedule:
+      interval: weekly
+    labels: [dependencies, substrate-review-required]
