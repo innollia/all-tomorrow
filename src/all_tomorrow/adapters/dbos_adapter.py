@@ -61,6 +61,7 @@ _WORKFLOW_REGISTRY["wf"] = at_generic_workflow
 
 
 _DBOS_LAUNCH_LOCK = threading.Lock()
+_CURRENT_LAUNCHED_DBOS_URL: str | None = None
 
 
 class DBOSDurableAdapter(DurableExecutionPort):
@@ -71,10 +72,20 @@ class DBOSDurableAdapter(DurableExecutionPort):
        Workflow status, result, signal, and cancellation are performed strictly through
        DBOS public SDK API (`DBOS.get_workflow_status()`, `DBOS.cancel_workflow()`,
        `DBOS.send()`, `DBOS.retrieve_workflow()`).
-    2. Only application-owned mappings (such as `public.at_run_executions` and
+    2. Lifecycle is managed strictly via public DBOS SDK APIs (`DBOS(config=...)`,
+       `DBOS.launch()`, `DBOS.destroy()`) without querying private globals or configs.
+    3. Only application-owned mappings (such as `public.at_run_executions` and
        `public.at_signals_seen`) are managed in application schema.
-    3. Initialization does not swallow broad exceptions.
+    4. Lifecycle operations never swallow destruction errors.
     """
+
+    @classmethod
+    def destroy_runtime(cls) -> None:
+        """Cleanly shut down DBOS runtime. Never silences destruction errors."""
+        global _CURRENT_LAUNCHED_DBOS_URL
+        with _DBOS_LAUNCH_LOCK:
+            DBOS.destroy()
+            _CURRENT_LAUNCHED_DBOS_URL = None
 
     def __init__(
         self,
@@ -101,33 +112,31 @@ class DBOSDurableAdapter(DurableExecutionPort):
         self._db_initialized = True
 
     def _ensure_dbos_launched(self) -> None:
-        """Ensure DBOS SDK runtime is launched with the configured system database URL."""
+        """Ensure DBOS SDK runtime is launched with configured database URL via public SDK APIs.
+
+        Boundary:
+        - Uses strictly public DBOS(config=...) and DBOS.launch().
+        - If database URL changes, cleans up previous instance via DBOS.destroy().
+        - Never silences destruction errors.
+        - Does not access private dbos._dbos or inspect internal private attributes.
+        """
+        global _CURRENT_LAUNCHED_DBOS_URL
         if not self.system_database_url:
             return
         with _DBOS_LAUNCH_LOCK:
-            from dbos import _dbos
-
-            instance = _dbos._dbos_global_instance
-            if instance is not None and getattr(instance, "_launched", False):
-                try:
-                    cfg = getattr(instance, "_config", {})
-                    current_url = cfg.get("system_database_url")
-                except Exception:
-                    current_url = None
-                if current_url == self.system_database_url:
+            if _CURRENT_LAUNCHED_DBOS_URL is not None:
+                if _CURRENT_LAUNCHED_DBOS_URL == self.system_database_url:
                     return
-                try:
-                    DBOS.destroy()
-                except Exception:
-                    pass
-                instance = None
+                # Different database URL requested; destroy current DBOS instance
+                DBOS.destroy()
+                _CURRENT_LAUNCHED_DBOS_URL = None
 
-            if instance is None:
-                DBOS(config={
-                    "name": self.application_name,
-                    "system_database_url": self.system_database_url,
-                })
+            DBOS(config={
+                "name": self.application_name,
+                "system_database_url": self.system_database_url,
+            })
             DBOS.launch()
+            _CURRENT_LAUNCHED_DBOS_URL = self.system_database_url
 
     def _get_connection(self):
         import psycopg

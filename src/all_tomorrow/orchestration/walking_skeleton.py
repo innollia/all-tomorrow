@@ -91,6 +91,7 @@ from all_tomorrow.ports.workers import (
 )
 from all_tomorrow.storage.artifact_store import LocalArtifactStore
 from all_tomorrow.storage.delivery_store import DeliveryStore
+from all_tomorrow.storage.run_store import RunConflictError
 
 
 class WalkingSkeletonOrchestrator:
@@ -230,7 +231,10 @@ class WalkingSkeletonOrchestrator:
             return
         import psycopg
         from dataclasses import asdict
-        evidence_json = json.dumps(asdict(evidence), default=str) if evidence else None
+        evidence_dict = asdict(evidence) if evidence else None
+        if evidence and evidence.observed_values:
+            evidence_dict.update(evidence.observed_values)
+        evidence_data = json.loads(json.dumps(evidence_dict, default=str)) if evidence_dict else None
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -242,7 +246,7 @@ class WalkingSkeletonOrchestrator:
                         evidence = COALESCE(EXCLUDED.evidence, at_works.evidence),
                         updated_at = EXCLUDED.updated_at
                     """,
-                    (str(work.work_id), str(work.goal_id), work.title, work.status.value, psycopg.types.json.Jsonb(evidence_json) if evidence_json else None, work.created_at, work.updated_at),
+                    (str(work.work_id), str(work.goal_id), work.title, work.status.value, psycopg.types.json.Jsonb(evidence_data) if evidence_data else None, work.created_at, work.updated_at),
                 )
             conn.commit()
 
@@ -267,7 +271,7 @@ class WalkingSkeletonOrchestrator:
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (run_id) DO UPDATE SET
                         status = EXCLUDED.status,
-                        execution_ref = EXCLUDED.execution_ref,
+                        execution_ref = COALESCE(at_runs.execution_ref, EXCLUDED.execution_ref),
                         attempt_number = EXCLUDED.attempt_number,
                         updated_at = EXCLUDED.updated_at
                     """,
@@ -353,6 +357,68 @@ class WalkingSkeletonOrchestrator:
         saved_run, committed_intent = await self.delivery_store.atomic_app_transaction(intent, _save_run)
         return saved_run, committed_intent
 
+    def cas_attach_execution_ref(self, run_id: RunId, exec_ref: ExecutionRef) -> bool:
+        """S0-00B3-02 / C-09: Atomic Compare-And-Swap execution_ref attachment in PostgreSQL.
+
+        Guarantees:
+        - If execution_ref IS NULL, attaches exec_ref and transitions status to RUNNING.
+        - If execution_ref already matches exec_ref.execution_id, converges idempotently (returns True).
+        - If execution_ref is already attached to a DIFFERENT execution_id, strictly fails closed
+          by raising RunConflictError, forbidding divergent execution attachment.
+        """
+        import psycopg
+        from all_tomorrow.storage.run_store import RunConflictError
+
+        ref_json = {
+            "backend": exec_ref.backend,
+            "execution_id": exec_ref.execution_id,
+            "execution_version": exec_ref.execution_version,
+            "attached_at": exec_ref.attached_at.isoformat() if exec_ref.attached_at else None,
+            "metadata": exec_ref.metadata,
+        }
+
+        if not self.database_url:
+            run = self.runs.get(run_id)
+            if run is not None:
+                if run.execution_ref is not None and run.execution_ref.execution_id != exec_ref.execution_id:
+                    raise RunConflictError(
+                        f"CAS conflict on run {run_id}: existing execution_id '{run.execution_ref.execution_id}' != '{exec_ref.execution_id}'"
+                    )
+                self.runs[run_id] = transition_run(run, RunStatus.RUNNING, execution_ref=exec_ref)
+                return True
+            return False
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE public.at_runs
+                    SET status = 'RUNNING',
+                        execution_ref = %s,
+                        updated_at = NOW()
+                    WHERE run_id = %s
+                      AND (execution_ref IS NULL OR (execution_ref->>'execution_id') = %s)
+                    RETURNING run_id, execution_ref
+                    """,
+                    (psycopg.types.json.Jsonb(ref_json), str(run_id), exec_ref.execution_id),
+                )
+                row = cur.fetchone()
+                conn.commit()
+
+                if row is not None:
+                    if run_id in self.runs:
+                        self.runs[run_id] = transition_run(self.runs[run_id], RunStatus.RUNNING, execution_ref=exec_ref)
+                    return True
+
+                cur.execute("SELECT execution_ref FROM public.at_runs WHERE run_id = %s", (str(run_id),))
+                existing_row = cur.fetchone()
+                existing_ref = existing_row[0] if existing_row else None
+                existing_exec_id = existing_ref.get("execution_id") if isinstance(existing_ref, dict) else None
+
+                raise RunConflictError(
+                    f"CAS conflict on run {run_id}: existing execution_id '{existing_exec_id}' conflicts with divergent '{exec_ref.execution_id}'"
+                )
+
     async def reconcile_run_start(self, run_id: RunId, intent: DeliveryRecord) -> tuple[RunRecord, ExecutionRef]:
         reconciled_delivery = await self.reconciler.reconcile(intent)
         if reconciled_delivery.status != DeliveryStatus.DELIVERED:
@@ -362,11 +428,129 @@ class WalkingSkeletonOrchestrator:
         if exec_ref is None:
             raise RuntimeError(f"ExecutionRef not found for started run {run_id}")
 
-        run = self.runs[run_id]
-        running_run = transition_run(run, RunStatus.RUNNING, execution_ref=exec_ref)
-        self.runs[run_id] = running_run
-        self._persist_run(running_run)
-        return running_run, exec_ref
+        self.cas_attach_execution_ref(run_id, exec_ref)
+        run = self.runs.get(run_id)
+        if run is None and self.database_url:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT run_id, work_id, status FROM public.at_runs WHERE run_id = %s", (str(run_id),))
+                    row = cur.fetchone()
+                    if row:
+                        run = RunRecord(run_id=RunId(row[0]), work_id=WorkId(row[1]), status=RunStatus(row[2]), execution_ref=exec_ref)
+                        self.runs[run_id] = run
+        return run or self.runs[run_id], exec_ref
+
+    async def supervise_worker_process(
+        self,
+        run_id: RunId,
+        command: list[str],
+        timeout_seconds: float = 1.0,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+    ) -> tuple[int | None, bool]:
+        """C-07: Product supervisor execution path with timeout, process cleanup, and failure evidence.
+
+        Guarantees:
+        - Monitors worker process execution subject to timeout deadline.
+        - On timeout:
+          1. Kills child worker process and reaps it (resource cleanup).
+          2. Normalizes timeout exception to ErrorCategory.TIMEOUT.
+          3. Transitions Run to FAILED and persists to PostgreSQL at_runs.
+          4. Transitions Work to FAILED with CompletionEvidence and persists to PostgreSQL at_works.
+          5. Preserves Goal in ACTIVE status (never cancelled or lost).
+          6. Emits OTel span recording timeout event.
+        - Returns (child_pid, completed_within_timeout).
+        """
+        import asyncio
+        import os
+        from all_tomorrow.error_normalization import normalize_exception
+
+        run = self.runs.get(run_id)
+        if run is None and self.database_url:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT run_id, work_id, status FROM public.at_runs WHERE run_id = %s", (str(run_id),))
+                    row = cur.fetchone()
+                    if row:
+                        run = RunRecord(run_id=RunId(row[0]), work_id=WorkId(row[1]), status=RunStatus(row[2]))
+                        self.runs[run_id] = run
+        if run is None:
+            raise RuntimeError(f"Run {run_id} not found for supervision")
+
+        work = self.works.get(run.work_id)
+        if work is None and self.database_url:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT work_id, goal_id, title, status FROM public.at_works WHERE work_id = %s", (str(run.work_id),))
+                    row = cur.fetchone()
+                    if row:
+                        work = WorkRecord(work_id=WorkId(row[0]), goal_id=GoalId(row[1]), title=row[2], status=WorkStatus(row[3]))
+                        self.works[run.work_id] = work
+        if work is None:
+            raise RuntimeError(f"Work {run.work_id} not found for supervision")
+
+        exec_env = {**os.environ, **(env or {})}
+        proc = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=exec_env,
+            cwd=cwd,
+        )
+        child_pid = proc.pid
+
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=timeout_seconds,
+            )
+            return child_pid, True
+        except asyncio.TimeoutError:
+            try:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+            except (ProcessLookupError, OSError):
+                pass
+
+            canonical = normalize_exception(TimeoutError(f"Worker process {child_pid} timed out after {timeout_seconds}s deadline"))
+
+            evidence = CompletionEvidence(
+                criterion_ref="worker_deadline",
+                evaluator_ref="supervisor",
+                evaluator_version="1.0",
+                observed_values={
+                    "error_code": canonical.code,
+                    "error_category": canonical.category.value,
+                },
+            )
+
+            failed_run = transition_run(run, RunStatus.FAILED)
+            self.runs[run_id] = failed_run
+            self._persist_run(failed_run)
+
+            failed_work = transition_work(work, WorkStatus.FAILED, evidence=evidence)
+            self.works[work.work_id] = failed_work
+            self._persist_work(failed_work, evidence=evidence)
+
+            span_path = exec_env.get("AT_TEST_OTEL_SPANS") or os.environ.get("AT_TEST_OTEL_SPANS")
+            if span_path:
+                try:
+                    from tests.support.otel_file_exporter import tracer_for
+                    tracer = tracer_for(span_path)
+                    with tracer.start_as_current_span("worker_timeout") as span:
+                        span.set_attribute("error", True)
+                        span.set_attribute("error.category", canonical.category.value)
+                        span.set_attribute("all_tomorrow.run_id", str(run_id))
+                        span.set_attribute("all_tomorrow.work_id", str(work.work_id))
+                        span.set_attribute("all_tomorrow.worker_pid", child_pid)
+                except Exception:
+                    pass
+
+            return child_pid, False
 
     async def execute_agent_step(
         self,

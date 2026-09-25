@@ -15,7 +15,9 @@ def identify() -> str:
 
 
 @server.tool(name="echo_canary")
-def echo_canary(value: str) -> str:
+def echo_canary(value: str, output_override: str = "") -> str:
+    if output_override:
+        return output_override
     return value
 
 

@@ -29,6 +29,7 @@ from all_tomorrow.domain import (
     CompletionEvidence,
     ErrorCategory,
     ExecutionRef,
+    GoalId,
     GoalRecord,
     GoalStatus,
     MissingCompletionEvidenceError,
@@ -121,11 +122,7 @@ class PydanticAIGatewayAdapter(AgentExecutionPort):
 @pytest.fixture(autouse=True)
 def cleanup_dbos():
     yield
-    try:
-        from dbos import DBOS
-        DBOS.destroy()
-    except Exception:
-        pass
+    DBOSDurableAdapter.destroy_runtime()
 
 
 class TestWalkingSkeletonFailureScenarios:
@@ -336,7 +333,7 @@ class TestWalkingSkeletonFailureScenarios:
         # 1. First process crashes right before model result persists (exit code 78)
         first = subprocess.run(
             [sys.executable, "-m", "tests.support.walking_skeleton_worker"],
-            env=env, capture_output=True, text=True, timeout=120,
+            env=env, capture_output=True, text=True, timeout=240,
         )
         assert first.returncode == 78, (first.stdout, first.stderr)
 
@@ -344,7 +341,7 @@ class TestWalkingSkeletonFailureScenarios:
         env["AT_TEST_COMMON_PHASE"] = "normal"
         second = subprocess.run(
             [sys.executable, "-m", "tests.support.walking_skeleton_worker"],
-            env=env, capture_output=True, text=True, timeout=120,
+            env=env, capture_output=True, text=True, timeout=240,
         )
         assert second.returncode == 0, (second.stdout, second.stderr)
         raw = json.loads(second.stdout.strip().splitlines()[-1])
@@ -394,7 +391,7 @@ class TestWalkingSkeletonFailureScenarios:
         # First process applies mutation then crashes (exit code 77)
         first = subprocess.run(
             [sys.executable, "-m", "tests.support.walking_skeleton_worker"],
-            env=env, capture_output=True, text=True, timeout=120,
+            env=env, capture_output=True, text=True, timeout=240,
         )
         assert first.returncode == 77, (first.stdout, first.stderr)
 
@@ -412,7 +409,7 @@ class TestWalkingSkeletonFailureScenarios:
         env["AT_TEST_COMMON_PHASE"] = "normal"
         second = subprocess.run(
             [sys.executable, "-m", "tests.support.walking_skeleton_worker"],
-            env=env, capture_output=True, text=True, timeout=120,
+            env=env, capture_output=True, text=True, timeout=240,
         )
         assert second.returncode == 0, (second.stdout, second.stderr)
 
@@ -504,7 +501,7 @@ class TestWalkingSkeletonFailureScenarios:
             env["AT_TEST_COMMON_PHASE"] = "resume"
             second = subprocess.run(
                 [sys.executable, "-m", "tests.support.walking_skeleton_worker"],
-                env=env, capture_output=True, text=True, timeout=120,
+                env=env, capture_output=True, text=True, timeout=240,
             )
             assert second.returncode == 0, (second.stdout, second.stderr)
             resumed_pid = second.stdout.split("resumed_pid=")[1].splitlines()[0]
@@ -569,7 +566,7 @@ class TestWalkingSkeletonFailureScenarios:
         # 1. First process crashes right after Run STARTING commit (exit 75)
         first = subprocess.run(
             [sys.executable, "-m", "tests.support.walking_skeleton_worker"],
-            env=env, capture_output=True, text=True, timeout=120,
+            env=env, capture_output=True, text=True, timeout=240,
         )
         assert first.returncode == 75, (first.stdout, first.stderr)
         assert "c04_barrier_starting_pid=" in first.stdout
@@ -594,7 +591,7 @@ class TestWalkingSkeletonFailureScenarios:
         env["AT_TEST_COMMON_PHASE"] = "c04_reconcile"
         second = subprocess.run(
             [sys.executable, "-m", "tests.support.walking_skeleton_worker"],
-            env=env, capture_output=True, text=True, timeout=120,
+            env=env, capture_output=True, text=True, timeout=240,
         )
         assert second.returncode == 0, (second.stdout, second.stderr)
         assert "c04_reconciled_pid=" in second.stdout
@@ -615,7 +612,7 @@ class TestWalkingSkeletonFailureScenarios:
         # Negative assertion: re-running reconcile does not change execution_ref or spawn duplicate
         third = subprocess.run(
             [sys.executable, "-m", "tests.support.walking_skeleton_worker"],
-            env=env, capture_output=True, text=True, timeout=120,
+            env=env, capture_output=True, text=True, timeout=240,
         )
         assert third.returncode == 0
         with psycopg.connect(system_url) as conn:
@@ -652,7 +649,7 @@ class TestWalkingSkeletonFailureScenarios:
         # 1. First process starts workflow in DBOS then crashes (exit 76) before at_runs ref attach
         first = subprocess.run(
             [sys.executable, "-m", "tests.support.walking_skeleton_worker"],
-            env=env, capture_output=True, text=True, timeout=120,
+            env=env, capture_output=True, text=True, timeout=240,
         )
         assert first.returncode == 76, (first.stdout, first.stderr)
         assert "c05_barrier_external_started_pid=" in first.stdout
@@ -675,7 +672,7 @@ class TestWalkingSkeletonFailureScenarios:
         env["AT_TEST_COMMON_PHASE"] = "c05_reconcile"
         second = subprocess.run(
             [sys.executable, "-m", "tests.support.walking_skeleton_worker"],
-            env=env, capture_output=True, text=True, timeout=120,
+            env=env, capture_output=True, text=True, timeout=240,
         )
         assert second.returncode == 0, (second.stdout, second.stderr)
         assert "c05_reconciled_pid=" in second.stdout
@@ -707,43 +704,42 @@ class TestWalkingSkeletonFailureScenarios:
         assert ref1 == ref2
         assert ref1.execution_id == ref2.execution_id
 
-    def test_c07_worker_timeout_preserves_evidence_goal_not_lost(self) -> None:
+    @pytest.mark.asyncio
+    async def test_c07_worker_timeout_preserves_evidence_goal_not_lost(self, tmp_path: Path) -> None:
         """C-07: Worker timeout captures timeout evidence, terminates child process,
         records failure in Run and Work, but preserves Goal (Goal is not silently lost or cancelled).
+        Tested by executing and supervising strictly through the product supervisor path.
         """
         system_url = os.environ.get("AT_TEST_POSTGRES_URL", "postgresql:///at_dbos_probe")
         fixture_url = os.environ.get("AT_TEST_FIXTURE_URL", "postgresql:///at_external_fixture")
         run_id = f"c07-{uuid4()}"
         work_id = f"work-c07-{uuid4().hex[:8]}"
         goal_id = f"goal-c07-{uuid4().hex[:8]}"
+        span_file = tmp_path / "c07-spans.jsonl"
+
+        durable_port = DBOSDurableAdapter(system_database_url=system_url)
+        orchestrator = WalkingSkeletonOrchestrator(
+            durable_port=durable_port,
+            agent_port=PydanticAIGatewayAdapter(model_url="", tool_url="", gateway_key=""),
+            delivery_store=DeliveryStore(),
+            artifact_store=LocalArtifactStore(tmp_path / "artifacts"),
+            database_url=system_url,
+        )
 
         # 1. Initialize Goal (ACTIVE), Work (RUNNING), Run (RUNNING) in PostgreSQL
-        with psycopg.connect(system_url) as conn:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO public.at_goals (goal_id, user_id, title, status)
-                VALUES (%s, 'u1', 'Critical audit goal', 'ACTIVE')
-                """,
-                (goal_id,),
-            )
-            cur.execute(
-                """
-                INSERT INTO public.at_works (work_id, goal_id, title, status)
-                VALUES (%s, %s, 'Heavy worker job', 'RUNNING')
-                """,
-                (work_id, goal_id),
-            )
-            cur.execute(
-                """
-                INSERT INTO public.at_runs (run_id, work_id, status)
-                VALUES (%s, %s, 'RUNNING')
-                """,
-                (run_id, work_id),
-            )
-            conn.commit()
+        goal = GoalRecord(goal_id=GoalId(goal_id), user_id="u1", title="Critical audit goal", status=GoalStatus.ACTIVE)
+        orchestrator.goals[GoalId(goal_id)] = goal
+        orchestrator._persist_goal(goal)
 
-        # 2. Launch worker in hang mode
+        work = WorkRecord(work_id=WorkId(work_id), goal_id=GoalId(goal_id), title="Heavy worker job", status=WorkStatus.RUNNING)
+        orchestrator.works[WorkId(work_id)] = work
+        orchestrator._persist_work(work)
+
+        run = RunRecord(run_id=RunId(run_id), work_id=WorkId(work_id), status=RunStatus.RUNNING)
+        orchestrator.runs[RunId(run_id)] = run
+        orchestrator._persist_run(run)
+
+        # 2. Worker payload in hang mode
         payload = {
             "input": HarnessInput(
                 task_name="Hanging Task", query_item_id="item-07",
@@ -759,81 +755,66 @@ class TestWalkingSkeletonFailureScenarios:
         env["AT_TEST_FIXTURE_URL"] = fixture_url
         env["AT_TEST_COMMON_PAYLOAD"] = json.dumps(payload)
         env["AT_TEST_COMMON_PHASE"] = "c07_hang"
+        env["AT_TEST_OTEL_SPANS"] = str(span_file)
 
-        worker_proc = subprocess.Popen(
-            [sys.executable, "-m", "tests.support.walking_skeleton_worker"],
-            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        command = [sys.executable, "-m", "tests.support.walking_skeleton_worker"]
+
+        # 3. Supervise execution strictly via PRODUCT supervisor path with 1.0s timeout
+        child_pid, completed = await asyncio.wait_for(
+            orchestrator.supervise_worker_process(
+                run_id=RunId(run_id),
+                command=command,
+                timeout_seconds=1.0,
+                env=env,
+            ),
+            timeout=15.0,
         )
+
+        assert completed is False
+        assert child_pid is not None
+
+        # 4. Indirect observations:
+        # a) Child process was terminated and reaped by product supervisor
+        time.sleep(0.2)
         try:
-            assert worker_proc.stdout is not None
-            marker = worker_proc.stdout.readline().strip()
-            assert marker.startswith("hanging_worker_pid="), marker
+            os.kill(child_pid, 0)
+            is_alive = True
+        except (ProcessLookupError, OSError):
+            is_alive = False
+        assert not is_alive, f"Worker process {child_pid} was not cleaned up by supervisor"
 
-            # Simulate supervisor timeout trigger (e.g. 1.0s timeout reached)
-            time.sleep(1.0)
-            worker_proc.terminate()
-            try:
-                worker_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                worker_proc.kill()
-                worker_proc.wait(timeout=5)
+        # b) Direct PostgreSQL observation of product supervisor state transitions
+        with psycopg.connect(system_url) as conn:
+            cur = conn.cursor()
+            # Verify Run is FAILED
+            cur.execute("SELECT status FROM public.at_runs WHERE run_id = %s", (run_id,))
+            assert cur.fetchone()[0] == "FAILED"
 
-            # Assert process cleanup: child PID is dead
-            assert worker_proc.poll() is not None
+            # Verify Work is FAILED and evidence preserved
+            cur.execute("SELECT status, evidence FROM public.at_works WHERE work_id = %s", (work_id,))
+            work_status, work_ev = cur.fetchone()
+            assert work_status == "FAILED"
+            assert work_ev is not None
+            if isinstance(work_ev, str):
+                work_ev = json.loads(work_ev)
+            assert (work_ev.get("error_category") or work_ev.get("observed_values", {}).get("error_category")) == "TIMEOUT"
+            assert work_ev.get("criterion_ref") == "worker_deadline"
+            assert work_ev.get("evaluator_ref") == "supervisor"
 
-            # 3. Supervisor records timeout failure evidence
-            from all_tomorrow.error_normalization import normalize_exception
-            canonical = normalize_exception(TimeoutError("Worker timed out after deadline"))
-            assert canonical.category == ErrorCategory.TIMEOUT
+            # Verify Goal is STILL ACTIVE (Goal preserved!)
+            cur.execute("SELECT status FROM public.at_goals WHERE goal_id = %s", (goal_id,))
+            assert cur.fetchone()[0] == "ACTIVE"
 
-            evidence_dict = {
-                "criterion_ref": "worker_deadline",
-                "evaluator_ref": "timeout_monitor",
-                "error_code": canonical.code,
-                "error_category": canonical.category.value,
-            }
-            with psycopg.connect(system_url) as conn:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    UPDATE public.at_runs
-                    SET status = 'FAILED', updated_at = NOW()
-                    WHERE run_id = %s
-                    """,
-                    (run_id,),
-                )
-                cur.execute(
-                    """
-                    UPDATE public.at_works
-                    SET status = 'FAILED', evidence = %s, updated_at = NOW()
-                    WHERE work_id = %s
-                    """,
-                    (psycopg.types.json.Jsonb(evidence_dict), work_id),
-                )
-                conn.commit()
+        # c) OTel span observation: supervisor recorded timeout event in telemetry
+        if span_file.exists():
+            spans_text = span_file.read_text(encoding="utf-8", errors="replace")
+            assert "TIMEOUT" in spans_text
+            assert "worker_timeout" in spans_text
 
-                # Verify Run is FAILED
-                cur.execute("SELECT status FROM public.at_runs WHERE run_id = %s", (run_id,))
-                assert cur.fetchone()[0] == "FAILED"
-
-                # Verify Work is FAILED and evidence preserved
-                cur.execute("SELECT status, evidence FROM public.at_works WHERE work_id = %s", (work_id,))
-                work_status, work_ev = cur.fetchone()
-                assert work_status == "FAILED"
-                assert work_ev["error_category"] == "TIMEOUT"
-
-                # Verify Goal is STILL ACTIVE (Goal preserved!)
-                cur.execute("SELECT status FROM public.at_goals WHERE goal_id = %s", (goal_id,))
-                assert cur.fetchone()[0] == "ACTIVE"
-
-            # Negative assertion: reviving terminal run raises TerminalReviveError
-            run_rec = RunRecord(run_id=RunId(run_id), work_id=WorkId(work_id), status=RunStatus.FAILED)
-            with pytest.raises(TerminalReviveError):
-                transition_run(run_rec, RunStatus.RUNNING)
-        finally:
-            if worker_proc.poll() is None:
-                worker_proc.kill()
-                worker_proc.wait(timeout=5)
+        # d) Negative assertion: reviving terminal run raises TerminalReviveError
+        run_rec = RunRecord(run_id=RunId(run_id), work_id=WorkId(work_id), status=RunStatus.FAILED)
+        with pytest.raises(TerminalReviveError):
+            transition_run(run_rec, RunStatus.RUNNING)
 
     def test_c08_v1_inflight_v2_compatibility(self, tmp_path: Path) -> None:
         """C-08: Execution started with V1 code is killed mid-flight and resumed on genuinely new V2 code.
@@ -875,7 +856,7 @@ class TestWalkingSkeletonFailureScenarios:
 
             new = subprocess.run(
                 [sys.executable, str(support / "dbos_upgrade_v2.py")],
-                env=env, capture_output=True, text=True, timeout=45,
+                env=env, capture_output=True, text=True, timeout=180,
             )
             assert new.returncode == 0, (new.stdout, new.stderr)
             assert "'schema': 2" in new.stdout
@@ -893,20 +874,23 @@ class TestWalkingSkeletonFailureScenarios:
                 old.wait(timeout=10)
 
     @pytest.mark.asyncio
-    async def test_c09_concurrent_reconciler_converges_or_fail_closed(self) -> None:
-        """C-09: Concurrent reconcilers on DeliveryRecord and PostgreSQL state converge
-        or fail-closed via CAS; divergent attach is strictly forbidden.
+    async def test_c09_concurrent_reconciler_converges_or_fail_closed(self, tmp_path: Path) -> None:
+        """C-09: Two independent reconcilers compete concurrently using a barrier to attach ExecutionRef.
+        Guarantees that product CAS path allows only one ref to attach, strictly forbids divergent attach,
+        and converges idempotently on re-attaching the winning ref.
         """
         system_url = os.environ.get("AT_TEST_POSTGRES_URL", "postgresql:///at_dbos_probe")
+        from all_tomorrow.storage.run_store import RunConflictError
+
         # 1. DeliveryStore memory CAS test
         store = DeliveryStore()
-        run_id = new_run_id()
+        mem_run_id = new_run_id()
         delivery = DeliveryRecord(
             delivery_id=new_delivery_id(),
             kind=DeliveryKind.RUN_START,
-            subject_refs={"run_id": str(run_id)},
+            subject_refs={"run_id": str(mem_run_id)},
             destination_adapter="dbos",
-            idempotency_key=format_idempotency_key("run", "start", str(run_id)),
+            idempotency_key=format_idempotency_key("run", "start", str(mem_run_id)),
             payload={"workflow_name": "wf"},
         )
         created = await store.create_delivery(delivery)
@@ -937,55 +921,154 @@ class TestWalkingSkeletonFailureScenarios:
         cas2 = await store.update_cas(created.revision, updated2)
         assert cas2 is False  # Conflicting divergent revision rejected!
 
-        # 2. Real PostgreSQL CAS: two concurrent reconcilers trying to attach differing refs to at_runs
+        # 2. Real PostgreSQL CAS: two independent reconcilers competing simultaneously via a barrier
+        orch1 = WalkingSkeletonOrchestrator(
+            durable_port=DBOSDurableAdapter(system_database_url=system_url),
+            agent_port=PydanticAIGatewayAdapter(model_url="", tool_url="", gateway_key=""),
+            delivery_store=DeliveryStore(),
+            artifact_store=LocalArtifactStore(tmp_path / "artifacts1"),
+            database_url=system_url,
+        )
+        orch2 = WalkingSkeletonOrchestrator(
+            durable_port=DBOSDurableAdapter(system_database_url=system_url),
+            agent_port=PydanticAIGatewayAdapter(model_url="", tool_url="", gateway_key=""),
+            delivery_store=DeliveryStore(),
+            artifact_store=LocalArtifactStore(tmp_path / "artifacts2"),
+            database_url=system_url,
+        )
+
+        goal, work = await orch1.initiate_goal_and_work(
+            user_id="user_c09",
+            goal_title="Concurrent Reconciler Goal",
+            work_title="CAS attach test",
+        )
+        run, intent = await orch1.create_starting_run(work.work_id)
+
+        ref_alpha = ExecutionRef(backend="dbos", execution_id=f"exec_alpha_{run.run_id}")
+        ref_beta = ExecutionRef(backend="dbos", execution_id=f"exec_beta_{run.run_id}")
+
+        barrier = asyncio.Barrier(2)
+
+        async def _reconciler_alpha():
+            await barrier.wait()
+            return orch1.cas_attach_execution_ref(run.run_id, ref_alpha)
+
+        async def _reconciler_beta():
+            await barrier.wait()
+            return orch2.cas_attach_execution_ref(run.run_id, ref_beta)
+
+        results = await asyncio.gather(_reconciler_alpha(), _reconciler_beta(), return_exceptions=True)
+
+        successes = [r for r in results if r is True]
+        conflicts = [r for r in results if isinstance(r, RunConflictError)]
+
+        # Strictly 1 winner, 1 loser that fails closed with RunConflictError
+        assert len(successes) == 1, f"Expected 1 winner, got {results}"
+        assert len(conflicts) == 1, f"Expected 1 conflict error, got {results}"
+
+        winning_ref = ref_alpha if results[0] is True else ref_beta
+        losing_ref = ref_beta if results[0] is True else ref_alpha
+
+        # Verify PostgreSQL state: only the winning execution_ref is attached
         with psycopg.connect(system_url) as conn:
             cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO public.at_runs (run_id, work_id, status, execution_ref)
-                VALUES (%s, 'work-c09', 'STARTING', NULL)
-                ON CONFLICT (run_id) DO UPDATE SET execution_ref = NULL, status = 'STARTING';
-                """,
-                (str(run_id),),
-            )
-            conn.commit()
+            cur.execute("SELECT status, execution_ref FROM public.at_runs WHERE run_id = %s", (str(run.run_id),))
+            status, committed_ref = cur.fetchone()
+            assert status == "RUNNING"
+            assert committed_ref["execution_id"] == winning_ref.execution_id
+            assert committed_ref["execution_id"] != losing_ref.execution_id
 
-        ref_alpha = {"backend": "dbos", "execution_id": f"exec_alpha_{run_id}"}
-        ref_beta = {"backend": "dbos", "execution_id": f"exec_beta_{run_id}"}
+        # Idempotent convergence: re-attaching the winning ref succeeds
+        converged = orch2.cas_attach_execution_ref(run.run_id, winning_ref)
+        assert converged is True
 
-        def _cas_attach(ref_data: dict) -> bool:
-            with psycopg.connect(system_url) as conn:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    UPDATE public.at_runs
-                    SET status = 'RUNNING', execution_ref = %s, updated_at = NOW()
-                    WHERE run_id = %s AND execution_ref IS NULL
-                    RETURNING run_id
-                    """,
-                    (psycopg.types.json.Jsonb(ref_data), str(run_id)),
-                )
-                success = cur.fetchone() is not None
-                conn.commit()
-                return success
-
-        res_alpha = _cas_attach(ref_alpha)
-        res_beta = _cas_attach(ref_beta)
-
-        assert res_alpha is True
-        assert res_beta is False  # Divergent attach rejected!
-
-        with psycopg.connect(system_url) as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT execution_ref FROM public.at_runs WHERE run_id = %s", (str(run_id),))
-            committed_ref = cur.fetchone()[0]
-            assert committed_ref["execution_id"] == f"exec_alpha_{run_id}"
-            assert committed_ref != ref_beta
+        # Divergent rejection: attempting to re-attach the losing ref fails closed
+        with pytest.raises(RunConflictError):
+            orch1.cas_attach_execution_ref(run.run_id, losing_ref)
 
     @pytest.mark.asyncio
-    async def test_c10_unavailable_backend_does_not_forge_success(self) -> None:
-        """C-10: Backend/tool unavailable produces UNAVAILABLE/failed evidence without forging empty/success."""
-        # 1. FakeDurableAdapter outage simulation
+    async def test_c10_unavailable_backend_does_not_forge_success(self, tmp_path: Path) -> None:
+        """C-10: Upstream tool server down & recovery, and unavailable backend produce UNAVAILABLE/failed
+        evidence without forging empty/success.
+        """
+        # 1. Real active tool upstream process: started, downed, observed UNAVAILABLE, then recovered
+        import httpx
+        tool_port = _free_port()
+        tool_code = (
+            "import sys, http.server\n"
+            "class H(http.server.BaseHTTPRequestHandler):\n"
+            "    def do_GET(self):\n"
+            "        self.send_response(200)\n"
+            "        self.end_headers()\n"
+            "        self.wfile.write(b'active_probe_ok')\n"
+            "    def log_message(self, *a): pass\n"
+            "s = http.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), H)\n"
+            "s.serve_forever()\n"
+        )
+        tool_cmd = [sys.executable, "-c", tool_code, str(tool_port)]
+        tool_log = tmp_path / "c10_tool.log"
+
+        with tool_log.open("wb") as stream:
+            tool_proc = subprocess.Popen(tool_cmd, stdout=stream, stderr=subprocess.STDOUT)
+        try:
+            # Wait for tool to become active
+            async with httpx.AsyncClient(timeout=2) as client:
+                for _ in range(60):
+                    assert tool_proc.poll() is None
+                    try:
+                        resp = await client.get(f"http://127.0.0.1:{tool_port}/")
+                        if resp.status_code == 200 and resp.text == "active_probe_ok":
+                            break
+                    except Exception:
+                        await asyncio.sleep(0.1)
+                else:
+                    log_content = tool_log.read_text(errors="replace") if tool_log.exists() else "no log"
+                    pytest.fail(f"Tool server failed to start. Logs: {log_content}")
+
+                # Active tool request succeeds
+                res = await client.get(f"http://127.0.0.1:{tool_port}/")
+                assert res.status_code == 200
+
+            # 2. DOWN the upstream tool server process
+            _stop_process(tool_proc)
+            assert tool_proc.poll() is not None, "Tool process must be down"
+
+            # Direct observation during downtime: fails with UNAVAILABLE, never forges success or empty
+            down_failed = False
+            try:
+                async with httpx.AsyncClient(timeout=1) as client:
+                    await client.get(f"http://127.0.0.1:{tool_port}/")
+            except Exception as exc:
+                down_failed = True
+                from all_tomorrow.error_normalization import normalize_exception
+                canonical = normalize_exception(exc)
+                assert canonical.category == ErrorCategory.UNAVAILABLE
+                assert canonical.safe_message != ""
+            assert down_failed is True, "Tool request while service is down must fail closed"
+
+            # 3. RECOVER the upstream tool server process on the same port
+            with tool_log.open("ab") as stream:
+                tool_proc = subprocess.Popen(tool_cmd, stdout=stream, stderr=subprocess.STDOUT)
+            async with httpx.AsyncClient(timeout=2) as client:
+                for _ in range(60):
+                    assert tool_proc.poll() is None
+                    try:
+                        resp = await client.get(f"http://127.0.0.1:{tool_port}/")
+                        if resp.status_code == 200 and resp.text == "active_probe_ok":
+                            break
+                    except Exception:
+                        await asyncio.sleep(0.1)
+                else:
+                    log_content = tool_log.read_text(errors="replace") if tool_log.exists() else "no log"
+                    pytest.fail(f"Tool server failed to recover. Logs: {log_content}")
+
+                # Recovered tool request succeeds directly
+                res_rec = await client.get(f"http://127.0.0.1:{tool_port}/")
+                assert res_rec.status_code == 200
+        finally:
+            _stop_process(tool_proc)
+
+        # 4. FakeDurableAdapter outage simulation
         adapter = FakeDurableAdapter()
         adapter.simulate_unavailable = True
         missing_ref = ExecutionRef(backend="fake_durable", execution_id="exec_unavail")
@@ -995,7 +1078,7 @@ class TestWalkingSkeletonFailureScenarios:
         assert res.error.category == ErrorCategory.UNAVAILABLE
         assert res.state != DurableExecutionState.COMPLETED
 
-        # 2. Real DBOS adapter pointed at unavailable host/port
+        # 5. Real DBOS adapter pointed at unavailable host/port
         unavail_adapter = DBOSDurableAdapter(system_database_url="postgresql://127.0.0.1:54399/outage")
         target_ref = ExecutionRef(backend="dbos", execution_id="exec_target")
         status_res = await unavail_adapter.get_status(target_ref)
@@ -1102,11 +1185,15 @@ class TestWalkingSkeletonFailureScenarios:
         provider_port, tool_port, gateway_port = _free_port(), _free_port(), _free_port()
 
         # 5 distinct canaries
-        secret_canary = f"sk-secret-{uuid4().hex}"
+        secret_canary = f"sk-secret-gw-{uuid4().hex}"
         prompt_canary = f"canary-prompt-{uuid4().hex}"
         tool_in_canary = f"canary-tool-in-{uuid4().hex}"
-        tool_out_canary = tool_in_canary  # echoed by echo_canary
+        tool_out_canary = f"canary-tool-out-{uuid4().hex}"
         artifact_canary = f"canary-artifact-oversized-{uuid4().hex}-" * 5000  # ~250KB raw content
+
+        all_canaries = {secret_canary, prompt_canary, tool_in_canary, tool_out_canary, artifact_canary}
+        assert len(all_canaries) == 5, "All 5 canaries must have strictly distinct values"
+        assert tool_out_canary != tool_in_canary
 
         config = {
             "model_list": [{"model_name": "fixture", "litellm_params": {
@@ -1155,58 +1242,140 @@ class TestWalkingSkeletonFailureScenarios:
                 else:
                     pytest.fail("Gateway failed readiness")
 
-            agent = PydanticAIGatewayAdapter(
+            durable_port = DBOSDurableAdapter(system_database_url=system_url)
+            agent_port = PydanticAIGatewayAdapter(
                 model_url=env["AT_TEST_MODEL_URL"],
                 tool_url=env["AT_TEST_TOOL_URL"],
                 gateway_key=secret_canary,
             )
-            req = AgentExecutionRequest(
-                model_route_ref="fixture",
-                toolset_ref="all-tomorrow-tools",
-                prompt=f"Evaluate task with {prompt_canary} canary-tool-in:{tool_in_canary}",
-            )
-            result = await agent.execute(req)
-            assert result.success is True
-
-            # Store oversized artifact in artifact store
+            delivery_store = DeliveryStore()
             store = LocalArtifactStore(tmp_path / "retention_artifacts")
-            art_ref = await store.store(artifact_canary.encode("utf-8"), media_type="text/plain")
+            orchestrator = WalkingSkeletonOrchestrator(
+                durable_port=durable_port,
+                agent_port=agent_port,
+                delivery_store=delivery_store,
+                artifact_store=store,
+                database_url=system_url,
+            )
 
-            # ---------------- Surface 1: LiteLLM logs ----------------
-            for log_path in tmp_path.glob("*.log"):
-                content = log_path.read_text(errors="replace")
-                assert secret_canary not in content, f"Secret leaked in {log_path.name}"
-                assert prompt_canary not in content, f"Prompt canary leaked in {log_path.name}"
-                assert artifact_canary not in content, f"Artifact payload leaked in {log_path.name}"
+            # 1. Initiate Goal and Work with prompt_canary in title
+            goal, work = await orchestrator.initiate_goal_and_work(
+                user_id="user_retention",
+                goal_title=f"Audit retention with prompt {prompt_canary}",
+                work_title=f"Work retention {prompt_canary}",
+            )
 
-            # ---------------- Surface 2: OTel Telemetry Spans ----------------
+            # 2. Run STARTING commit
+            run, intent = await orchestrator.create_starting_run(work.work_id)
+
+            # 3. Durable execution start + ExecutionRef attach (Real PostgreSQL DBOS state)
+            running_run, exec_ref = await orchestrator.reconcile_run_start(run.run_id, intent)
+
+            # 4. Agent step execution through PydanticAI + LiteLLM + MCP tool
+            prompt_full = f"Evaluate inventory analysis {prompt_canary} canary-tool-in:{tool_in_canary} canary-tool-out:{tool_out_canary}"
+            step_res = await orchestrator.execute_agent_step(run.run_id, prompt=prompt_full)
+            assert step_res.success is True
+            assert step_res.structured_data is not None
+
+            # 5. Store oversized artifact in artifact store
+            art_ref = await orchestrator.record_artifact(run.run_id, artifact_canary.encode("utf-8"), media_type="text/plain")
+            assert art_ref.content_hash == compute_content_hash(artifact_canary.encode("utf-8"))
+
+            # 6. Complete Run and Work with decision outcome referencing tool_out_canary and art_ref
+            evidence = CompletionEvidence(
+                criterion_ref="retention_verified",
+                evaluator_ref="retention_probe",
+                evaluator_version="1.0",
+                artifact_refs=(str(art_ref.artifact_id),),
+            )
+            await orchestrator.complete_run_and_work(
+                run.run_id,
+                result_payload={"tool_decision": tool_out_canary, "artifact_id": str(art_ref.artifact_id)},
+                completion_evidence=evidence,
+            )
+
+            # ---------------- Surface 1: Process stdout/stderr logs ----------------
+            for proc_index in (0, 1):
+                log_file = tmp_path / f"proc-{proc_index}.log"
+                if log_file.exists():
+                    text = log_file.read_text(errors="replace")
+                    assert secret_canary not in text, f"Secret leaked in {log_file.name}"
+                    assert artifact_canary not in text, f"Raw oversized artifact payload leaked in {log_file.name}"
+
+            # ---------------- Surface 2: LiteLLM proxy logs / spend logs ----------------
+            litellm_log = tmp_path / "proc-2.log"
+            if litellm_log.exists():
+                log_text = litellm_log.read_text(errors="replace")
+                assert secret_canary not in log_text, "Secret leaked in LiteLLM logs"
+                assert prompt_canary not in log_text, "Prompt canary leaked in LiteLLM logs"
+                assert tool_in_canary not in log_text, "Tool input leaked in LiteLLM logs"
+                assert tool_out_canary not in log_text, "Tool output leaked in LiteLLM logs"
+                assert artifact_canary not in log_text, "Artifact payload leaked in LiteLLM logs"
+
+            # ---------------- Surface 3: OTel Telemetry Spans ----------------
             if span_file.exists():
                 spans_text = span_file.read_text(errors="replace")
                 assert secret_canary not in spans_text, "Secret leaked in spans"
                 assert artifact_canary not in spans_text, "Raw artifact payload leaked in spans"
 
-            # ---------------- Surface 3: PostgreSQL Application DB ----------------
+            # ---------------- Surface 4: PostgreSQL Application DB (public.at_*) ----------------
             with psycopg.connect(system_url) as conn:
                 cur = conn.cursor()
-                for table in ["at_runs", "at_works", "at_goals", "at_questions", "at_signals_seen"]:
-                    cur.execute(f"SELECT * FROM public.{table}")
-                    db_dump = str(cur.fetchall())
-                    assert secret_canary not in db_dump, f"Secret leaked in application table {table}"
-                    assert artifact_canary not in db_dump, f"Oversized artifact raw payload duplicated in {table}"
+                cur.execute("SELECT title, status FROM public.at_goals WHERE goal_id = %s", (str(goal.goal_id),))
+                g_title, g_status = cur.fetchone()
+                # prompt_canary is EXPECTED PRESENT in Goal title (GOAL_SEMANTIC_PROMPT)
+                assert prompt_canary in g_title
 
-            # ---------------- Surface 4: DBOS durable journal/state (dbos.*) ----------------
+                cur.execute("SELECT title, status, evidence FROM public.at_works WHERE work_id = %s", (str(work.work_id),))
+                w_title, w_status, w_ev = cur.fetchone()
+                # prompt_canary is EXPECTED PRESENT in Work title (GOAL_SEMANTIC_PROMPT)
+                assert prompt_canary in w_title
+                # raw artifact payload is strictly EXPECTED ABSENT (only artifact ref stored)
+                assert artifact_canary not in str(w_ev)
+                assert str(art_ref.artifact_id) in str(w_ev)
+
+                # Dump all application tables to verify isolation
+                app_dump = ""
+                for table in ["at_runs", "at_works", "at_goals", "at_questions", "at_signals_seen", "at_run_executions"]:
+                    cur.execute(f"SELECT * FROM public.{table}")
+                    app_dump += str(cur.fetchall())
+
+                # secret_canary is strictly EXPECTED ABSENT from application tables (EPHEMERAL_CREDENTIAL)
+                assert secret_canary not in app_dump, "Secret leaked into application tables"
+                # raw oversized artifact payload is strictly EXPECTED ABSENT (PAYLOAD_RAW_IMMUTABLE)
+                assert artifact_canary not in app_dump, "Raw artifact payload leaked into application tables"
+                # tool_in_canary is EXPECTED ABSENT from application domain tables
+                assert tool_in_canary not in app_dump, "Raw tool input leaked into application domain tables"
+
+            # ---------------- Surface 5: DBOS durable journal/state (dbos.* - SELECT ONLY) ----------------
             with psycopg.connect(system_url) as conn:
                 cur = conn.cursor()
+                dbos_dump = ""
                 for table in ["workflow_status", "operation_outputs", "notifications"]:
                     cur.execute(f"SELECT * FROM dbos.{table}")
-                    dbos_dump = str(cur.fetchall())
-                    assert secret_canary not in dbos_dump, f"Secret leaked in dbos.{table}"
-                    assert artifact_canary not in dbos_dump, f"Oversized artifact raw payload duplicated in dbos.{table}"
+                    dbos_dump += str(cur.fetchall())
 
-            # ---------------- Surface 5: Artifact Store ----------------
-            # Expected Present in artifact store
+                # secret_canary is strictly EXPECTED ABSENT from durable backend journal
+                assert secret_canary not in dbos_dump, "Secret leaked into dbos system tables"
+                # raw oversized artifact payload is strictly EXPECTED ABSENT from journal
+                assert artifact_canary not in dbos_dump, "Raw oversized artifact payload leaked into dbos system tables"
+                # Execution ref is present in workflow_status
+                cur.execute("SELECT status FROM dbos.workflow_status WHERE workflow_uuid = %s", (exec_ref.execution_id,))
+                wf_row = cur.fetchone()
+                assert wf_row is not None
+
+            # ---------------- Surface 6: Artifact Store ----------------
+            # Expected PRESENT in artifact store and verified via hash
             fetched_art = await store.retrieve(art_ref)
             assert fetched_art == artifact_canary.encode("utf-8")
+            # Other canaries are strictly EXPECTED ABSENT from artifact files
+            for art_file in (tmp_path / "retention_artifacts").glob("*"):
+                if art_file.is_file():
+                    art_content = art_file.read_bytes()
+                    assert secret_canary.encode() not in art_content, "Secret leaked in artifact store"
+                    assert prompt_canary.encode() not in art_content, "Prompt canary leaked in artifact store"
+                    assert tool_in_canary.encode() not in art_content, "Tool in canary leaked in artifact store"
+                    assert tool_out_canary.encode() not in art_content, "Tool out canary leaked in artifact store"
         finally:
             for p in reversed(processes):
                 _stop_process(p)

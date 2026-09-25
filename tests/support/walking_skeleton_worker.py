@@ -108,6 +108,42 @@ def run(payload: dict) -> dict:
 
 def main() -> None:
     payload = json.loads(os.environ["AT_TEST_COMMON_PAYLOAD"])
+    phase = os.environ.get("AT_TEST_COMMON_PHASE", "normal")
+    identity = ExecutionIdentity.model_validate(payload["identity"])
+
+    if phase == "c07_hang":
+        print(f"hanging_worker_pid={os.getpid()}", flush=True)
+        while True:
+            time.sleep(1)
+
+    if phase == "c04_crash":
+        with psycopg.connect(os.environ["AT_TEST_POSTGRES_URL"]) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS public.at_runs (
+                        run_id TEXT PRIMARY KEY,
+                        work_id TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        execution_ref JSONB,
+                        attempt_number INT NOT NULL DEFAULT 1,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    INSERT INTO public.at_runs (run_id, work_id, status, execution_ref, attempt_number)
+                    VALUES (%s, %s, 'STARTING', NULL, 1)
+                    ON CONFLICT (run_id) DO UPDATE SET status = 'STARTING'
+                    """,
+                    (identity.run_id, identity.work_id),
+                )
+            conn.commit()
+        print(f"c04_barrier_starting_pid={os.getpid()}", flush=True)
+        os._exit(75)
+
     DBOS(config={
         "name": "all-tomorrow-walking-skeleton-worker",
         "system_database_url": os.environ["AT_TEST_POSTGRES_URL"],
@@ -115,9 +151,7 @@ def main() -> None:
     })
     try:
         DBOS.launch()
-        identity = ExecutionIdentity.model_validate(payload["identity"])
         workflow_id = f"{identity.work_id}:{identity.run_id}"
-        phase = os.environ.get("AT_TEST_COMMON_PHASE", "normal")
 
         if phase == "wait":
             with SetWorkflowID(workflow_id):
@@ -146,34 +180,6 @@ def main() -> None:
             print(f"resumed_pid={os.getpid()}", flush=True)
             write_output(output)
             return
-
-        if phase == "c04_crash":
-            with psycopg.connect(os.environ["AT_TEST_POSTGRES_URL"]) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS public.at_runs (
-                            run_id TEXT PRIMARY KEY,
-                            work_id TEXT NOT NULL,
-                            status TEXT NOT NULL,
-                            execution_ref JSONB,
-                            attempt_number INT NOT NULL DEFAULT 1,
-                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                        )
-                        """
-                    )
-                    cur.execute(
-                        """
-                        INSERT INTO public.at_runs (run_id, work_id, status, execution_ref, attempt_number)
-                        VALUES (%s, %s, 'STARTING', NULL, 1)
-                        ON CONFLICT (run_id) DO UPDATE SET status = 'STARTING'
-                        """,
-                        (identity.run_id, identity.work_id),
-                    )
-                conn.commit()
-            print(f"c04_barrier_starting_pid={os.getpid()}", flush=True)
-            os._exit(75)
 
         if phase == "c04_reconcile":
             from all_tomorrow.adapters.dbos_adapter import DBOSDurableAdapter
@@ -278,11 +284,6 @@ def main() -> None:
                 conn.commit()
             print(f"c05_reconciled_pid={os.getpid()} execution_id={ref.execution_id if ref else None}", flush=True)
             return
-
-        if phase == "c07_hang":
-            print(f"hanging_worker_pid={os.getpid()}", flush=True)
-            while True:
-                time.sleep(1)
 
         with SetWorkflowID(workflow_id):
             output = run(payload)
