@@ -13,7 +13,7 @@
 
 ## 지금 바로 작업 가능한 것
 
-Stage 0만 진행한다. 00A(기반 선택), 00B(소유권 및 어댑터 계약), 00C(Failure Walking Skeleton)를 완료했다. C07 제품 supervisor timeout/evidence 경로, C09 동시 reconciler CAS 경쟁, C10 장애/복구 직접 검증, 5-canary/6-surface retention isolation, DBOS public SDK API 경계 정리를 포함한 00C 후속 보완 및 검증을 완료했다. 현재 00D(Observability / Eval / CI Seam)를 시작할 수 있다.
+Stage 0만 진행한다. 00A(기반 선택), 00B(소유권 및 어댑터 계약), 00C(Failure Walking Skeleton)를 완료했다. C07 제품 supervisor timeout/evidence 경로, C09 독립 reconciler ThreadPool/DB barrier 기반 PostgreSQL CAS 실제 경합 및 관측 검증, C10 장애/복구 직접 검증, 5-canary/6-surface retention isolation, DBOS public SDK API 경계 정리를 포함한 00C 후속 보완 및 검증을 완료했다. 현재 00D(Observability / Eval / CI Seam)를 시작할 수 있다.
 
 - OSS substrate spike
 - All Tomorrow와 외부 엔진의 ownership boundary 확정

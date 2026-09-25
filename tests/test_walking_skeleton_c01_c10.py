@@ -6,8 +6,11 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import psycopg
@@ -947,27 +950,116 @@ class TestWalkingSkeletonFailureScenarios:
         ref_alpha = ExecutionRef(backend="dbos", execution_id=f"exec_alpha_{run.run_id}")
         ref_beta = ExecutionRef(backend="dbos", execution_id=f"exec_beta_{run.run_id}")
 
-        barrier = asyncio.Barrier(2)
+        # Setup DB-level barrier trigger in PostgreSQL:
+        # Whichever worker arrives at the row in PostgreSQL first will acquire the row lock,
+        # then fire the BEFORE UPDATE trigger and block on a transaction advisory lock held by the test controller.
+        # The competing worker arriving at the same row will attempt to UPDATE and block in PostgreSQL
+        # on the row-level lock (Lock/transactionid or Lock/tuple) held by the first worker.
+        advisory_key = abs(hash(str(run.run_id))) % 2147483647
+        clean_run_id = str(run.run_id).replace("-", "_")
+        barrier_func = f"test_c09_barrier_{clean_run_id}"
+        barrier_trg = f"trg_c09_{clean_run_id}"
 
-        async def _reconciler_alpha():
-            await barrier.wait()
-            return orch1.cas_attach_execution_ref(run.run_id, ref_alpha)
+        with psycopg.connect(system_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    CREATE OR REPLACE FUNCTION {barrier_func}() RETURNS TRIGGER AS $$
+                    BEGIN
+                        IF NEW.run_id = '{run.run_id}' THEN
+                            PERFORM pg_advisory_xact_lock({advisory_key});
+                        END IF;
+                        RETURN NEW;
+                    END;
+                    $$ LANGUAGE plpgsql;
 
-        async def _reconciler_beta():
-            await barrier.wait()
-            return orch2.cas_attach_execution_ref(run.run_id, ref_beta)
+                    DROP TRIGGER IF EXISTS {barrier_trg} ON public.at_runs;
+                    CREATE TRIGGER {barrier_trg}
+                    BEFORE UPDATE ON public.at_runs
+                    FOR EACH ROW EXECUTE FUNCTION {barrier_func}();
+                """)
+                conn.commit()
 
-        results = await asyncio.gather(_reconciler_alpha(), _reconciler_beta(), return_exceptions=True)
+        lock_conn = psycopg.connect(system_url)
+        lock_cur = lock_conn.cursor()
+        lock_cur.execute(f"SELECT pg_advisory_lock({advisory_key})")
 
-        successes = [r for r in results if r is True]
-        conflicts = [r for r in results if isinstance(r, RunConflictError)]
+        start_barrier = threading.Barrier(2)
+
+        def _reconciler_worker(orch: WalkingSkeletonOrchestrator, ref: ExecutionRef, label: str):
+            start_barrier.wait()
+            t_start = time.perf_counter()
+            try:
+                res = orch.cas_attach_execution_ref(run.run_id, ref)
+                t_end = time.perf_counter()
+                return (label, res, None, t_start, t_end)
+            except Exception as exc:
+                t_end = time.perf_counter()
+                return (label, None, exc, t_start, t_end)
+
+        contention_observed: dict[str, Any] = {}
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                fut1 = executor.submit(_reconciler_worker, orch1, ref_alpha, "alpha")
+                fut2 = executor.submit(_reconciler_worker, orch2, ref_beta, "beta")
+
+                # Directly probe PostgreSQL lock manager (pg_stat_activity) to verify actual DB contention:
+                # One worker holding the row lock and waiting on the advisory barrier;
+                # The other worker actively blocked on the row/transaction lock waiting for the first worker!
+                with psycopg.connect(system_url) as probe_conn:
+                    with probe_conn.cursor() as probe_cur:
+                        for _ in range(100):
+                            probe_cur.execute("""
+                                SELECT pid, wait_event_type, wait_event, state, query
+                                FROM pg_stat_activity
+                                WHERE query LIKE '%UPDATE public.at_runs%'
+                                  AND pid != pg_backend_pid()
+                            """)
+                            rows = probe_cur.fetchall()
+                            tuple_waits = [r for r in rows if r[1] == "Lock" and r[2] in ("tuple", "transactionid")]
+                            advisory_waits = [r for r in rows if r[1] == "Lock" and r[2] == "advisory"]
+                            if tuple_waits and advisory_waits:
+                                contention_observed["tuple_wait"] = tuple_waits[0]
+                                contention_observed["advisory_wait"] = advisory_waits[0]
+                                break
+                            time.sleep(0.01)
+
+                # Release advisory lock so the winner can commit and the contender can unblock
+                lock_cur.execute(f"SELECT pg_advisory_unlock({advisory_key})")
+                lock_conn.close()
+
+                res1 = fut1.result(timeout=10)
+                res2 = fut2.result(timeout=10)
+        finally:
+            try:
+                lock_conn.close()
+            except Exception:
+                pass
+            with psycopg.connect(system_url) as cleanup_conn:
+                with cleanup_conn.cursor() as cleanup_cur:
+                    cleanup_cur.execute(f"DROP TRIGGER IF EXISTS {barrier_trg} ON public.at_runs;")
+                    cleanup_cur.execute(f"DROP FUNCTION IF EXISTS {barrier_func}();")
+                    cleanup_conn.commit()
+
+        # Direct observable evidence of DB contention:
+        # Proves beyond start concurrency that actual DB-level row lock contention occurred in PostgreSQL!
+        assert contention_observed, (
+            "Actual PostgreSQL row lock contention was NOT observed: "
+            "competing reconciler was not blocked on tuple/transaction lock during CAS update"
+        )
+
+        results = [res1, res2]
+        successes = [r for r in results if r[1] is True]
+        conflicts = [r for r in results if isinstance(r[2], RunConflictError)]
 
         # Strictly 1 winner, 1 loser that fails closed with RunConflictError
         assert len(successes) == 1, f"Expected 1 winner, got {results}"
         assert len(conflicts) == 1, f"Expected 1 conflict error, got {results}"
 
-        winning_ref = ref_alpha if results[0] is True else ref_beta
-        losing_ref = ref_beta if results[0] is True else ref_alpha
+        winning_label = successes[0][0]
+        winning_ref = ref_alpha if winning_label == "alpha" else ref_beta
+        losing_ref = ref_beta if winning_label == "alpha" else ref_alpha
+        winning_orch = orch1 if winning_label == "alpha" else orch2
+        losing_orch = orch2 if winning_label == "alpha" else orch1
 
         # Verify PostgreSQL state: only the winning execution_ref is attached
         with psycopg.connect(system_url) as conn:
@@ -979,12 +1071,12 @@ class TestWalkingSkeletonFailureScenarios:
             assert committed_ref["execution_id"] != losing_ref.execution_id
 
         # Idempotent convergence: re-attaching the winning ref succeeds
-        converged = orch2.cas_attach_execution_ref(run.run_id, winning_ref)
+        converged = losing_orch.cas_attach_execution_ref(run.run_id, winning_ref)
         assert converged is True
 
         # Divergent rejection: attempting to re-attach the losing ref fails closed
         with pytest.raises(RunConflictError):
-            orch1.cas_attach_execution_ref(run.run_id, losing_ref)
+            winning_orch.cas_attach_execution_ref(run.run_id, losing_ref)
 
     @pytest.mark.asyncio
     async def test_c10_unavailable_backend_does_not_forge_success(self, tmp_path: Path) -> None:

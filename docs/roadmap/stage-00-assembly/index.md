@@ -58,7 +58,7 @@ production durable engine은 하나만 채택한다.
 
 ## 지금 시작할 작업
 
-**00A, 00B, 00C 완료.** 00C Failure Walking Skeleton(C-01~C-10, real OS crash/restart, durable DBOS PostgreSQL backend, LiteLLM E2E, data retention canary isolation 5-canary/6-surface, C-07 제품 경로 supervisor timeout/evidence, C-09 독립 reconciler barrier CAS 경쟁, C-10 다운/복구 직접 검증 및 상태 정직화, DBOS SDK public API 정리, artifact probe)이 100% 통과하여 00D Observability / Eval / CI Seam을 시작할 수 있다. Stage 0 전체는 계속 개발중이며 Stage 1은 대기한다.
+**00A, 00B, 00C 완료.** 00C Failure Walking Skeleton(C-01~C-10, real OS crash/restart, durable DBOS PostgreSQL backend, LiteLLM E2E, data retention canary isolation 5-canary/6-surface, C-07 제품 경로 supervisor timeout/evidence, C-09 독립 reconciler ThreadPool/DB barrier 기반 PostgreSQL CAS 실제 경합 및 관측 검증, C-10 다운/복구 직접 검증 및 상태 정직화, DBOS SDK public API 정리, artifact probe)이 100% 통과하여 00D Observability / Eval / CI Seam을 시작할 수 있다. Stage 0 전체는 계속 개발중이며 Stage 1은 대기한다.
 
 00A-1이 끝나기 전에 DBOS/Restate implementation convenience에 맞춰 harness나 domain semantics를 바꾸지 않는다.
 
