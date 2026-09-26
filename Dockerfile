@@ -13,6 +13,7 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src
 COPY migrations ./migrations
+COPY edge ./edge
 RUN pip install .
 
 # Non-root runtime user.

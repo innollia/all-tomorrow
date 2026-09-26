@@ -6,6 +6,30 @@ IaC/service config; the actual live apply/reboot/restore is an operator action
 (it incurs ongoing cost and is gated on explicit approval).
 
 `mutable latest` is forbidden — every image is pinned by digest
+
+## Deployed image record (ap-northeast-2, account 761558630442)
+
+Built and pushed 2026-09-27; digests pinned in `deploy/docker-compose.yaml`:
+
+| service | image@digest |
+|---|---|
+| all-tomorrow-app | `761558630442.dkr.ecr.ap-northeast-2.amazonaws.com/all-tomorrow:0.1.0@sha256:f46cced5cfb3ce6ba436a3e9c7f3672452b6edb110a30d2fd690149f24fca58f` |
+| postgres | `postgres:16.4@sha256:e62fbf9d3e2b49816a32c400ed2dba83e3b361e6833e624024309c35d334b412` |
+| litellm-proxy | `ghcr.io/berriai/litellm:main-stable@sha256:87f34979b9f8cb274fac90ca8a4fdda07d8480de22755562a26adeb95ce20d02` |
+
+Build/push commands (reproducible):
+
+```
+docker build -t all-tomorrow:0.1.0 .
+aws ecr get-login-password --region ap-northeast-2 | docker login --username AWS --password-stdin 761558630442.dkr.ecr.ap-northeast-2.amazonaws.com
+docker tag all-tomorrow:0.1.0 761558630442.dkr.ecr.ap-northeast-2.amazonaws.com/all-tomorrow:0.1.0
+docker push 761558630442.dkr.ecr.ap-northeast-2.amazonaws.com/all-tomorrow:0.1.0
+```
+
+Image smoke test before push: container boots, `/healthz` → 200 (auth env required; fail-closed without it).
+
+Rollback: re-pin the previous `@sha256:` digest for `all-tomorrow-app` in `deploy/docker-compose.yaml` and `docker compose up -d` — image immutability guarantees the prior artifact is byte-identical.
+
 (`tests/test_aws_runtime.py` enforces it against `deploy/docker-compose.yaml`).
 
 ## Deployment contract (per service)
