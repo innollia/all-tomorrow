@@ -86,7 +86,7 @@ Redis와 pgvector는 이 phase의 필수 조건이 아니다.
 우선순위:
 
 1. Eve read-only/status adapter using existing MCP
-2. DiscordService-compatible read adapter
+2. DiscordService-compatible read adapter — **완료** (`DiscordReadAdapter` + `StdioMcpClient`, [문서](discord-read-adapter.md))
 3. 기존 Antigravity Manager bridge adapter — **완료** (AntigravityWorker + OpenCodeWorker)
 
 각 adapter는 source owner, timeout, idempotency, error mapping, trace propagation을 명시한다.

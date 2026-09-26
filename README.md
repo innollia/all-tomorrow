@@ -31,5 +31,7 @@ Phase 0 조사와 설계만 수행했다. production runtime은 아직 구현하
 - [기존 시스템 inventory](docs/inventory.md)
 - [아키텍처](docs/architecture.md)
 - [단계별 구현 계획](docs/roadmap.md)
-- [초기 결정 기록](docs/decisions/0001-control-plane-boundary.md)
+- [결정 기록](docs/decisions/0001-control-plane-boundary.md), [Discord read 경계](docs/decisions/0002-discord-read-via-existing-mcp.md)
+- [worker adapter](docs/worker-adapters.md)
+- [Discord read adapter](docs/discord-read-adapter.md)
 
