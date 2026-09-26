@@ -12,3 +12,5 @@ dist/
 coverage/
 *.log
 .artifacts/
+scratch_*.py
+task_checklist.md
