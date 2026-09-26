@@ -486,6 +486,167 @@ class OpenCodeWorker:
         )
 
 
+def _allowlisted_env(base_env: dict[str, str], allowlist: frozenset[str]) -> dict[str, str]:
+    """Build a minimal environment for an untrusted repo process.
+
+    Only PATH plus explicitly allow-listed names pass through; anything that looks
+    like a secret (KEY/TOKEN/SECRET/PASSWORD) is never forwarded, so a repo build
+    step cannot read a process-wide provider credential (04B authentication).
+    """
+    safe: dict[str, str] = {}
+    for name in ("PATH", "PATHEXT", "SYSTEMROOT", "TEMP", "TMP", "HOME", "USERPROFILE"):
+        if name in os.environ:
+            safe[name] = os.environ[name]
+    for name in allowlist:
+        up = name.upper()
+        if any(s in up for s in ("KEY", "TOKEN", "SECRET", "PASSWORD")):
+            continue  # never forward a credential-looking var, even if allow-listed
+        if name in os.environ:
+            safe[name] = os.environ[name]
+    safe.update(base_env)  # explicit per-worker env last (still user-controlled)
+    return safe
+
+
+class CodexWorker:
+    """04B — Codex CLI non-interactive worker adapter.
+
+    Runs `codex exec` non-interactively with a workspace-write sandbox (never
+    danger-full-access as default/fallback), an ephemeral run, a minimal
+    allow-listed environment, and JSON/JSONL event-output normalization into
+    WorkerResult fields (raw stdout is NOT stored wholesale).
+    """
+
+    def __init__(
+        self,
+        *,
+        argv_prefix: list[str] | None = None,
+        allowed_roots: tuple[str, ...],
+        sandbox_mode: str = "workspace-write",
+        model: str | None = None,
+        timeout_seconds: float = 180.0,
+        output_limit_bytes: int = 1024 * 1024,
+        env: dict[str, str] | None = None,
+        env_allowlist: frozenset[str] = frozenset(),
+    ) -> None:
+        if argv_prefix is None:
+            argv_prefix = ["codex.cmd"] if os.name == "nt" else ["codex"]
+        if not argv_prefix:
+            raise ValueError("argv_prefix must not be empty")
+        # Safety: refuse danger-full-access as the configured sandbox default.
+        if sandbox_mode == "danger-full-access":
+            raise ValueError("CodexWorker refuses danger-full-access as default sandbox")
+        self._argv_prefix = list(argv_prefix)
+        self._allowed_roots = allowed_roots
+        self._sandbox_mode = sandbox_mode
+        self._model = model
+        self._timeout_seconds = timeout_seconds
+        self._output_limit_bytes = output_limit_bytes
+        self._env = env or {}
+        self._env_allowlist = env_allowlist
+
+    @property
+    def worker_id(self) -> str:
+        return "codex"
+
+    @property
+    def capabilities(self) -> frozenset[str]:
+        return frozenset({"coding", "repo_edit", "analysis", "terminal"})
+
+    async def is_available(self) -> bool:
+        return _check_executable_available(self._argv_prefix)
+
+    def build_argv(self, prompt: str) -> list[str]:
+        cmd = list(self._argv_prefix)
+        cmd.append("exec")                              # non-interactive
+        cmd.extend(["--sandbox", self._sandbox_mode])   # workspace-write, never full-access
+        cmd.extend(["--json"])                          # JSONL event stream
+        if self._model:
+            cmd.extend(["--model", self._model])
+        cmd.append(prompt)
+        return cmd
+
+    def _normalize_jsonl(self, stdout_str: str) -> dict[str, Any]:
+        """Reduce the Codex JSONL event stream to normalized WorkerResult fields.
+
+        Keeps final/output, an event summary count, and any usage — NOT the raw
+        stream. Unknown event types become opaque preserved refs, not new enums.
+        """
+        events: list[dict[str, Any]] = []
+        for line in (l.strip() for l in stdout_str.splitlines()):
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except (json.JSONDecodeError, ValueError):
+                continue
+        final_output: Any = None
+        usage: dict[str, Any] | None = None
+        opaque_refs: list[str] = []
+        for ev in events:
+            etype = ev.get("type") or ev.get("event") or ""
+            if etype in ("message", "final", "assistant", "agent_message", "task_complete"):
+                final_output = ev.get("text") or ev.get("message") or ev.get("content") or final_output
+            elif etype in ("usage", "token_usage"):
+                usage = {k: v for k, v in ev.items() if k not in ("type", "event")}
+            elif etype:
+                opaque_refs.append(etype)  # preserve as opaque evidence, no new enum
+        return {
+            "final_output": final_output,
+            "event_count": len(events),
+            "usage": usage,
+            "opaque_event_refs": sorted(set(opaque_refs)),
+        }
+
+    async def execute(self, request: WorkerRequest) -> WorkerResult:
+        start = time.perf_counter()
+        try:
+            cwd = _resolve_cwd(request.payload.get("cwd"), self._allowed_roots)
+        except WorkerError as e:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            return WorkerResult(
+                request_id=request.request_id,
+                trace_id=request.trace_id,
+                status=WorkerStatus.TRAVERSAL_BLOCKED,
+                duration_ms=duration_ms,
+                error=_sanitize_error(e),
+            )
+
+        prompt = _build_worker_prompt(request)
+        cmd = self.build_argv(prompt)
+        env = _allowlisted_env(self._env, self._env_allowlist)
+
+        res = await _run_process_safe(
+            cmd=cmd,
+            cwd=cwd,
+            env=env,
+            timeout_seconds=self._timeout_seconds,
+            output_limit_bytes=self._output_limit_bytes,
+            request=request,
+            worker_name="Codex",
+            start_time=start,
+        )
+        if isinstance(res, WorkerResult):
+            return res
+        stdout_str, duration_ms = res
+
+        normalized = self._normalize_jsonl(stdout_str)
+        if normalized["event_count"] == 0:
+            return WorkerResult(
+                request_id=request.request_id,
+                trace_id=request.trace_id,
+                status=WorkerStatus.INVALID_OUTPUT,
+                duration_ms=duration_ms,
+                error=_sanitize_error(ValueError("no parseable Codex JSONL events")),
+            )
+        return WorkerResult(
+            request_id=request.request_id,
+            trace_id=request.trace_id,
+            status=WorkerStatus.SUCCESS,
+            payload=normalized,
+            duration_ms=duration_ms,
+        )
+
+
 async def register_available_workers(
     registry: Any,
     *,
