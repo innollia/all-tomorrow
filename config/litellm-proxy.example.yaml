@@ -9,6 +9,9 @@
 # in this file, never on a Work/Event/prompt artifact. The master key is an env
 # reference too, so this file is safe to commit and to scan with a canary.
 
+# Config schema version (all-tomorrow policy-config contract; ignored by LiteLLM).
+version: "1"
+
 model_list:
   # Logical ModelRoute alias → provider/model. The application selects by alias
   # (all_tomorrow.models.ModelRoute); it never branches on a provider SDK.

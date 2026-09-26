@@ -1,4 +1,5 @@
 # Stage 2.4B — Routing selection policy (example).
+version: "1"
 policy_version: "1"
 pipeline:
   - stage: hard_filter

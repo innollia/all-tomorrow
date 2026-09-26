@@ -101,6 +101,11 @@ def cleanup_dbos():
     DBOSDurableAdapter.destroy_runtime()
 
 
+@pytest.mark.skipif(
+    not os.environ.get("AT_TEST_POSTGRES_URL"),
+    reason="Live-infra suite: set AT_TEST_POSTGRES_URL (a reachable PostgreSQL with credentials) to run. "
+    "Skipped offline — the DBOS child process cannot connect to the passwordless fallback URL.",
+)
 class TestWalkingSkeletonFailureScenarios:
     """Rigorous verification of 00C Walking Skeleton and Failure Scenarios C-01 ~ C-10."""
 
