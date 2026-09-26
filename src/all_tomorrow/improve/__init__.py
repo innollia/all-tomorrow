@@ -25,6 +25,19 @@ from .experiment import (
     SandboxRunner,
     UnsupportedTargetError,
 )
+from .promotion import (
+    DeploymentPlan,
+    DeploymentRef,
+    MissingMonitoringPolicyError,
+    MonitoringPolicy,
+    Promoter,
+    PromotionError,
+    PromotionResult,
+    PromotionTarget,
+    ProtectedChangeError,
+    ProtectionClass,
+    StaleBaselineError,
+)
 
 __all__ = [
     "EvaluationCriteria",
@@ -48,4 +61,15 @@ __all__ = [
     "ExperimentSpec",
     "SandboxRunner",
     "UnsupportedTargetError",
+    "DeploymentPlan",
+    "DeploymentRef",
+    "MissingMonitoringPolicyError",
+    "MonitoringPolicy",
+    "Promoter",
+    "PromotionError",
+    "PromotionResult",
+    "PromotionTarget",
+    "ProtectedChangeError",
+    "ProtectionClass",
+    "StaleBaselineError",
 ]
