@@ -38,6 +38,17 @@ from .promotion import (
     ProtectionClass,
     StaleBaselineError,
 )
+from .protection import (
+    Classification,
+    ChangeDescriptor,
+    ClassificationResult,
+    HandoffPackage,
+    MECHANICAL_PROTECTED_SURFACES,
+    SEMANTIC_SIGNALS,
+    build_handoff,
+    classify,
+    handoff_valid,
+)
 
 __all__ = [
     "EvaluationCriteria",
@@ -72,4 +83,13 @@ __all__ = [
     "ProtectedChangeError",
     "ProtectionClass",
     "StaleBaselineError",
+    "Classification",
+    "ChangeDescriptor",
+    "ClassificationResult",
+    "HandoffPackage",
+    "MECHANICAL_PROTECTED_SURFACES",
+    "SEMANTIC_SIGNALS",
+    "build_handoff",
+    "classify",
+    "handoff_valid",
 ]
