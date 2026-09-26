@@ -1,7 +1,11 @@
 from .artifact_store import (
+    ArtifactAccessDeniedError,
     ArtifactIntegrityError,
     ArtifactStoreProtocol,
+    ArtifactSubstitutionError,
+    FinalizingArtifactStore,
     LocalArtifactStore,
+    StagedUpload,
 )
 from .delivery_store import (
     DeliveryCASConflictError,
@@ -44,6 +48,10 @@ from .run_store import (
 __all__ = [
     "ArtifactIntegrityError",
     "ArtifactStoreProtocol",
+    "ArtifactAccessDeniedError",
+    "ArtifactSubstitutionError",
+    "FinalizingArtifactStore",
+    "StagedUpload",
     "LocalArtifactStore",
     "InMemoryRunStateStore",
     "PostgresEventSink",
