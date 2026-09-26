@@ -6,6 +6,15 @@ from .proposals import (
     ProposalError,
     ProposalStatus,
 )
+from .evaluator import (
+    Criterion,
+    Decision,
+    Direction,
+    EvaluationDecision,
+    MetricObservation,
+    UserEvidence,
+    evaluate,
+)
 
 __all__ = [
     "EvaluationCriteria",
@@ -14,4 +23,11 @@ __all__ = [
     "ImprovementStore",
     "ProposalError",
     "ProposalStatus",
+    "Criterion",
+    "Decision",
+    "Direction",
+    "EvaluationDecision",
+    "MetricObservation",
+    "UserEvidence",
+    "evaluate",
 ]
