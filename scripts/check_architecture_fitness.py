@@ -56,6 +56,53 @@ def check_migration_ownership() -> list[str]:
     return violations
 
 
+def check_semantic_schema_invariants() -> list[str]:
+    """01A. Semantic kernel migration invariants (work_items / runs_semantic).
+
+    * work_items must NOT own execution_backend/id/version (Run owns ExecutionRef).
+    * work_items / runs_semantic must NOT add All Tomorrow queue-authority columns
+      (claimed_by, lease_expires_at) — those mechanics belong to the durable backend.
+    * runs_semantic MUST carry the ExecutionRef columns (execution_backend/id/version).
+    """
+    violations: list[str] = []
+    mig = Path("migrations/0006_semantic_kernel.sql")
+    if not mig.exists():
+        return violations
+    text = mig.read_text(encoding="utf-8").lower()
+
+    def _table_body(name: str) -> str:
+        marker = f"create table if not exists {name} ("
+        if marker not in text:
+            return ""
+        after = text.split(marker, 1)[1]
+        # body ends at the first ");" that closes the CREATE TABLE
+        return after.split(");", 1)[0]
+
+    work_body = _table_body("work_items")
+    if work_body:
+        for forbidden in ("execution_backend", "execution_id", "execution_version",
+                          "claimed_by", "lease_expires_at"):
+            if forbidden in work_body:
+                violations.append(
+                    f"work_items owns forbidden column '{forbidden}' "
+                    f"(ExecutionRef/queue authority must not live on Work)"
+                )
+
+    runs_body = _table_body("runs_semantic")
+    if runs_body:
+        for required in ("execution_backend", "execution_id", "execution_version"):
+            if required not in runs_body:
+                violations.append(
+                    f"runs_semantic missing required ExecutionRef column '{required}'"
+                )
+        for forbidden in ("claimed_by", "lease_expires_at"):
+            if forbidden in runs_body:
+                violations.append(
+                    f"runs_semantic owns forbidden queue-authority column '{forbidden}'"
+                )
+    return violations
+
+
 def check_protected_credentials() -> list[str]:
     """5. Protected credentials not in deploy/runtime config."""
     violations = []
@@ -88,6 +135,7 @@ def run_all_checks() -> bool:
     all_violations.extend(check_domain_backend_imports())
     all_violations.extend(check_work_execution_ref_invariant())
     all_violations.extend(check_migration_ownership())
+    all_violations.extend(check_semantic_schema_invariants())
     all_violations.extend(check_protected_credentials())
     all_violations.extend(check_mutable_latest_tags())
 
