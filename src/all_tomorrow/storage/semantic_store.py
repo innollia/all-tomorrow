@@ -186,6 +186,7 @@ class GoalWorkRunStore(Protocol):
 
     # Questions
     async def create_question(self, question: QuestionRecordSemantic) -> QuestionRecordSemantic: ...
+    async def get_question(self, question_id: QuestionId) -> QuestionRecordSemantic | None: ...
     async def answer_question(
         self,
         question_id: QuestionId,
@@ -407,6 +408,9 @@ class InMemoryGoalWorkRunStore:
                     )
             self._questions[question.question_id] = question
             return question
+
+    async def get_question(self, question_id: QuestionId) -> QuestionRecordSemantic | None:
+        return self._questions.get(question_id)
 
     async def answer_question(
         self,
@@ -912,6 +916,19 @@ class PostgresGoalWorkRunStore:
                 raise
         return question
 
+    async def get_question(self, question_id: QuestionId) -> QuestionRecordSemantic | None:
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT question_id, work_id, run_id, prompt, status, answer_ref,
+                       signal_correlation, revision, created_at, updated_at, answered_at
+                FROM questions_semantic WHERE question_id = %s
+                """,
+                (question_id,),
+            )
+            row = await cur.fetchone()
+        return _question_from_row(row) if row else None
+
     async def answer_question(
         self,
         question_id: QuestionId,
@@ -1027,3 +1044,19 @@ def _run_from_row(row: Any) -> RunRecord:
     )
     _set_run_revision(run, int(row[7]))
     return run
+
+
+def _question_from_row(row: Any) -> QuestionRecordSemantic:
+    return QuestionRecordSemantic(
+        question_id=QuestionId(row[0]),
+        work_id=WorkId(row[1]) if row[1] is not None else None,
+        run_id=RunId(row[2]) if row[2] is not None else None,
+        prompt=row[3],
+        status=row[4],
+        answer_ref=row[5],
+        signal_correlation=row[6],
+        revision=row[7],
+        created_at=row[8],
+        updated_at=row[9],
+        answered_at=row[10],
+    )
