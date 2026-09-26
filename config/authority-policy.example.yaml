@@ -1,0 +1,37 @@
+version: "1.0"
+description: "All Tomorrow capability authorization and risk matrix"
+
+default_rules:
+  - capability: "read"
+    risk_class: "LOW"
+    decision: "ALLOW"
+    requires_confirmation: false
+
+  - capability: "write"
+    risk_class: "MEDIUM"
+    decision: "ALLOW"
+    requires_confirmation: false
+
+  - capability: "delete"
+    risk_class: "HIGH"
+    decision: "CONFIRM"
+    requires_confirmation: true
+
+  - capability: "git_push"
+    risk_class: "HIGH"
+    decision: "CONFIRM"
+    requires_confirmation: true
+
+  - capability: "production_deploy"
+    risk_class: "CRITICAL"
+    decision: "CONFIRM"
+    requires_confirmation: true
+
+  - capability: "untrusted_eval"
+    risk_class: "CRITICAL"
+    decision: "DENY"
+    requires_confirmation: false
+
+untrusted_content_isolation:
+  reject_prompt_authority_escalation: true
+  immutable_system_instruction: true

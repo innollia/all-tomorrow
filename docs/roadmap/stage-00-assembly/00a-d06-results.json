@@ -1,0 +1,30 @@
+[
+  {
+    "scenario_id": "D06",
+    "candidate": "DBOS",
+    "version": "3.0.0",
+    "passed": true,
+    "manual_steps": ["Run tests/test_live_common_d01.py::test_dbos_live_common_d06_wait_restart_signal in the 00A live lab"],
+    "custom_glue_loc": 19,
+    "adapter_loc": 107,
+    "processes_required": 2,
+    "persistent_state_systems": ["DBOS PostgreSQL system database", "external PostgreSQL fixture database"],
+    "recovery_notes": "The first worker reported durable wait and was killed; a different PID sent the approval message and retrieved the original workflow's typed result.",
+    "persisted_payload_notes": "dbos.workflow_status reported SUCCESS after recovery. The external fixture recorded calls=1 and applications=1.",
+    "trace_notes": "Actual OTel SDK wait and recovery spans came from different worker PIDs and both carried the original correlation ID. Parent/link topology remains a D12 concern."
+  },
+  {
+    "scenario_id": "D06",
+    "candidate": "Restate",
+    "version": "server 1.7.10 / SDK 1.0.5",
+    "passed": true,
+    "manual_steps": ["Run tests/test_live_common_d01.py::test_restate_live_common_d06_wait_restart_signal in the 00A live lab"],
+    "custom_glue_loc": 19,
+    "adapter_loc": 81,
+    "processes_required": 3,
+    "persistent_state_systems": ["Restate journal/state directory", "external PostgreSQL fixture database"],
+    "recovery_notes": "The first handler entered a durable promise wait and was killed; a different PID accepted approval and the original ingress completed with typed output.",
+    "persisted_payload_notes": "Restate's output endpoint returned the completed typed result; the external fixture recorded calls=1 and applications=1.",
+    "trace_notes": "Actual OTel SDK wait and recovery spans came from different handler PIDs and both carried the original correlation ID. Parent/link topology remains a D12 concern."
+  }
+]

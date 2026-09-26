@@ -2,8 +2,10 @@
 
 ## Status
 
-- 상태: **선행작업 대기**
+- 상태: **개발중**
 - 선행조건: 00C
+- CI 실행 증거: PR #1 run [36138283775](https://github.com/innollia/all-tomorrow/actions/runs/36138283775) (completed/success: architecture, security-data, unit, integration-local, crash-replay, eval 성공; deployed-smoke는 실제 AWS/laptop 환경 미실행으로 skipped)
+- D-UP-01 상태: 실제 dependency update PR artifact 없음 (미충족)
 - 공통 계약:
   - ../plan-verification-contract.md
   - ../domain-contracts.md
@@ -135,8 +137,8 @@ durable history incompatibility가 발견되면 test expectation을 새 버전�
 | D-EVENT-01 | Event row가 span 수에 비례해 폭증하지 않음 | domain-event count fixture |
 | D-PRIV-01 | prompt/secret fixture telemetry 검색 결과 0 | negative scan |
 | D-EVAL-01 | E-01~E-08 expected property 통과 | eval artifact |
-| D-CI-01 | required lanes가 실제 PR check로 실행 | workflow run evidence |
-| D-UP-01 | dependency update에서 history compatibility 검증 | replay/drain CI artifact |
+| D-CI-01 | required lanes가 실제 PR check로 실행 | PR #1 run [36138283775](https://github.com/innollia/all-tomorrow/actions/runs/36138283775) (architecture, security-data, unit, integration-local, crash-replay, eval 성공; deployed-smoke는 실제 AWS/laptop 환경 미실행으로 skipped) |
+| D-UP-01 | dependency update에서 history compatibility 검증 | 실제 dependency update PR artifact 없음 (미충족) |
 | D-RET-01 | recovery payload/log retention inventory 존재 | inventory document/test |
 
 ## 완료조건

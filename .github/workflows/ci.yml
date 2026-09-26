@@ -1,0 +1,184 @@
+name: All Tomorrow CI Rails (Stage 00D)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  architecture:
+    name: "Lane: architecture"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest pyyaml
+      - name: Run Architecture Fitness Checks
+        run: |
+          python scripts/check_architecture_fitness.py
+          pytest tests/test_architecture_fitness.py -v
+
+  unit:
+    name: "Lane: unit"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-asyncio pyyaml
+      - name: Run Unit & Contract Tests
+        run: |
+          pytest tests/contracts tests/test_contracts.py tests/test_authorization.py -v
+
+  eval:
+    name: "Lane: eval"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-asyncio pydantic opentelemetry-api opentelemetry-sdk
+      - name: Run E-01~E-08 Deterministic Contract Evals
+        run: |
+          pytest tests/test_eval_e01_e08.py -v
+      - name: Upload Eval Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: .artifacts/eval/eval_report.json
+
+  security-data:
+    name: "Lane: security-data"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-asyncio opentelemetry-api opentelemetry-sdk
+      - name: Run Observability & Retention Negative Scans
+        run: |
+          pytest tests/test_observability_00d.py tests/test_retention_inventory.py tests/test_upgrade_rail.py -v
+
+  integration-local:
+    name: "Lane: integration-local"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: at_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d at_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-asyncio psycopg[binary] dbos fastmcp opentelemetry-api opentelemetry-sdk
+      - name: Run Local Integration Tests
+        env:
+          AT_TEST_POSTGRES_URL: postgresql://postgres:postgrespassword@localhost:5432/at_test
+          AT_TEST_FIXTURE_URL: postgresql://postgres:postgrespassword@localhost:5432/at_test
+        run: |
+          python -c "from tests.test_live_common_d01 import _prepare_fixture; import os; _prepare_fixture(os.environ['AT_TEST_FIXTURE_URL'])"
+          pytest tests/test_postgres_store.py tests/test_delivery_store.py tests/test_dbos_runtime_probe.py -v
+
+  crash-replay:
+    name: "Lane: crash-replay"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: at_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d at_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-asyncio psycopg[binary] dbos fastmcp opentelemetry-api opentelemetry-sdk httpx uvicorn
+      - name: Run Crash Replay Tests
+        env:
+          AT_TEST_POSTGRES_URL: postgresql://postgres:postgrespassword@localhost:5432/at_test
+          AT_TEST_FIXTURE_URL: postgresql://postgres:postgrespassword@localhost:5432/at_test
+        run: |
+          python -c "from tests.test_live_common_d01 import _prepare_fixture; import os; _prepare_fixture(os.environ['AT_TEST_FIXTURE_URL'])"
+          pytest tests/test_walking_skeleton_c01_c10.py tests/test_upgrade_rail.py -v
+      - name: Upload Upgrade Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgrade-report
+          path: .artifacts/upgrade/upgrade_report.json
+          if-no-files-found: ignore
+
+  deployed-smoke:
+    name: "Lane: deployed-smoke"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    environment: protected-aws
+    steps:
+      - name: Manual gate - verify target environment
+        shell: bash
+        run: |
+          echo "Status: BLOCKED"
+          echo "Reason: Actual AWS/laptop boundary environment is not configured on this runner."
+          echo "Per Stage 00D CI specification, unexecuted lanes must remain explicit not-run/blocked manual gates rather than forging success."
+          exit 1
