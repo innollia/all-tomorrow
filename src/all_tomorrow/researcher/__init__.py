@@ -5,6 +5,17 @@ from .observation import (
     ObservationSnapshot,
     PROJECTION_VERSION,
 )
+from .lineage import (
+    FINGERPRINT_VERSION,
+    AutonomousLineage,
+    BudgetConfig,
+    BudgetExceededError,
+    BudgetLedger,
+    DedupConflictError,
+    OpenWorkDedupIndex,
+    UnknownCostError,
+    dedup_fingerprint,
+)
 
 __all__ = [
     "CursorConflictError",
@@ -12,4 +23,13 @@ __all__ = [
     "ObservationBuilder",
     "ObservationSnapshot",
     "PROJECTION_VERSION",
+    "FINGERPRINT_VERSION",
+    "AutonomousLineage",
+    "BudgetConfig",
+    "BudgetExceededError",
+    "BudgetLedger",
+    "DedupConflictError",
+    "OpenWorkDedupIndex",
+    "UnknownCostError",
+    "dedup_fingerprint",
 ]
