@@ -1,0 +1,16 @@
+# Stage 2.4B — Routing selection policy (example).
+policy_version: "1"
+pipeline:
+  - stage: hard_filter
+    require: [authority_scope, capabilities, healthy, quota]
+  - stage: rank
+    by: [cost_per_unit_asc, resource_id_asc]   # stable, insertion-order independent
+  - stage: select
+    first_ranked: true
+overrides:
+  explicit_user_choice: honored          # never overridden by inferred preference
+  inferred_preference: only_without_explicit_choice
+aging:
+  # composed with the priority policy (src/all_tomorrow/priority.py):
+  autonomous_aging_max_step: 1
+  never_above_active_user_request: true
