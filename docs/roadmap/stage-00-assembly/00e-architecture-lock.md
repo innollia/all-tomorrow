@@ -2,8 +2,17 @@
 
 ## Status
 
-- 상태: **선행작업 대기**
-- 선행조건: 00A~00D
+- 상태: **개발중**
+- 선행조건: 00A~00D (00D는 D-UP-01 미충족으로 개발중)
+- 진행 증거:
+  - E-ADR-01: [ADR 0006 — Stage 0 Architecture Lock](../../decisions/0006-stage0-architecture-lock.md)이 14개 필수 결정(D-LOCK-01~14 + D-ESCAPE-01)을 형식에 맞게 닫음 ✅
+  - E-REWRITE-01: [Stage 1 index](../stage-01-researcher/index.md)의 placeholder 표가 ADR 0006 값으로 전부 해소됨 ✅
+  - E-ID-01: Work/Run/ExecutionRef schema를 `tests/test_architecture_fitness.py`가 강제 ✅
+  - E-UP-01: `tests/test_upgrade_rail.py`(V1→V2 replay/drain) 통과 ✅
+  - E-RET-01: `docs/architecture/retention-inventory.md` + `tests/test_retention_inventory.py` ✅
+  - E-ESCAPE-01: ADR 0006 D-ESCAPE-01 ✅
+  - **E-RUNTIME-01: 미충족** — 최소 topology는 D-LOCK-13에 문서화됐으나 실제 AWS backup/restart L3 evidence는 Stage 1 04D로 이월
+- 완료 gate: 00D의 D-UP-01 종료 + E-RUNTIME-01 L3 evidence 확보 시 00E를 개발완료로 전이
 - 공통 계약:
   - ../plan-verification-contract.md
   - ../domain-contracts.md

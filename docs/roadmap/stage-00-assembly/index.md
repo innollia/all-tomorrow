@@ -54,7 +54,7 @@ production durable engine은 하나만 채택한다.
 | 00B | Ownership & Adapter Contracts | 개발완료 | — | 00A | [00b](00b-ownership-contracts.md) |
 | 00C | Failure Walking Skeleton | 개발완료 | — | 00A + 00B | [00c](00c-failure-walking-skeleton.md) |
 | 00D | Observability / Eval / CI Seam | 개발중 | 예 | 00C | [00d](00d-observability-eval-ci.md) |
-| 00E | Architecture Lock & Stage 1 Rewrite | 선행작업 대기 | 아니오 | 00A~00D | [00e](00e-architecture-lock.md) |
+| 00E | Architecture Lock & Stage 1 Rewrite | 개발중 | 예 | 00A~00D | [00e](00e-architecture-lock.md) |
 
 ## 지금 시작할 작업
 
