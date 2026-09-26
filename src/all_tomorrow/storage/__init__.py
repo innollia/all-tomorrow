@@ -11,6 +11,17 @@ from .delivery_store import (
     IdempotencyKeyExpiredError,
 )
 from .postgres import PostgresEventSink, PostgresStore
+from .semantic_store import (
+    ExecutionRefConflictError,
+    GoalWorkRunStore,
+    InMemoryGoalWorkRunStore,
+    NotFoundError,
+    PendingQuestionExistsError,
+    PostgresGoalWorkRunStore,
+    QuestionRecordSemantic,
+    SemanticEvent,
+    StoreConflictError,
+)
 from .run_store import (
     InMemoryRunStateStore,
     QuestionRecord,
@@ -37,6 +48,15 @@ __all__ = [
     "InMemoryRunStateStore",
     "PostgresEventSink",
     "PostgresStore",
+    "ExecutionRefConflictError",
+    "GoalWorkRunStore",
+    "InMemoryGoalWorkRunStore",
+    "NotFoundError",
+    "PendingQuestionExistsError",
+    "PostgresGoalWorkRunStore",
+    "QuestionRecordSemantic",
+    "SemanticEvent",
+    "StoreConflictError",
     "QuestionRecord",
     "RunConflictError",
     "RunRecord",
