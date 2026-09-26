@@ -28,6 +28,26 @@ docker push 761558630442.dkr.ecr.ap-northeast-2.amazonaws.com/all-tomorrow:0.1.0
 
 Image smoke test before push: container boots, `/healthz` → 200 (auth env required; fail-closed without it).
 
+## Live single-node deployment (ap-northeast-2, 2026-09-27)
+
+Provisioned and serving:
+
+| resource | value |
+|---|---|
+| instance | `i-034a2f4ca37b9e293` (t3.small, AL2023 `ami-03137ee2d0c5af1fe`, 20GB gp3) |
+| public endpoint | `http://15.164.99.125:8080/healthz` → `200 {"ok":true,"service":"all-tomorrow","version":"0.1.0"}` |
+| security group | `sg-03fd323bce8b24f5e` — inbound 8080 (app) + 22 (admin) only; postgres bound `127.0.0.1:5432` (private) |
+| IAM instance profile | `all-tomorrow-node` — `AmazonEC2ContainerRegistryReadOnly` + `AmazonSSMManagedInstanceCore` (no protected/approval credential on the node, per 04D-04) |
+| stack | `docker compose` (postgres@digest + app@ECR digest); secrets (pg password, session secret, admin password) generated on the node, never in the image or repo |
+| autostart | systemd `all-tomorrow.service` (enabled) — survives reboot (04D-01) |
+| remote admin | AWS SSM (no SSH key distributed) |
+
+Health verified after a full instance reboot (SSM re-registered, stack came back via the systemd unit).
+
+### Lesson: EC2 user-data must not be pre-base64-encoded when passed via `--user-data file://`
+The AWS CLI base64-encodes `file://` user-data itself; passing an already-base64 blob double-encodes it and cloud-init silently skips the script (cloud-init "finished in ~8s", no bootstrap log, docker absent). Fix used here: install + configure the stack over SSM `AWS-RunShellScript` on the running node. For a fresh launch, pass the RAW script text to `--user-data file://script.sh`.
+
+
 Rollback: re-pin the previous `@sha256:` digest for `all-tomorrow-app` in `deploy/docker-compose.yaml` and `docker compose up -d` — image immutability guarantees the prior artifact is byte-identical.
 
 (`tests/test_aws_runtime.py` enforces it against `deploy/docker-compose.yaml`).
