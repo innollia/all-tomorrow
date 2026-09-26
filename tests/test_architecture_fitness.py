@@ -5,6 +5,7 @@ from scripts.check_architecture_fitness import (
     check_domain_backend_imports,
     check_work_execution_ref_invariant,
     check_migration_ownership,
+    check_semantic_schema_invariants,
     check_protected_credentials,
     check_mutable_latest_tags,
     run_all_checks,
@@ -27,6 +28,12 @@ def test_architecture_fitness_migration_system_tables() -> None:
     """Migrations must not own backend system tables."""
     violations = check_migration_ownership()
     assert len(violations) == 0, f"Migration ownership violations: {violations}"
+
+
+def test_architecture_fitness_semantic_schema_invariants() -> None:
+    """01A — Work owns no ExecutionRef/queue columns; Run owns ExecutionRef."""
+    violations = check_semantic_schema_invariants()
+    assert len(violations) == 0, f"Semantic schema invariant violations: {violations}"
 
 
 def test_architecture_fitness_no_protected_credentials() -> None:
