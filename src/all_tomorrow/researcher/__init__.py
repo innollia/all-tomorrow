@@ -16,6 +16,18 @@ from .lineage import (
     UnknownCostError,
     dedup_fingerprint,
 )
+from .decision import (
+    Action,
+    Decision,
+    DecisionValidationError,
+    DECISION_SCHEMA_VERSION,
+    validate_decision,
+)
+from .materialize import (
+    DecisionMaterializer,
+    MaterializationError,
+    MaterializationResult,
+)
 
 __all__ = [
     "CursorConflictError",
@@ -32,4 +44,12 @@ __all__ = [
     "OpenWorkDedupIndex",
     "UnknownCostError",
     "dedup_fingerprint",
+    "Action",
+    "Decision",
+    "DecisionValidationError",
+    "DECISION_SCHEMA_VERSION",
+    "validate_decision",
+    "DecisionMaterializer",
+    "MaterializationError",
+    "MaterializationResult",
 ]
