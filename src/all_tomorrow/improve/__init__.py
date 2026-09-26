@@ -15,6 +15,16 @@ from .evaluator import (
     UserEvidence,
     evaluate,
 )
+from .experiment import (
+    CaseOutcome,
+    CriteriaTamperError,
+    ExperimentAdapter,
+    ExperimentError,
+    ExperimentResult,
+    ExperimentSpec,
+    SandboxRunner,
+    UnsupportedTargetError,
+)
 
 __all__ = [
     "EvaluationCriteria",
@@ -30,4 +40,12 @@ __all__ = [
     "MetricObservation",
     "UserEvidence",
     "evaluate",
+    "CaseOutcome",
+    "CriteriaTamperError",
+    "ExperimentAdapter",
+    "ExperimentError",
+    "ExperimentResult",
+    "ExperimentSpec",
+    "SandboxRunner",
+    "UnsupportedTargetError",
 ]
