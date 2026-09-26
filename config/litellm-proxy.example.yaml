@@ -1,0 +1,38 @@
+# 04A — LiteLLM Proxy config example (All Tomorrow model + MCP gateway).
+#
+# Privacy/retry defaults follow ADR 0006:
+#   D-LOCK-09: prompt/spend/message logging OFF; no callbacks; no gateway DB / virtual keys.
+#   D-LOCK-04: gateway/router retry disabled — the DBOS model step is the sole
+#              automatic retry owner. num_retries: 0, no fallbacks.
+#
+# Provider credentials live in the Proxy runtime env ONLY (os.environ/…), never
+# in this file, never on a Work/Event/prompt artifact. The master key is an env
+# reference too, so this file is safe to commit and to scan with a canary.
+
+model_list:
+  # Logical ModelRoute alias → provider/model. The application selects by alias
+  # (all_tomorrow.models.ModelRoute); it never branches on a provider SDK.
+  - model_name: at-reasoning        # logical alias used by AgentExecutionRequest.model_route_ref
+    litellm_params:
+      model: openai/gpt-4o          # provider:model resolved by the Proxy
+      api_key: os.environ/AT_OPENAI_API_KEY
+      num_retries: 0                # D-LOCK-04: no gateway retry
+  - model_name: at-fast
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/AT_OPENAI_API_KEY
+      num_retries: 0
+
+general_settings:
+  master_key: os.environ/AT_GATEWAY_MASTER_KEY   # env reference, never a literal
+  store_prompts_in_spend_logs: false             # D-LOCK-09
+  turn_off_message_logging: true                 # D-LOCK-09
+
+litellm_settings:
+  callbacks: []                                  # D-LOCK-09: no logging callbacks
+  num_retries: 0                                 # D-LOCK-04: router retry off
+  drop_params: true
+
+# MCP tool gateway (same Proxy process — D-LOCK-07). Tool servers are fixed here,
+# discovered by PydanticAI's MCPToolset through the Proxy.
+mcp_servers: {}

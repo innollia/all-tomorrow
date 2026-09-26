@@ -9,6 +9,7 @@ from all_tomorrow.ports.agent import (
     AgentExecutionPort,
     AgentExecutionRequest,
     AgentExecutionResult,
+    AgentUsage,
 )
 
 
@@ -70,8 +71,12 @@ class PydanticAIGatewayAdapter(AgentExecutionPort):
                 retries=self.agent_retries,
             )
 
+            import time as _time
+
+            started = _time.monotonic()
             async with agent as active_agent:
                 result = await active_agent.run(request.prompt)
+            latency_ms = (_time.monotonic() - started) * 1000.0
 
             raw_output = result.output
             if hasattr(raw_output, "model_dump"):
@@ -87,10 +92,15 @@ class PydanticAIGatewayAdapter(AgentExecutionPort):
 
             structured_data = {"stock_confirmed": stock_confirmed} if stock_confirmed is not None else output_data
 
+            usage = _extract_usage(result)
+            provenance = _provenance_ref(request, result, latency_ms)
+
             return AgentExecutionResult(
                 success=True,
                 output=output_data,
                 structured_data=structured_data,
+                usage=usage,
+                provenance_ref=provenance,
             )
         except Exception as exc:
             canonical = normalize_exception(exc, default_code="tool_or_gateway_unavailable")
@@ -100,3 +110,49 @@ class PydanticAIGatewayAdapter(AgentExecutionPort):
                 structured_data=None,
                 error=canonical,
             )
+
+
+def _extract_usage(result: Any) -> AgentUsage:
+    """Read real usage off a PydanticAI run result.
+
+    Returns ``usage_known=False`` when the provider/gateway reported no usage, so
+    an unmeasured call is never forged into a zero-token (free) measurement
+    (04A-04). Token field names vary across PydanticAI versions, so several are
+    probed.
+    """
+    usage_obj: Any = None
+    getter = getattr(result, "usage", None)
+    try:
+        usage_obj = getter() if callable(getter) else getter
+    except Exception:
+        usage_obj = None
+    if usage_obj is None:
+        return AgentUsage(usage_known=False)
+
+    def _pick(*names: str) -> int | None:
+        for n in names:
+            v = getattr(usage_obj, n, None)
+            if isinstance(v, int):
+                return v
+        return None
+
+    prompt = _pick("request_tokens", "prompt_tokens", "input_tokens")
+    completion = _pick("response_tokens", "completion_tokens", "output_tokens")
+    total = _pick("total_tokens")
+    if prompt is None and completion is None and total is None:
+        return AgentUsage(usage_known=False)
+    prompt = prompt or 0
+    completion = completion or 0
+    total = total if total is not None else (prompt + completion)
+    return AgentUsage(
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        total_tokens=total,
+        usage_known=True,
+    )
+
+
+def _provenance_ref(request: AgentExecutionRequest, result: Any, latency_ms: float) -> str:
+    """Compose a provenance ref carrying model route + latency for the Run event."""
+    model = request.model_route_ref
+    return f"agent_inv:{model}:lat={latency_ms:.0f}ms"

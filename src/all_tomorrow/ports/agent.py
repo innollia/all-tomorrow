@@ -14,6 +14,10 @@ class AgentUsage:
     completion_tokens: int = 0
     total_tokens: int = 0
     estimated_cost_usd: float | None = None
+    usage_known: bool = True
+    """False when the provider/gateway reported no usage. Distinguishes a real
+    zero-token call from 'usage unavailable', so unknown usage is never forged to
+    0 (04A-04). When False, the token counts are placeholders, not measurements."""
 
 
 @dataclass(frozen=True, slots=True)
