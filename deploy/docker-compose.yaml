@@ -1,0 +1,85 @@
+# 04D — AWS single-node runtime topology (D-LOCK-13).
+#
+# Logical services on ONE node:
+#   - all-tomorrow-app  : DBOS-embedded Python worker + FastAPI ingress
+#   - postgres          : application DB (domain) — DBOS system schema lives in a
+#                         separate database on the same server (D-LOCK-10 boundary)
+#   - litellm-proxy     : model gateway + fixed MCP gateway (D-LOCK-07), isolated
+#                         dependency graph, separate container
+#
+# Version pinning: images are pinned by DIGEST, never a mutable tag (D-LOCK-13;
+# tests/test_aws_runtime.py enforces this). Replace the sha256 placeholders with
+# the digests you deploy, recorded in docs/deploy/aws-single-node.md.
+#
+# Secrets: injected from the runtime environment / secrets manager ONLY. No
+# protected approval credential is present on this node (D-LOCK-14, 04D-04).
+# Bind: only the app's HTTPS ingress is public; postgres and the proxy admin
+# port bind to the private network (see docs/deploy/aws-single-node.md).
+
+services:
+  postgres:
+    # pin by digest before deploy — example tag shown for readability only
+    image: postgres:16.4@sha256:REPLACE_WITH_POSTGRES_DIGEST
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: at_app
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+      POSTGRES_DB: all_tomorrow
+    volumes:
+      - at_pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"        # private/local only
+    secrets:
+      - pg_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U at_app -d all_tomorrow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  litellm-proxy:
+    image: ghcr.io/berriai/litellm:main-v1.101.0@sha256:REPLACE_WITH_LITELLM_DIGEST
+    restart: unless-stopped
+    command: ["--config", "/etc/litellm/proxy.yaml", "--port", "4000"]
+    volumes:
+      - ./config/litellm-proxy.example.yaml:/etc/litellm/proxy.yaml:ro
+    environment:
+      AT_GATEWAY_MASTER_KEY: ${AT_GATEWAY_MASTER_KEY:?set in runtime env}
+      AT_OPENAI_API_KEY: ${AT_OPENAI_API_KEY:?set in runtime env}
+    ports:
+      - "127.0.0.1:4000:4000"        # private/local only; app reaches it over loopback
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness',timeout=3).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  all-tomorrow-app:
+    image: ghcr.io/innollia/all-tomorrow:0.1.0@sha256:REPLACE_WITH_APP_DIGEST
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      litellm-proxy:
+        condition: service_healthy
+    environment:
+      AT_DOMAIN_DATABASE_URL: postgresql://at_app@postgres:5432/all_tomorrow
+      AT_SYSTEM_DATABASE_URL: postgresql://at_app@postgres:5432/all_tomorrow_dbos
+      AT_MODEL_GATEWAY_URL: http://litellm-proxy:4000
+      PGPASSWORD_FILE: /run/secrets/pg_password
+    secrets:
+      - pg_password
+    ports:
+      - "8080:8080"                  # the ONLY public surface (behind TLS ingress)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=3).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  at_pgdata:
+
+secrets:
+  pg_password:
+    file: ./secrets/pg_password   # provided out-of-band on the node, never committed

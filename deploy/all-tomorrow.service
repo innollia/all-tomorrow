@@ -1,0 +1,26 @@
+# 04D — process supervisor / autostart for the single-node stack.
+# Install at /etc/systemd/system/all-tomorrow.service on the AWS node.
+#   sudo systemctl daemon-reload && sudo systemctl enable --now all-tomorrow
+[Unit]
+Description=All Tomorrow single-node runtime (app + postgres + litellm proxy)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/all-tomorrow
+# Secrets sourced from an EnvironmentFile placed on the node out-of-band (0600,
+# root-owned). It carries AT_GATEWAY_MASTER_KEY / AT_OPENAI_API_KEY only; NO
+# protected approval / deployment credential lives here (D-LOCK-14, 04D-04).
+EnvironmentFile=/etc/all-tomorrow/runtime.env
+ExecStart=/usr/bin/docker compose -f /opt/all-tomorrow/deploy/docker-compose.yaml up -d
+ExecStop=/usr/bin/docker compose -f /opt/all-tomorrow/deploy/docker-compose.yaml down
+# On instance reboot systemd restarts this unit, docker restarts the containers,
+# and DBOS recovers in-flight Runs from the durable system DB (04D-01).
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
