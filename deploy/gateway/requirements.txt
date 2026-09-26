@@ -1,2 +1,2 @@
 # Separate gateway runtime; do not merge its dependency graph into the agent.
-litellm[proxy]==1.101.0
+litellm[proxy]==1.102.1
