@@ -496,12 +496,21 @@ class TestRegisterAvailableWorkers:
 
 
 class TestErrorSanitization:
-    def test_sanitize_error_redacts_home_path(self) -> None:
+    def test_sanitize_error_redacts_home_path(self, monkeypatch) -> None:
         from all_tomorrow.adapters.workers import _sanitize_error
 
-        error = Exception(f"Error in {os.environ.get('HOME', '/home/user')}/project/file.py")
+        monkeypatch.setenv("HOME", "/home/tester")
+        error = Exception(f"Error in {os.environ['HOME']}/project/file.py")
         sanitized = _sanitize_error(error)
-        assert "<HOME>" in sanitized or "<USERPROFILE>" in sanitized
+        assert "<HOME>" in sanitized
+        assert "/home/tester" not in sanitized
+
+    def test_sanitize_error_leaves_message_intact_without_home_env(self, monkeypatch) -> None:
+        from all_tomorrow.adapters.workers import _sanitize_error
+
+        monkeypatch.delenv("HOME", raising=False)
+        sanitized = _sanitize_error(Exception("plain failure"))
+        assert sanitized == "plain failure"
 
     def test_sanitize_error_redacts_env_secrets(self) -> None:
         from all_tomorrow.adapters.workers import _sanitize_error

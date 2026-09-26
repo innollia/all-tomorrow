@@ -43,8 +43,11 @@ def _resolve_cwd(cwd: str | None, allowed_roots: tuple[str, ...]) -> Path:
 def _sanitize_error(error: Exception, *, include_traceback: bool = False) -> str:
     """Sanitize error messages to avoid leaking sensitive data."""
     msg = str(error)
-    redacted = msg.replace(os.environ.get("HOME", ""), "<HOME>")
-    redacted = redacted.replace(os.environ.get("USERPROFILE", ""), "<USERPROFILE>")
+    redacted = msg
+    for key in ("HOME", "USERPROFILE"):
+        value = os.environ.get(key)
+        if value:
+            redacted = redacted.replace(value, "<HOME>")
     for key, value in os.environ.items():
         if "KEY" in key.upper() or "TOKEN" in key.upper() or "SECRET" in key.upper() or "PASSWORD" in key.upper():
             if value and value in redacted:
