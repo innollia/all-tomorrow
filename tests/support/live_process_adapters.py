@@ -118,6 +118,10 @@ class RestateProcessAdapter(ProcessAdapter):
     def cancel(self):
         response = httpx.patch(f"{self.admin}/invocations/{self.invocation_id}/cancel", timeout=10)
         assert response.status_code in (200,202), response.text
+        # Restate records the cancel durably but delivers it to the handler; with the worker
+        # killed the invocation stays suspended until a deployment is reachable again.
+        if self.process.poll() is not None:
+            self.start("recover")
 
     def signal(self):
         if self.process.poll() is not None:
@@ -127,6 +131,7 @@ class RestateProcessAdapter(ProcessAdapter):
 
     def state(self):
         response = httpx.get(f"{self.ingress}/restate/output/{self.invocation_id}", timeout=10)
+        self.last_state_response = (response.status_code, response.text[:300])
         if response.status_code == 409 and response.json().get("message") == "cancelled":
             return "CANCELLED"
         if response.status_code == 200:

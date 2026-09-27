@@ -6,7 +6,7 @@
 
 | Stage | 상태 | 지금 시작 가능 | 선행조건 | 인덱스 |
 |---|---|---:|---|---|
-| 0. OSS Assembly & Architecture Proof | 개발중 | 예 | 없음 | [stage-00-assembly](stage-00-assembly/index.md) |
+| 0. OSS Assembly & Architecture Proof | 개발완료 | 예 | 없음 | [stage-00-assembly](stage-00-assembly/index.md) |
 | 1. Durable Self-Improving Researcher | 개발완료 | 아니오 | Stage 0 | [stage-01-researcher](stage-01-researcher/index.md) |
 | 2. Reliable Assistant & Remote Control | 개발완료 | 아니오 | Stage 1 | [stage-02-assistant](stage-02-assistant/index.md) |
 | 3. Personal Manager & Generalized Autonomy | 개발완료 | 아니오 | Stage 2 | [stage-03-manager](stage-03-manager/index.md) |

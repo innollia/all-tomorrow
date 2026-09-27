@@ -55,7 +55,7 @@ def test_cancel_survives_restart_and_later_signal(execution):
         if execution.state() == "CANCELLED":
             break
         time.sleep(.1)
-    assert execution.state() == "CANCELLED"
+    assert execution.state() == "CANCELLED", getattr(execution, "last_state_response", None)
     execution.signal()
     time.sleep(1)
     assert execution.state() == "CANCELLED"
@@ -87,3 +87,31 @@ def test_application_and_dependency_upgrade_replays_old_model(execution):
         key = execution.payload["input"]["mutation_key"]
         assert conn.execute("SELECT calls FROM common_model_probe WHERE idempotency_key=%s", (key,)).fetchone() == (1,)
         assert conn.execute("SELECT schema_version FROM common_upgrade_probe WHERE idempotency_key=%s", (key,)).fetchone() == (2,)
+
+
+def test_durable_backend_dependency_upgrade_drains_v1_history(execution):
+    """D-UP-01: history written by the previous durable-backend release resumes on the candidate."""
+    if execution.candidate != "dbos":
+        pytest.skip("Dependency-upgrade drain applies to the DBOS backend package")
+    old_package = os.environ.get("AT_TEST_OLD_DBOS_PATH", "/opt/all-tomorrow-dbos-3.0.0")
+    from pathlib import Path
+    if not Path(old_package).is_dir():
+        pytest.skip("Install the previous dbos release into AT_TEST_OLD_DBOS_PATH for the upgrade probe")
+    execution.payload["input"]["wait_for_signal_name"] = "approval"
+    execution.environment["PYTHONPATH"] = old_package
+    first = execution.start()
+    execution.wait_span("_wait_started")
+    execution.kill()
+    execution.environment.pop("PYTHONPATH")
+    execution.signal()
+    if execution.process.poll() is None:
+        execution.kill()
+    output = execution.finish()
+    _assert_common_result(execution.fixture_url, execution.payload, output)
+    assert execution.process.pid != first.pid
+    spans = [json.loads(line) for line in execution.span_file.read_text().splitlines()]
+    versions = {s["attributes"].get("dbos.version") for s in spans} - {None}
+    assert len(versions) == 2, versions
+    with psycopg.connect(execution.fixture_url) as conn:
+        key = execution.payload["input"]["mutation_key"]
+        assert conn.execute("SELECT calls FROM common_model_probe WHERE idempotency_key=%s", (key,)).fetchone() == (1,)
