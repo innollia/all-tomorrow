@@ -11,7 +11,7 @@ from html import escape
 from typing import Any
 
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from all_tomorrow.contracts import Project
@@ -100,11 +100,12 @@ class Auth:
 def _login_page() -> str:
     return """<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>All Tomorrow Login</title><style>
-body{font:16px system-ui;background:#10131a;color:#e8ecf3;display:grid;place-items:center;height:100vh;margin:0}
-form{display:grid;gap:12px;width:min(360px,85vw);padding:28px;background:#1a2030;border-radius:16px}
-input,button{font:inherit;padding:12px;border-radius:8px;border:1px solid #39435a;background:#111623;color:inherit}
-button{background:#6d5dfc;border:0;font-weight:700;cursor:pointer}#error{color:#ff9a9a;min-height:1.2em}
+<title>All Tomorrow</title><style>
+body{font:15px system-ui,sans-serif;background:#fafafa;color:#111;display:grid;place-items:center;height:100vh;margin:0}
+form{display:grid;gap:10px;width:min(300px,85vw)}h1{font-size:18px;font-weight:600;margin:0 0 8px}
+input,button{font:inherit;padding:10px;border:1px solid #ccc;border-radius:4px;background:#fff;color:#111}
+input:focus{outline:2px solid #111;outline-offset:-1px}button{background:#111;color:#fff;border-color:#111;cursor:pointer}
+#error{color:#b00;font-size:13px;min-height:1.2em}
 </style></head><body><form id="login"><h1>All Tomorrow</h1><input id="username" autocomplete="username" placeholder="사용자명">
 <input id="password" type="password" autocomplete="current-password" placeholder="비밀번호"><button>로그인</button><div id="error"></div></form>
 <script>login.onsubmit=async(e)=>{e.preventDefault();const r=await fetch('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:username.value,password:password.value})});if(r.ok)location='/';else error.textContent='로그인 실패';}</script></body></html>"""
@@ -115,19 +116,30 @@ def _dashboard(username: str) -> str:
     return f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>All Tomorrow</title><style>
-body{{font:15px system-ui;margin:0;background:#0c1018;color:#e9edf5}}header{{padding:18px 24px;background:#161c29;display:flex;justify-content:space-between}}
-main{{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;padding:20px}}section{{background:#171e2c;padding:18px;border-radius:14px;min-height:180px}}
-pre{{white-space:pre-wrap;color:#b8c4dc}}button{{background:#6d5dfc;color:white;border:0;padding:8px 12px;border-radius:7px;cursor:pointer}}
-</style></head><body><header><strong>All Tomorrow Control Plane</strong><span>{safe_user} <button onclick="logout()">로그아웃</button></span></header>
-<main><section><h2>Chat</h2><p>Edge routing preview가 먼저 적용됩니다. 실행 pipeline 연결은 다음 단계입니다.</p></section>
-<section><h2>Projects</h2><pre id="projects">loading…</pre></section><section><h2>Runs</h2><pre id="runs">loading…</pre></section>
-<section><h2>Pending Questions</h2><pre id="questions">loading…</pre></section></main>
-<script>async function load(id,path){{const r=await fetch(path);document.getElementById(id).textContent=r.ok?JSON.stringify(await r.json(),null,2):'불러오기 실패';}}
+body{{font:15px system-ui,sans-serif;margin:0 auto;max-width:720px;padding:24px;background:#fafafa;color:#111}}
+header{{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #ddd;padding-bottom:12px}}
+h1{{font-size:18px;font-weight:600;margin:0}}h2{{font-size:14px;font-weight:600;margin:28px 0 8px;color:#555}}
+ul{{list-style:none;padding:0;margin:0}}li{{padding:8px 0;border-bottom:1px solid #eee;word-break:break-all}}.empty{{color:#999}}
+button{{font:inherit;background:none;border:1px solid #ccc;border-radius:4px;padding:4px 10px;cursor:pointer}}
+</style></head><body><header><h1>All Tomorrow</h1><span>{safe_user} <button onclick="logout()">로그아웃</button></span></header>
+<h2>프로젝트</h2><ul id="projects"><li class="empty">불러오는 중</li></ul>
+<h2>실행 기록</h2><ul id="runs"><li class="empty">불러오는 중</li></ul>
+<h2>답을 기다리는 질문</h2><ul id="questions"><li class="empty">불러오는 중</li></ul>
+<script>function label(x){{if(typeof x!=='object'||!x)return String(x);return x.title||x.name||x.question||x.text||x.id||JSON.stringify(x);}}
+async function load(id,path){{const el=document.getElementById(id);const r=await fetch(path);if(!r.ok){{el.innerHTML='<li class="empty">불러오기 실패</li>';return;}}
+const items=await r.json();el.innerHTML='';if(!items.length){{el.innerHTML='<li class="empty">없음</li>';return;}}
+for(const it of items){{const li=document.createElement('li');li.textContent=label(it);el.appendChild(li);}}}}
 load('projects','/api/projects');load('runs','/api/runs');load('questions','/api/questions');
 async function logout(){{await fetch('/api/logout',{{method:'POST'}});location='/login';}}</script></body></html>"""
 
 
-def create_app(*, auth: Auth, web_state: WebState | None = None, policy_path: str = "edge/discord/default.yaml") -> FastAPI:
+def create_app(
+    *,
+    auth: Auth,
+    web_state: WebState | None = None,
+    policy_path: str = "edge/discord/default.yaml",
+    cookie_secure: bool = True,
+) -> FastAPI:
     app = FastAPI(title="All Tomorrow Control Plane", version="0.1.0")
     state_store = web_state or WebState()
     policy = load_edge_policy(policy_path)
@@ -151,7 +163,7 @@ def create_app(*, auth: Auth, web_state: WebState | None = None, policy_path: st
             SESSION_COOKIE,
             auth.issue(),
             httponly=True,
-            secure=True,
+            secure=cookie_secure,
             samesite="strict",
             max_age=auth.ttl_seconds,
         )
@@ -161,8 +173,15 @@ def create_app(*, auth: Auth, web_state: WebState | None = None, policy_path: st
         response.delete_cookie(SESSION_COOKIE)
 
     @app.get("/", response_class=HTMLResponse)
-    async def dashboard(user: str = Depends(current_user)) -> str:
-        return _dashboard(user)
+    async def dashboard(
+        all_tomorrow_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+    ) -> Response:
+        # Browsers get sent to the login page instead of a raw JSON 401.
+        try:
+            user = auth.verify(all_tomorrow_session)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+        return HTMLResponse(_dashboard(user))
 
     @app.get("/api/projects")
     async def projects(_: str = Depends(current_user)) -> list[dict[str, Any]]:
@@ -205,7 +224,9 @@ def app_from_environment() -> FastAPI:
     password = os.environ.get("ALL_TOMORROW_ADMIN_PASSWORD", "")
     secret = os.environ.get("ALL_TOMORROW_SESSION_SECRET", "")
     edge_token = os.environ.get("ALL_TOMORROW_EDGE_TOKEN")
-    return create_app(auth=Auth(username, password, secret, edge_token=edge_token))
+    # Secure cookies need HTTPS; allow opting out for a plain-HTTP deployment.
+    cookie_secure = os.environ.get("ALL_TOMORROW_COOKIE_SECURE", "true").lower() not in {"0", "false", "no"}
+    return create_app(auth=Auth(username, password, secret, edge_token=edge_token), cookie_secure=cookie_secure)
 
 
 def run() -> None:
