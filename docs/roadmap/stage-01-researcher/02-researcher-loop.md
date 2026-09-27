@@ -2,7 +2,7 @@
 
 ## Status
 
-- 상태: **선행작업 대기**
+- 상태: **개발완료**
 - 지금 시작 가능: **아니오**
 - 선행조건: 01 완료 + Stage 0 agent/model substrate 확정
 
@@ -37,11 +37,11 @@ canonical DB, source ownership, authority expansion policy는 PydanticAI가 소�
 
 | 순서 | 작업 | 상태 | 지금 시작 가능 | 선행조건 |
 |---:|---|---|---:|---|
-| 02A | Observation Snapshot | 선행작업 대기 | 아니오 | 01 |
-| 02B | Researcher Agent & Typed Decision | 선행작업 대기 | 아니오 | 02A + 04A |
-| 02C | Decision Materialization | 선행작업 대기 | 아니오 | 02B |
-| 02D | Lineage / Budget / Dedup | 선행작업 대기 | 아니오 | 02C |
-| 02E | Researcher Acceptance | 선행작업 대기 | 아니오 | 02A~02D |
+| 02A | Observation Snapshot | 개발완료 | 아니오 | 01 |
+| 02B | Researcher Agent & Typed Decision | 개발완료 | 아니오 | 02A + 04A |
+| 02C | Decision Materialization | 개발완료 | 아니오 | 02B |
+| 02D | Lineage / Budget / Dedup | 개발완료 | 아니오 | 02C |
+| 02E | Researcher Acceptance | 개발완료 | 아니오 | 02A~02D |
 
 ## 금지
 

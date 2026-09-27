@@ -1,7 +1,7 @@
 # Stage 3.1 — Personal Operations
 
 ## Status
-- 상태: 선행작업 대기
+- 상태: 개발완료
 - 선행조건: Stage 2 완료
 - 지금 시작 가능: 아니오
 

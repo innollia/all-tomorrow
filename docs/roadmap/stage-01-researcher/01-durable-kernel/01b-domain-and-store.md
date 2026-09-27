@@ -2,7 +2,7 @@
 
 ## Status
 
-- 상태: **선행작업 대기**
+- 상태: **개발완료**
 - 지금 시작 가능: **아니오**
 - 선행조건: 01A
 - contracts: ../../domain-contracts.md, ../../plan-verification-contract.md

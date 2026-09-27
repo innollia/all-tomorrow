@@ -1,7 +1,7 @@
 # 04F — Artifact Store & Integrity
 
 ## Status
-- 상태: 선행작업 대기
+- 상태: 개발완료
 - 선행조건: Stage 0 + 01 domain/schema
 - 지금 시작 가능: 아니오
 

@@ -2,7 +2,7 @@
 
 ## Stage Status
 
-- 상태: **선행작업 대기**
+- 상태: **개발완료**
 - 지금 시작 가능: **아니오**
 - 선행조건: Stage 0 OSS Assembly & Architecture Proof 완료
 - Stage 종료 조건: [06-acceptance.md](06-acceptance.md) 통과
@@ -18,12 +18,12 @@ Stage 1 계획은 공통 contract 수준까지 구체화되어 있고, selected 
 
 | 순서 | 작업 | 상태 | 지금 시작 가능 | 선행조건 | 상태/상세 인덱스 |
 |---:|---|---|---:|---|---|
-| 1 | Minimal Durable Kernel | 선행작업 대기 | 아니오 | Stage 0 | [01-durable-kernel.md](01-durable-kernel.md) |
-| 2 | Researcher Loop | 선행작업 대기 | 아니오 | 1 + 04A | [02-researcher-loop.md](02-researcher-loop.md) |
-| 3 | Evaluation & Self-Improvement | 선행작업 대기 | 아니오 | 2 | [03-evaluation-self-improvement.md](03-evaluation-self-improvement.md) |
-| 4 | Runtime & Tool Surface | 선행작업 대기 | 아니오 | Stage 0 | [04-runtime-and-tools.md](04-runtime-and-tools.md) |
-| 5 | Daily Report & Priority | 선행작업 대기 | 아니오 | 1 + 2 + runtime | [05-report-and-priority.md](05-report-and-priority.md) |
-| 6 | Stage Acceptance | 선행작업 대기 | 아니오 | 1~5 | [06-acceptance.md](06-acceptance.md) |
+| 1 | Minimal Durable Kernel | 개발완료 | 아니오 | Stage 0 | [01-durable-kernel.md](01-durable-kernel.md) |
+| 2 | Researcher Loop | 개발완료 | 아니오 | 1 + 04A | [02-researcher-loop.md](02-researcher-loop.md) |
+| 3 | Evaluation & Self-Improvement | 개발완료 | 아니오 | 2 | [03-evaluation-self-improvement.md](03-evaluation-self-improvement.md) |
+| 4 | Runtime & Tool Surface | 개발완료 | 아니오 | Stage 0 | [04-runtime-and-tools.md](04-runtime-and-tools.md) |
+| 5 | Daily Report & Priority | 개발완료 | 아니오 | 1 + 2 + runtime | [05-report-and-priority.md](05-report-and-priority.md) |
+| 6 | Stage Acceptance | 개발완료 | 아니오 | 1~5 | [06-acceptance.md](06-acceptance.md) |
 
 ## 00E에서 확정된 값 (placeholder 해소 완료)
 
