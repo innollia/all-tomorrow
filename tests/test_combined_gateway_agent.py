@@ -71,7 +71,11 @@ async def test_agent_through_model_and_tool_gateway(tmp_path, monkeypatch, mode)
                 result = await agent.run(canary)
             assert result.output.stock_confirmed == 42
             returns = [p for m in result.all_messages() for p in m.parts if isinstance(p, ToolReturnPart)]
-            assert any("identify" in p.tool_name and "alpha" in str(p.content) for p in returns)
+            # The fixture model prefers alpha's echo_canary when listed; the contract is that an
+            # alpha-routed tool round-tripped through the gateway and its result fed the decision.
+            alpha_returns = [p for p in returns if p.tool_name.startswith("alpha-")]
+            assert alpha_returns, [p.tool_name for p in returns]
+            assert result.output.planned_mutation_value == str(alpha_returns[-1].content)
         else:
             from tests.support.live_process_adapters import DBOSProcessAdapter
             from tests.test_live_common_d01 import _payload, _prepare_fixture, _assert_common_result

@@ -51,6 +51,11 @@ def emit_trace(tracer, trace, name: str) -> None:
             import pydantic_ai
             span.set_attribute("all_tomorrow.correlation_id", trace.correlation_id)
             span.set_attribute("pydantic_ai.version", pydantic_ai.__version__)
+            try:
+                from importlib.metadata import version as _dist_version
+                span.set_attribute("dbos.version", _dist_version("dbos"))
+            except Exception:  # dbos is optional for the Restate candidate
+                pass
 
 
 def record_followup(fixture_url, key):
