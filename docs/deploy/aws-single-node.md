@@ -129,3 +129,9 @@ one-way-door spend decision. The IaC/config/runbooks above are complete and
 reviewable; the actual provisioning (create instance, attach EBS, ALB+ACM, first
 `compose up`) and the L3 reboot/restore/upgrade verifications require the
 operator to apply them on the live account.
+
+## Edge token (eve Discord bridge)
+
+- `ALL_TOMORROW_EDGE_TOKEN` gates `/internal/edge/discord/decide` (bearer). Without it the request gets 401.
+- eve-scene-runtime sets the same value in its `ALL_TOMORROW_EDGE_TOKEN`, plus `ALL_TOMORROW_EDGE_URL=http://<node>:8080`.
+- On the live node the token is generated and kept on the node only (via SSM). It is never printed locally.
