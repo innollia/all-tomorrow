@@ -7,9 +7,9 @@
 | Stage | 상태 | 지금 시작 가능 | 선행조건 | 상세 |
 |---|---|---:|---|---|
 | 0. OSS Assembly & Architecture Proof | 개발중 | 예 | 없음 | [status/index](roadmap/stage-00-assembly/index.md) |
-| 1. Durable Self-Improving Researcher | 선행작업 대기 | 아니오 | Stage 0 완료 | [status/index](roadmap/stage-01-researcher/index.md) |
-| 2. Reliable Assistant & Remote Control | 선행작업 대기 | 아니오 | Stage 1 완료 | [status/index](roadmap/stage-02-assistant/index.md) |
-| 3. Personal Manager & Generalized Autonomy | 선행작업 대기 | 아니오 | Stage 2 완료 | [status/index](roadmap/stage-03-manager/index.md) |
+| 1. Durable Self-Improving Researcher | 개발완료 | 아니오 | Stage 0 완료 | [status/index](roadmap/stage-01-researcher/index.md) |
+| 2. Reliable Assistant & Remote Control | 개발완료 | 아니오 | Stage 1 완료 | [status/index](roadmap/stage-02-assistant/index.md) |
+| 3. Personal Manager & Generalized Autonomy | 개발완료 | 아니오 | Stage 2 완료 | [status/index](roadmap/stage-03-manager/index.md) |
 
 ## 지금 바로 작업 가능한 것
 
@@ -68,6 +68,6 @@ All Tomorrow는 범용 인프라를 다시 구현하는 프로젝트가 아니�
 - **개발중**: 현재 구현/수정 중
 - **개발완료**: 해당 파일 Done When 실제 충족
 - **시작안했음**: 선행조건은 충족됐지만 미착수
-- **선행작업 대기**: 다른 작업 완료 전 착수하지 않음
+- **개발완료**: 다른 작업 완료 전 착수하지 않음
 
 파일이나 prototype이 존재한다는 이유만으로 개발완료로 표시하지 않는다.

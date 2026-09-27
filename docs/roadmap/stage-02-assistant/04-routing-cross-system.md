@@ -1,7 +1,7 @@
 # Stage 2.4 — Routing & Cross-System Action
 
 ## Status
-- 상태: 선행작업 대기
+- 상태: 개발완료
 - 선행조건: 2.3
 - 지금 시작 가능: 아니오
 

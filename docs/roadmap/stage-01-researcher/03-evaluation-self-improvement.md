@@ -2,7 +2,7 @@
 
 ## Status
 
-- 상태: **선행작업 대기**
+- 상태: **개발완료**
 - 지금 시작 가능: **아니오**
 - 선행조건: 02 Researcher Loop 완료
 
@@ -22,12 +22,12 @@ Promptfoo/Langfuse는 실제 requirement가 생길 때만 후보로 추가한다
 
 | 순서 | 작업 | 상태 | 지금 시작 가능 | 선행조건 |
 |---:|---|---|---:|---|
-| 03A | Evaluation/Proposal Persistence | 선행작업 대기 | 아니오 | 02 |
-| 03B | Frozen Mixed Evaluation | 선행작업 대기 | 아니오 | 03A |
-| 03C | Sandbox Experiment | 선행작업 대기 | 아니오 | 03A + 03B |
-| 03D | Ordinary Promotion & Rollback | 선행작업 대기 | 아니오 | 03C |
-| 03E | Protected Classification & Handoff | 선행작업 대기 | 아니오 | 03A + 03C |
-| 03F | Acceptance | 선행작업 대기 | 아니오 | 03A~03E |
+| 03A | Evaluation/Proposal Persistence | 개발완료 | 아니오 | 02 |
+| 03B | Frozen Mixed Evaluation | 개발완료 | 아니오 | 03A |
+| 03C | Sandbox Experiment | 개발완료 | 아니오 | 03A + 03B |
+| 03D | Ordinary Promotion & Rollback | 개발완료 | 아니오 | 03C |
+| 03E | Protected Classification & Handoff | 개발완료 | 아니오 | 03A + 03C |
+| 03F | Acceptance | 개발완료 | 아니오 | 03A~03E |
 
 ## Version-safe self-change
 

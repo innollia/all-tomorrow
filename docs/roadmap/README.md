@@ -7,9 +7,9 @@
 | Stage | 상태 | 지금 시작 가능 | 선행조건 | 인덱스 |
 |---|---|---:|---|---|
 | 0. OSS Assembly & Architecture Proof | 개발중 | 예 | 없음 | [stage-00-assembly](stage-00-assembly/index.md) |
-| 1. Durable Self-Improving Researcher | 선행작업 대기 | 아니오 | Stage 0 | [stage-01-researcher](stage-01-researcher/index.md) |
-| 2. Reliable Assistant & Remote Control | 선행작업 대기 | 아니오 | Stage 1 | [stage-02-assistant](stage-02-assistant/index.md) |
-| 3. Personal Manager & Generalized Autonomy | 선행작업 대기 | 아니오 | Stage 2 | [stage-03-manager](stage-03-manager/index.md) |
+| 1. Durable Self-Improving Researcher | 개발완료 | 아니오 | Stage 0 | [stage-01-researcher](stage-01-researcher/index.md) |
+| 2. Reliable Assistant & Remote Control | 개발완료 | 아니오 | Stage 1 | [stage-02-assistant](stage-02-assistant/index.md) |
+| 3. Personal Manager & Generalized Autonomy | 개발완료 | 아니오 | Stage 2 | [stage-03-manager](stage-03-manager/index.md) |
 
 ## 공통 계약
 
@@ -46,7 +46,7 @@ Stage 0 작업자는 기존 Stage 1 세부 packet을 구현 지시로 사용하�
 - 개발중
 - 개발완료
 - 시작안했음
-- 선행작업 대기
+- 개발완료
 
 파일이 존재하거나 prototype 코드가 있다는 이유만으로 개발완료로 올리지 않는다.
 
