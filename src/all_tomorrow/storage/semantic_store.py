@@ -187,6 +187,7 @@ class GoalWorkRunStore(Protocol):
     # Questions
     async def create_question(self, question: QuestionRecordSemantic) -> QuestionRecordSemantic: ...
     async def get_question(self, question_id: QuestionId) -> QuestionRecordSemantic | None: ...
+    async def list_questions(self, work_id: WorkId) -> list[QuestionRecordSemantic]: ...
     async def answer_question(
         self,
         question_id: QuestionId,
@@ -411,6 +412,12 @@ class InMemoryGoalWorkRunStore:
 
     async def get_question(self, question_id: QuestionId) -> QuestionRecordSemantic | None:
         return self._questions.get(question_id)
+
+    async def list_questions(self, work_id: WorkId) -> list[QuestionRecordSemantic]:
+        return sorted(
+            (q for q in self._questions.values() if q.work_id == work_id),
+            key=lambda q: q.created_at,
+        )
 
     async def answer_question(
         self,
@@ -928,6 +935,19 @@ class PostgresGoalWorkRunStore:
             )
             row = await cur.fetchone()
         return _question_from_row(row) if row else None
+
+    async def list_questions(self, work_id: WorkId) -> list[QuestionRecordSemantic]:
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT question_id, work_id, run_id, prompt, status, answer_ref,
+                       signal_correlation, revision, created_at, updated_at, answered_at
+                FROM questions_semantic WHERE work_id = %s ORDER BY created_at
+                """,
+                (work_id,),
+            )
+            rows = await cur.fetchall()
+        return [_question_from_row(row) for row in rows]
 
     async def answer_question(
         self,
