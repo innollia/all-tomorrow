@@ -318,6 +318,24 @@ def create_app(
         except NotFound as error:
             raise HTTPException(status_code=404, detail="not found") from error
 
+    @app.get("/api/broken-work")
+    async def list_broken_work(user: str = Depends(current_user)) -> list[dict[str, Any]]:
+        return await ctl.list_broken_work(user)
+
+    @app.post("/api/broken-work/{work_id}/retry")
+    async def retry_broken_work(work_id: str, user: str = Depends(current_user)) -> dict[str, Any]:
+        try:
+            return await ctl.retry_broken_work(user, work_id, operator=user)
+        except NotFound as error:
+            raise HTTPException(status_code=404, detail="not found") from error
+
+    @app.post("/api/broken-work/{work_id}/clean-up")
+    async def clean_up_broken_work(work_id: str, user: str = Depends(current_user)) -> dict[str, Any]:
+        try:
+            return await ctl.clean_up_broken_work(user, work_id, operator=user)
+        except NotFound as error:
+            raise HTTPException(status_code=404, detail="not found") from error
+
     @app.post("/api/edge/discord/decide")
     async def decide(payload: EdgeDecisionRequest, _: str = Depends(current_user)) -> dict[str, Any]:
         decision = policy.decide(EdgeAnalysis(**payload.model_dump()))

@@ -12,10 +12,11 @@ from typing import Any
 
 from all_tomorrow.domain.errors import DomainError
 from all_tomorrow.domain.ids import GoalId, QuestionId, WorkId, new_event_id, new_goal_id, new_work_id
-from all_tomorrow.domain.state import GoalRecord, WorkRecord
+from all_tomorrow.domain.state import GoalRecord, WorkRecord, WorkStatus
 from all_tomorrow.execution_service import ExecutionService
 from all_tomorrow.ingress_adapters import web_api_ingress
 from all_tomorrow.report.store import Report, ReportStore
+from all_tomorrow.repair import RepairError, RepairItem, RepairService, RepairStatus
 from all_tomorrow.requests import RequestStore
 from all_tomorrow.storage.artifact_store import ArtifactAccessDeniedError, ArtifactStoreProtocol
 from all_tomorrow.storage.semantic_store import GoalWorkRunStore, SemanticEvent
@@ -43,11 +44,13 @@ class WebControl:
         *,
         artifact_store: ArtifactStoreProtocol | None = None,
         report_store: ReportStore | None = None,
+        repair_service: RepairService | None = None,
     ) -> None:
         self.store = store
         self.requests = requests or RequestStore()
         self.artifact_store = artifact_store
         self.report_store = report_store or ReportStore()
+        self.repair_service = repair_service or RepairService()
         self._goal_for_request: dict[str, GoalId] = {}
         self._lock = asyncio.Lock()
 
@@ -216,3 +219,71 @@ class WebControl:
                 for s in report.sections
             ],
         }
+
+    # -- Feature 6: broken/stuck Work -- list, retry, clean up (via RepairService) --
+    async def list_broken_work(self, user: str) -> list[dict[str, Any]]:
+        """FAILED Work owned by ``user``. A STUCK Work is one RUNNING/WAITING with
+        no active Run left (its Run already terminalized without the Work
+        following) -- surfaced the same way so an operator can act on either."""
+        out: list[dict[str, Any]] = []
+        for goal in await self.store.list_goals(user_id=user):
+            for work in await self.store.list_work(goal.goal_id):
+                is_stuck = False
+                if work.status in (WorkStatus.RUNNING, WorkStatus.WAITING):
+                    runs = await self.store.list_runs(work.work_id)
+                    is_stuck = bool(runs) and not any(r.is_active() for r in runs)
+                if work.status == WorkStatus.FAILED or is_stuck:
+                    out.append({
+                        "work_id": str(work.work_id), "goal_id": str(goal.goal_id),
+                        "title": work.title, "status": str(work.status), "stuck": is_stuck,
+                    })
+        return out
+
+    async def retry_broken_work(self, user: str, work_id: str, *, operator: str) -> dict[str, Any]:
+        """Retry = a fresh Work under the same Goal (FAILED/terminal Work is never
+        revived in place -- TerminalReviveError -- so a new attempt is a new Work),
+        recorded through RepairService for the audit trail."""
+        work = await self.store.get_work(WorkId(work_id))
+        if work is None:
+            raise NotFound(work_id)
+        await self._owned_goal(user, str(work.goal_id))
+        repair_id = f"repair:{work_id}"
+        item = self.repair_service._items.get(repair_id)
+        if item is None:
+            item = self.repair_service.record_repair_required(RepairItem(
+                repair_id=repair_id, subject_ref=f"work:{work_id}", reason="failed or stuck",
+                safe_to_retry=True, provenance_refs=(f"work:{work_id}",),
+            ))
+        self.repair_service.authorize(operator)
+        self.repair_service.retry(repair_id, operator)
+        new_work = WorkRecord(work_id=new_work_id(), goal_id=work.goal_id, title=work.title)
+        await self.store.create_work(
+            new_work, _evt(operator, "work.retried", goal_id=work.goal_id, work_id=new_work.work_id,
+                            payload={"retried_from": work_id}),
+        )
+        return {"original_work_id": work_id, "new_work_id": str(new_work.work_id)}
+
+    async def clean_up_broken_work(self, user: str, work_id: str, *, operator: str) -> dict[str, Any]:
+        """Abandon a broken Work -- recorded through RepairService, never a blind
+        automatic retry for a non-retryable item."""
+        work = await self.store.get_work(WorkId(work_id))
+        if work is None:
+            raise NotFound(work_id)
+        await self._owned_goal(user, str(work.goal_id))
+        repair_id = f"repair:{work_id}"
+        if repair_id not in self.repair_service._items:
+            self.repair_service.record_repair_required(RepairItem(
+                repair_id=repair_id, subject_ref=f"work:{work_id}", reason="failed or stuck",
+                safe_to_retry=False, provenance_refs=(f"work:{work_id}",),
+            ))
+        self.repair_service.authorize(operator)
+        self.repair_service.abandon(repair_id, operator)
+        if work.status in (WorkStatus.RUNNING, WorkStatus.WAITING, WorkStatus.PENDING):
+            try:
+                await self.store.transition_work_status(
+                    work.work_id, WorkStatus.CANCELLED, work.revision,
+                    _evt(operator, "work.cleaned_up", work_id=work.work_id),
+                )
+            except DomainError:
+                pass  # already terminal (e.g. FAILED); nothing left to transition
+        return {"work_id": work_id, "status": "ABANDONED"}
