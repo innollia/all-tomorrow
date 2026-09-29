@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 
 from all_tomorrow.contracts import Project
 from all_tomorrow.edge import EdgeAnalysis, load_edge_policy
+from all_tomorrow.storage.semantic_store import InMemoryGoalWorkRunStore
+from all_tomorrow.web_control import NotFound, WebControl
 
 
 SESSION_COOKIE = "all_tomorrow_session"
@@ -31,6 +33,15 @@ class WebState:
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=1024)
+
+
+class SubmitRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class AnswerRequest(BaseModel):
+    answer: str = Field(min_length=1, max_length=4000)
 
 
 class EdgeDecisionRequest(BaseModel):
@@ -97,41 +108,86 @@ class Auth:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid edge credential")
 
 
+_BASE_CSS = (
+    ":root{color-scheme:dark}"
+    "body{font:15px system-ui,sans-serif;background:#000;color:#fff;margin:0}"
+    "input,textarea,button{font:inherit;color:#fff;background:#000;border:1px solid #555;border-radius:4px;padding:9px}"
+    "input:focus,textarea:focus,button:focus-visible{outline:2px solid #fff;outline-offset:-1px}"
+    "button{cursor:pointer}button.primary{background:#fff;color:#000;border-color:#fff}"
+    "button:disabled{opacity:.5;cursor:default}.muted{color:#999}.err{color:#f66}"
+)
+
+
 def _login_page() -> str:
-    return """<!doctype html>
+    return f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>All Tomorrow</title><style>
-body{font:15px system-ui,sans-serif;background:#fafafa;color:#111;display:grid;place-items:center;height:100vh;margin:0}
-form{display:grid;gap:10px;width:min(300px,85vw)}h1{font-size:18px;font-weight:600;margin:0 0 8px}
-input,button{font:inherit;padding:10px;border:1px solid #ccc;border-radius:4px;background:#fff;color:#111}
-input:focus{outline:2px solid #111;outline-offset:-1px}button{background:#111;color:#fff;border-color:#111;cursor:pointer}
-#error{color:#b00;font-size:13px;min-height:1.2em}
-</style></head><body><form id="login"><h1>All Tomorrow</h1><input id="username" autocomplete="username" placeholder="사용자명">
-<input id="password" type="password" autocomplete="current-password" placeholder="비밀번호"><button>로그인</button><div id="error"></div></form>
-<script>login.onsubmit=async(e)=>{e.preventDefault();const r=await fetch('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:username.value,password:password.value})});if(r.ok)location='/';else error.textContent='로그인 실패';}</script></body></html>"""
+<title>All Tomorrow</title><style>{_BASE_CSS}
+body{{display:grid;place-items:center;height:100vh}}form{{display:grid;gap:10px;width:min(300px,85vw)}}
+h1{{font-size:18px;font-weight:600;margin:0 0 8px}}#error{{font-size:13px;min-height:1.2em}}
+</style></head><body><form id="login"><h1>All Tomorrow</h1>
+<input id="username" autocomplete="username" placeholder="사용자명" autofocus>
+<input id="password" type="password" autocomplete="current-password" placeholder="비밀번호">
+<button class="primary">로그인</button><div id="error" class="err"></div></form>
+<script>login.onsubmit=async(e)=>{{e.preventDefault();const r=await fetch('/api/login',{{method:'POST',headers:{{'content-type':'application/json'}},body:JSON.stringify({{username:username.value,password:password.value}})}});if(r.ok)location='/';else error.textContent='로그인 실패';}}</script></body></html>"""
+
+
+_STATUS_KO = {
+    "ACTIVE": "진행 중", "WAITING": "대기", "SUCCEEDED": "완료", "FAILED": "실패",
+    "CANCEL_REQUESTED": "취소 요청됨", "CANCELLED": "취소됨", "PENDING": "대기",
+    "RUNNING": "실행 중", "STARTING": "시작 중",
+}
 
 
 def _dashboard(username: str) -> str:
     safe_user = escape(username)
+    status_ko = json.dumps(_STATUS_KO, ensure_ascii=False)
     return f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>All Tomorrow</title><style>
-body{{font:15px system-ui,sans-serif;margin:0 auto;max-width:720px;padding:24px;background:#fafafa;color:#111}}
-header{{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #ddd;padding-bottom:12px}}
-h1{{font-size:18px;font-weight:600;margin:0}}h2{{font-size:14px;font-weight:600;margin:28px 0 8px;color:#555}}
-ul{{list-style:none;padding:0;margin:0}}li{{padding:8px 0;border-bottom:1px solid #eee;word-break:break-all}}.empty{{color:#999}}
-button{{font:inherit;background:none;border:1px solid #ccc;border-radius:4px;padding:4px 10px;cursor:pointer}}
-</style></head><body><header><h1>All Tomorrow</h1><span>{safe_user} <button onclick="logout()">로그아웃</button></span></header>
-<h2>프로젝트</h2><ul id="projects"><li class="empty">불러오는 중</li></ul>
-<h2>실행 기록</h2><ul id="runs"><li class="empty">불러오는 중</li></ul>
-<h2>답을 기다리는 질문</h2><ul id="questions"><li class="empty">불러오는 중</li></ul>
-<script>function label(x){{if(typeof x!=='object'||!x)return String(x);return x.title||x.name||x.question||x.text||x.id||JSON.stringify(x);}}
-async function load(id,path){{const el=document.getElementById(id);const r=await fetch(path);if(!r.ok){{el.innerHTML='<li class="empty">불러오기 실패</li>';return;}}
-const items=await r.json();el.innerHTML='';if(!items.length){{el.innerHTML='<li class="empty">없음</li>';return;}}
-for(const it of items){{const li=document.createElement('li');li.textContent=label(it);el.appendChild(li);}}}}
-load('projects','/api/projects');load('runs','/api/runs');load('questions','/api/questions');
-async function logout(){{await fetch('/api/logout',{{method:'POST'}});location='/login';}}</script></body></html>"""
-
+<title>All Tomorrow</title><style>{_BASE_CSS}
+main{{max-width:720px;margin:0 auto;padding:24px}}
+header{{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #333;padding-bottom:12px}}
+h1{{font-size:18px;font-weight:600;margin:0}}h2{{font-size:14px;font-weight:600;margin:28px 0 8px;color:#bbb}}
+form.ask{{display:grid;gap:8px;margin-top:20px}}textarea{{min-height:70px;resize:vertical}}
+.row{{display:flex;gap:8px;align-items:center;justify-content:space-between}}
+ul{{list-style:none;padding:0;margin:0}}li{{padding:10px 0;border-bottom:1px solid #222}}
+.title{{word-break:break-word}}.meta{{font-size:13px;color:#999;margin-top:4px}}
+.qa{{display:flex;gap:8px;margin-top:8px}}.qa input{{flex:1}}
+</style></head><body><main>
+<header><h1>All Tomorrow</h1><span>{safe_user} <button onclick="logout()">로그아웃</button></span></header>
+<form class="ask" id="ask"><label for="text" class="muted">할 일을 요청하세요 (Ctrl+Enter로 보내기)</label>
+<textarea id="text" autofocus></textarea>
+<div class="row"><span id="askmsg" class="muted"></span><button class="primary" id="send">보내기</button></div></form>
+<h2>답을 기다리는 질문</h2><ul id="questions"><li class="muted">불러오는 중</li></ul>
+<h2>요청한 일</h2><ul id="goals"><li class="muted">불러오는 중</li></ul>
+</main><script>
+const KO={status_ko};const ko=s=>KO[s]||s;let pendingKey=null;
+async function api(path,body){{const r=await fetch(path,{{method:body?'POST':'GET',headers:body?{{'content-type':'application/json'}}:{{}},body:body?JSON.stringify(body):undefined}});
+if(r.status===401){{location='/login';throw new Error('auth');}}if(!r.ok)throw new Error((await r.json().catch(()=>({{}}))).detail||r.status);return r.json();}}
+function el(tag,cls,text){{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}}
+async function refresh(){{let d;try{{d=await api('/api/overview');}}catch(e){{return;}}
+const q=document.getElementById('questions');q.innerHTML='';
+if(!d.questions.length)q.appendChild(el('li','muted','없음'));
+for(const it of d.questions){{const li=el('li');li.appendChild(el('div','title',it.prompt));li.appendChild(el('div','meta',it.goal_title));
+const f=el('form','qa');const inp=el('input');inp.placeholder='답변';inp.setAttribute('aria-label','답변');const b=el('button','primary','답하기');
+f.append(inp,b);f.onsubmit=async(e)=>{{e.preventDefault();b.disabled=true;try{{await api('/api/questions/'+encodeURIComponent(it.question_id)+'/answer',{{answer:inp.value}});await refresh();}}catch(err){{b.disabled=false;alert('실패: '+err.message);}}}};
+li.appendChild(f);q.appendChild(li);}}
+const g=document.getElementById('goals');g.innerHTML='';
+if(!d.goals.length)g.appendChild(el('li','muted','없음'));
+for(const it of d.goals){{const li=el('li');const row=el('div','row');row.appendChild(el('div','title',it.title));
+if(!it.terminal&&it.status!=='CANCEL_REQUESTED'){{const b=el('button',null,'취소');b.onclick=async()=>{{if(!confirm('이 일을 취소할까요?'))return;b.disabled=true;try{{await api('/api/goals/'+encodeURIComponent(it.goal_id)+'/cancel',{{}});}}catch(err){{alert('실패: '+err.message);}}await refresh();}};row.appendChild(b);}}
+li.appendChild(row);const runs=it.works.flatMap(w=>w.runs);
+const work=it.works.map(w=>ko(w.status)).join(', ');
+li.appendChild(el('div','meta',ko(it.status)+(work?' · 작업 '+work:'')+' · 실행 '+runs.length+'회 · '+new Date(it.created_at).toLocaleString('ko-KR')));
+g.appendChild(li);}}}}
+ask.onsubmit=async(e)=>{{e.preventDefault();const v=text.value.trim();if(!v)return;send.disabled=true;askmsg.textContent='보내는 중';
+pendingKey=pendingKey||crypto.randomUUID();
+try{{const r=await api('/api/requests',{{text:v,idempotency_key:pendingKey}});pendingKey=null;text.value='';askmsg.textContent=r.is_new?'접수됨':'이미 접수된 요청';await refresh();}}
+catch(err){{askmsg.textContent='실패: '+err.message+' (다시 보내도 한 번만 접수됩니다)';}}send.disabled=false;}};
+text.addEventListener('input',()=>{{pendingKey=null;}});
+text.addEventListener('keydown',e=>{{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){{e.preventDefault();ask.requestSubmit();}}}});
+async function logout(){{await fetch('/api/logout',{{method:'POST'}});location='/login';}}
+refresh();setInterval(refresh,10000);
+</script></body></html>"""
 
 def create_app(
     *,
@@ -139,10 +195,13 @@ def create_app(
     web_state: WebState | None = None,
     policy_path: str = "edge/discord/default.yaml",
     cookie_secure: bool = True,
+    control: WebControl | None = None,
+    lifespan: Any = None,
 ) -> FastAPI:
-    app = FastAPI(title="All Tomorrow Control Plane", version="0.1.0")
+    app = FastAPI(title="All Tomorrow Control Plane", version="0.1.0", lifespan=lifespan)
     state_store = web_state or WebState()
     policy = load_edge_policy(policy_path)
+    ctl = control or WebControl(InMemoryGoalWorkRunStore())
 
     def current_user(all_tomorrow_session: str | None = Cookie(default=None, alias=SESSION_COOKIE)) -> str:
         return auth.verify(all_tomorrow_session)
@@ -195,6 +254,35 @@ def create_app(
     async def questions(_: str = Depends(current_user)) -> list[dict[str, Any]]:
         return list(state_store.questions)
 
+    @app.get("/api/overview")
+    async def overview(user: str = Depends(current_user)) -> dict[str, Any]:
+        return await ctl.overview(user)
+
+    @app.post("/api/requests")
+    async def submit_request(payload: SubmitRequest, user: str = Depends(current_user)) -> dict[str, Any]:
+        try:
+            return await ctl.submit(user, payload.text, payload.idempotency_key)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post("/api/goals/{goal_id}/cancel")
+    async def cancel_goal(goal_id: str, user: str = Depends(current_user)) -> dict[str, Any]:
+        try:
+            return await ctl.cancel(user, goal_id)
+        except NotFound as error:
+            raise HTTPException(status_code=404, detail="not found") from error
+
+    @app.post("/api/questions/{question_id}/answer")
+    async def answer_question(
+        question_id: str, payload: AnswerRequest, user: str = Depends(current_user)
+    ) -> dict[str, Any]:
+        try:
+            return await ctl.answer(user, question_id, payload.answer)
+        except NotFound as error:
+            raise HTTPException(status_code=404, detail="not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
     @app.post("/api/edge/discord/decide")
     async def decide(payload: EdgeDecisionRequest, _: str = Depends(current_user)) -> dict[str, Any]:
         decision = policy.decide(EdgeAnalysis(**payload.model_dump()))
@@ -226,7 +314,33 @@ def app_from_environment() -> FastAPI:
     edge_token = os.environ.get("ALL_TOMORROW_EDGE_TOKEN")
     # Secure cookies need HTTPS; allow opting out for a plain-HTTP deployment.
     cookie_secure = os.environ.get("ALL_TOMORROW_COOKIE_SECURE", "true").lower() not in {"0", "false", "no"}
-    return create_app(auth=Auth(username, password, secret, edge_token=edge_token), cookie_secure=cookie_secure)
+    auth = Auth(username, password, secret, edge_token=edge_token)
+    database_url = os.environ.get("ALL_TOMORROW_DATABASE_URL", "")
+    if not database_url:
+        return create_app(auth=auth, cookie_secure=cookie_secure)
+
+    # Durable mode: the web reads and writes the canonical PostgreSQL store.
+    from contextlib import asynccontextmanager
+    from pathlib import Path
+
+    from all_tomorrow.storage.postgres import PostgresStore
+    from all_tomorrow.storage.semantic_store import PostgresGoalWorkRunStore
+
+    semantic = PostgresGoalWorkRunStore(database_url)
+    migration_dir = os.environ.get("ALL_TOMORROW_MIGRATIONS", "migrations")
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        migrator = PostgresStore(database_url, pool=semantic.pool)
+        await semantic.open()
+        if Path(migration_dir).is_dir():
+            await migrator.migrate(migration_dir)
+        try:
+            yield
+        finally:
+            await semantic.close()
+
+    return create_app(auth=auth, cookie_secure=cookie_secure, control=WebControl(semantic), lifespan=lifespan)
 
 
 def run() -> None:
