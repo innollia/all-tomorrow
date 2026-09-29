@@ -47,7 +47,13 @@ from all_tomorrow.domain.ids import (
     new_event_id,
     utc_now,
 )
-from all_tomorrow.domain.outcomes import CompletionEvidence, OutcomeRecord
+from all_tomorrow.domain.outcomes import (
+    CompletionEvidence,
+    OutcomeRecord,
+    OutcomeStatus,
+    TargetType,
+    verify_completion_evidence,
+)
 from all_tomorrow.domain.state import (
     GoalRecord,
     GoalStatus,
@@ -188,6 +194,8 @@ class GoalWorkRunStore(Protocol):
         run_id: RunId | None = None,
     ) -> list[SemanticEvent]: ...
 
+    async def get_outcome(self, work_id: WorkId) -> OutcomeRecord | None: ...
+
     # Questions
     async def create_question(self, question: QuestionRecordSemantic) -> QuestionRecordSemantic: ...
     async def get_question(self, question_id: QuestionId) -> QuestionRecordSemantic | None: ...
@@ -222,6 +230,7 @@ class InMemoryGoalWorkRunStore:
         self._events: list[SemanticEvent] = []
         self._questions: dict[QuestionId, QuestionRecordSemantic] = {}
         self._delivery_signals: list[dict[str, Any]] = []
+        self._outcomes: dict[WorkId, OutcomeRecord] = {}
 
     def run_revision(self, run_id: RunId) -> int:
         """Current stored revision for a Run (1 at creation)."""
@@ -301,6 +310,13 @@ class InMemoryGoalWorkRunStore:
             updated = transition_work(current, target, evidence)
             self._work[work_id] = updated
             self._events.append(event)
+            if target == WorkStatus.SUCCEEDED:
+                # transition_work already verified evidence -> OutcomeRecord; persist
+                # it so the artifact_refs it carries are queryable later (list_outcomes).
+                outcome = evidence if isinstance(evidence, OutcomeRecord) else verify_completion_evidence(
+                    TargetType.WORK, str(work_id), evidence
+                )
+                self._outcomes[work_id] = outcome
             return updated
 
     # -- Run ----------------------------------------------------------------
@@ -419,6 +435,9 @@ class InMemoryGoalWorkRunStore:
         if run_id is not None:
             events = [e for e in events if e.run_id == run_id]
         return events
+
+    async def get_outcome(self, work_id: WorkId) -> OutcomeRecord | None:
+        return self._outcomes.get(work_id)
 
     # -- Questions ----------------------------------------------------------
     async def create_question(self, question: QuestionRecordSemantic) -> QuestionRecordSemantic:
@@ -688,6 +707,11 @@ class PostgresGoalWorkRunStore:
                 if await res.fetchone() is None:
                     raise StoreConflictError(f"work {work_id} revision conflict")
                 await self._append_event_conn(conn, event)
+                if target == WorkStatus.SUCCEEDED:
+                    outcome = evidence if isinstance(evidence, OutcomeRecord) else verify_completion_evidence(
+                        TargetType.WORK, str(work_id), evidence
+                    )
+                    await self._insert_outcome_conn(conn, outcome)
         return updated
 
     # -- Run ----------------------------------------------------------------
@@ -925,6 +949,59 @@ class PostgresGoalWorkRunStore:
                     )
                     claimed.append(updated)
         return claimed
+
+    async def _insert_outcome_conn(self, conn: Any, outcome: OutcomeRecord) -> None:
+        evidence = outcome.evidence
+        await conn.execute(
+            """
+            INSERT INTO outcomes
+                (outcome_id, target_type, target_id, status, criterion_ref,
+                 evaluator_ref, evaluator_version, observed_values, evidence_refs,
+                 artifact_refs, details, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (outcome_id) DO NOTHING
+            """,
+            (
+                outcome.outcome_id, outcome.target_type.value, outcome.target_id,
+                outcome.status.value,
+                evidence.criterion_ref if evidence else None,
+                evidence.evaluator_ref if evidence else None,
+                evidence.evaluator_version if evidence else None,
+                Jsonb(evidence.observed_values if evidence else {}),
+                Jsonb(list(evidence.evidence_refs) if evidence else []),
+                Jsonb(list(evidence.artifact_refs) if evidence else []),
+                Jsonb(outcome.details),
+                outcome.created_at,
+            ),
+        )
+
+    async def get_outcome(self, work_id: WorkId) -> OutcomeRecord | None:
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT outcome_id, target_type, target_id, status, criterion_ref,
+                       evaluator_ref, evaluator_version, observed_values,
+                       evidence_refs, artifact_refs, details, created_at
+                FROM outcomes WHERE target_type = 'WORK' AND target_id = %s
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (work_id,),
+            )
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        evidence = None
+        if row[4] and row[5] and row[6]:
+            evidence = CompletionEvidence(
+                criterion_ref=row[4], evaluator_ref=row[5], evaluator_version=row[6],
+                observed_values=dict(row[7] or {}), evidence_refs=tuple(row[8] or ()),
+                artifact_refs=tuple(row[9] or ()),
+            )
+        return OutcomeRecord(
+            outcome_id=row[0], target_type=TargetType(row[1]), target_id=row[2],
+            status=OutcomeStatus(row[3]), evidence=evidence, details=dict(row[10] or {}),
+            created_at=row[11],
+        )
 
     # -- Events -------------------------------------------------------------
     async def _append_event_conn(self, conn: Any, event: SemanticEvent) -> None:

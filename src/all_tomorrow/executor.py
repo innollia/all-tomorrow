@@ -29,6 +29,7 @@ from all_tomorrow.domain.ids import QuestionId, new_event_id, new_question_id, n
 from all_tomorrow.domain.outcomes import CompletionEvidence
 from all_tomorrow.domain.state import RunStatus, WorkRecord, WorkStatus
 from all_tomorrow.registry import WorkerService
+from all_tomorrow.storage.artifact_store import ArtifactStoreProtocol
 from all_tomorrow.storage.semantic_store import (
     GoalWorkRunStore,
     QuestionRecordSemantic,
@@ -44,6 +45,18 @@ EVALUATOR_VERSION = "1"
 
 class NoWorkerAvailableError(DomainError):
     """Raised (and turned into a FAILED Work) when no configured worker can run it."""
+
+
+def _extract_output_text(result: WorkerResult) -> str | None:
+    payload = result.payload or {}
+    for key in ("output", "text", "stdout", "result"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    if payload:
+        import json as _json
+        return _json.dumps(payload, ensure_ascii=False)
+    return None
 
 
 def _evt(actor: str, type_: str, **kw) -> SemanticEvent:
@@ -73,12 +86,14 @@ class ExecutorLoop:
         worker_id: str = DEFAULT_WORKER_ID,
         actor: str = "executor",
         poll_interval_seconds: float = 2.0,
+        artifact_store: ArtifactStoreProtocol | None = None,
     ) -> None:
         self.store = store
         self.worker_service = worker_service
         self.worker_id = worker_id
         self.actor = actor
         self.poll_interval_seconds = poll_interval_seconds
+        self.artifact_store = artifact_store
 
     def _select_worker_id(self, work: WorkRecord) -> str:
         return self.worker_id
@@ -154,11 +169,22 @@ class ExecutorLoop:
             run.run_id, RunStatus.SUCCEEDED, rev,
             _evt(self.actor, "run.succeeded", work_id=work.work_id, run_id=run.run_id),
         )
+        artifact_refs: tuple[str, ...] = ()
+        if self.artifact_store is not None:
+            output_text = _extract_output_text(result)
+            if output_text:
+                ref = await self.artifact_store.store(
+                    output_text, media_type="text/plain", owner_id=str(work.work_id),
+                )
+                # Store the content_hash (content-addressed, resolvable by the web
+                # layer via retrieve_by_content_hash), not the internal artifact_id.
+                artifact_refs = (ref.content_hash,)
         evidence = CompletionEvidence(
             criterion_ref=f"work:{work.work_id}",
             evaluator_ref=EVALUATOR_REF,
             evaluator_version=EVALUATOR_VERSION,
             observed_values={"duration_ms": result.duration_ms},
+            artifact_refs=artifact_refs,
         )
         work_cur = await self.store.get_work(work.work_id)
         await self.store.transition_work_status(

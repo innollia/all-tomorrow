@@ -11,11 +11,13 @@ import asyncio
 from typing import Any
 
 from all_tomorrow.domain.errors import DomainError
-from all_tomorrow.domain.ids import GoalId, QuestionId, new_event_id, new_goal_id, new_work_id
+from all_tomorrow.domain.ids import GoalId, QuestionId, WorkId, new_event_id, new_goal_id, new_work_id
 from all_tomorrow.domain.state import GoalRecord, WorkRecord
 from all_tomorrow.execution_service import ExecutionService
 from all_tomorrow.ingress_adapters import web_api_ingress
+from all_tomorrow.report.store import Report, ReportStore
 from all_tomorrow.requests import RequestStore
+from all_tomorrow.storage.artifact_store import ArtifactAccessDeniedError, ArtifactStoreProtocol
 from all_tomorrow.storage.semantic_store import GoalWorkRunStore, SemanticEvent
 
 MAX_TEXT = 4000
@@ -34,9 +36,18 @@ def _ts(value: Any) -> str | None:
 
 
 class WebControl:
-    def __init__(self, store: GoalWorkRunStore, requests: RequestStore | None = None) -> None:
+    def __init__(
+        self,
+        store: GoalWorkRunStore,
+        requests: RequestStore | None = None,
+        *,
+        artifact_store: ArtifactStoreProtocol | None = None,
+        report_store: ReportStore | None = None,
+    ) -> None:
         self.store = store
         self.requests = requests or RequestStore()
+        self.artifact_store = artifact_store
+        self.report_store = report_store or ReportStore()
         self._goal_for_request: dict[str, GoalId] = {}
         self._lock = asyncio.Lock()
 
@@ -113,3 +124,95 @@ class WebControl:
             q.question_id, q.revision, answer, f"web:{new_event_id()}"
         )
         return {"question_id": question_id, "status": updated.status}
+
+    # -- Feature 4: Goal detail (Work list, Run history, event/state timeline) --
+    async def goal_detail(self, user: str, goal_id: str) -> dict[str, Any]:
+        goal = await self._owned_goal(user, goal_id)
+        works_out: list[dict[str, Any]] = []
+        for work in await self.store.list_work(goal.goal_id):
+            runs = await self.store.list_runs(work.work_id)
+            outcome = await self.store.get_outcome(work.work_id)
+            events = await self.store.list_events(work_id=work.work_id)
+            works_out.append({
+                "work_id": str(work.work_id), "title": work.title, "status": str(work.status),
+                "revision": work.revision, "created_at": _ts(work.created_at),
+                "runs": [
+                    {"run_id": str(r.run_id), "status": str(r.status),
+                     "attempt": r.attempt_number, "created_at": _ts(r.created_at)}
+                    for r in sorted(runs, key=lambda r: r.created_at)
+                ],
+                "artifact_refs": list(outcome.evidence.artifact_refs) if outcome and outcome.evidence else [],
+                "events": [
+                    {"type": e.type, "actor": e.actor, "occurred_at": _ts(e.occurred_at)}
+                    for e in sorted(events, key=lambda e: e.occurred_at)
+                ],
+            })
+        goal_events = await self.store.list_events(goal_id=goal.goal_id)
+        return {
+            "goal_id": str(goal.goal_id), "title": goal.title, "status": str(goal.status),
+            "revision": goal.revision, "created_at": _ts(goal.created_at), "works": works_out,
+            "events": [
+                {"type": e.type, "actor": e.actor, "occurred_at": _ts(e.occurred_at)}
+                for e in sorted(goal_events, key=lambda e: e.occurred_at)
+            ],
+        }
+
+    # -- Feature 3: artifact listing/viewing (own Work's outputs only) ----------
+    async def list_work_artifacts(self, user: str, work_id: str) -> list[dict[str, Any]]:
+        work = await self.store.get_work(WorkId(work_id))
+        if work is None:
+            raise NotFound(work_id)
+        await self._owned_goal(user, str(work.goal_id))
+        outcome = await self.store.get_outcome(work.work_id)
+        if outcome is None or outcome.evidence is None:
+            return []
+        return [{"artifact_id": ref} for ref in outcome.evidence.artifact_refs]
+
+    async def get_artifact_content(self, user: str, work_id: str, artifact_ref: str) -> str:
+        """``artifact_ref`` here is the content_hash the executor recorded in
+        CompletionEvidence.artifact_refs (see executor._succeed)."""
+        if self.artifact_store is None:
+            raise NotFound(artifact_ref)
+        work = await self.store.get_work(WorkId(work_id))
+        if work is None:
+            raise NotFound(work_id)
+        await self._owned_goal(user, str(work.goal_id))
+        outcome = await self.store.get_outcome(work.work_id)
+        refs = outcome.evidence.artifact_refs if outcome and outcome.evidence else ()
+        if artifact_ref not in refs:
+            raise NotFound(artifact_ref)
+        resolver = getattr(self.artifact_store, "retrieve_by_content_hash", None)
+        if resolver is None:
+            raise NotFound(artifact_ref)
+        try:
+            content = await resolver(artifact_ref)
+        except FileNotFoundError as error:
+            raise NotFound(artifact_ref) from error
+        try:
+            return content.decode("utf-8")
+        except UnicodeDecodeError:
+            return content.decode("utf-8", errors="replace")
+
+    # -- Feature 5: reports -----------------------------------------------------
+    def list_reports(self, user: str) -> list[dict[str, Any]]:
+        reports = [r for r in self.report_store._by_id.values() if r.user_id == user]
+        reports.sort(key=lambda r: r.period_start_utc, reverse=True)
+        return [
+            {"report_id": r.report_id, "logical_period_id": r.logical_period_id,
+             "status": str(r.status), "summary": r.summary, "created_at": _ts(r.created_at)}
+            for r in reports
+        ]
+
+    def get_report(self, user: str, report_id: str) -> dict[str, Any]:
+        report = self.report_store.get(report_id)
+        if report is None or report.user_id != user:
+            raise NotFound(report_id)
+        return {
+            "report_id": report.report_id, "logical_period_id": report.logical_period_id,
+            "status": str(report.status), "summary": report.summary,
+            "created_at": _ts(report.created_at),
+            "sections": [
+                {"title": s.title, "source_refs": list(s.source_refs), "unknown": s.unknown}
+                for s in report.sections
+            ],
+        }

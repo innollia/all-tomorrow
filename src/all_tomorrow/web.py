@@ -283,6 +283,41 @@ def create_app(
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
+    @app.get("/api/goals/{goal_id}")
+    async def goal_detail(goal_id: str, user: str = Depends(current_user)) -> dict[str, Any]:
+        try:
+            return await ctl.goal_detail(user, goal_id)
+        except NotFound as error:
+            raise HTTPException(status_code=404, detail="not found") from error
+
+    @app.get("/api/works/{work_id}/artifacts")
+    async def list_work_artifacts(work_id: str, user: str = Depends(current_user)) -> list[dict[str, Any]]:
+        try:
+            return await ctl.list_work_artifacts(user, work_id)
+        except NotFound as error:
+            raise HTTPException(status_code=404, detail="not found") from error
+
+    @app.get("/api/works/{work_id}/artifacts/{artifact_ref}")
+    async def get_work_artifact(
+        work_id: str, artifact_ref: str, user: str = Depends(current_user)
+    ) -> dict[str, Any]:
+        try:
+            content = await ctl.get_artifact_content(user, work_id, artifact_ref)
+        except NotFound as error:
+            raise HTTPException(status_code=404, detail="not found") from error
+        return {"artifact_ref": artifact_ref, "content": content}
+
+    @app.get("/api/reports")
+    async def list_reports(user: str = Depends(current_user)) -> list[dict[str, Any]]:
+        return ctl.list_reports(user)
+
+    @app.get("/api/reports/{report_id}")
+    async def get_report(report_id: str, user: str = Depends(current_user)) -> dict[str, Any]:
+        try:
+            return ctl.get_report(user, report_id)
+        except NotFound as error:
+            raise HTTPException(status_code=404, detail="not found") from error
+
     @app.post("/api/edge/discord/decide")
     async def decide(payload: EdgeDecisionRequest, _: str = Depends(current_user)) -> dict[str, Any]:
         decision = policy.decide(EdgeAnalysis(**payload.model_dump()))

@@ -83,6 +83,20 @@ class LocalArtifactStore:
             )
         return data
 
+    async def retrieve_by_content_hash(self, content_hash: str) -> bytes:
+        """Content-addressed lookup: the caller only has the hash (e.g. from a
+        CompletionEvidence.artifact_refs entry), not the full ArtifactRef."""
+        file_path = self.base_dir / f"{content_hash}.dat"
+        if not file_path.exists():
+            raise FileNotFoundError(f"Artifact with content_hash {content_hash} not found")
+        data = file_path.read_bytes()
+        actual_hash = compute_content_hash(data)
+        if actual_hash != content_hash:
+            raise ArtifactIntegrityError(
+                f"Artifact hash mismatch: expected {content_hash}, got {actual_hash}"
+            )
+        return data
+
 
 @dataclass(frozen=True, slots=True)
 class StagedUpload:
