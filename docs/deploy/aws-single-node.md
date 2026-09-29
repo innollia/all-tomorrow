@@ -35,8 +35,8 @@ Provisioned and serving:
 | resource | value |
 |---|---|
 | instance | `i-034a2f4ca37b9e293` (t3.small, AL2023 `ami-03137ee2d0c5af1fe`, 20GB gp3) |
-| public endpoint | `http://15.164.99.125:8080/healthz` → `200 {"ok":true,"service":"all-tomorrow","version":"0.1.0"}` |
-| security group | `sg-03fd323bce8b24f5e` — inbound 8080 (app) + 22 (admin) only; postgres bound `127.0.0.1:5432` (private) |
+| public endpoint | `https://15.164.99.125.sslip.io/healthz` → `200` (Caddy 리버스 프록시가 8080 앱으로 전달, Let's Encrypt 자동 인증서) |
+| security group | `sg-03fd323bce8b24f5e` — inbound 80 (ACME/redirect) + 443 (https app) + 22 (admin) only; 8080은 확인 후 닫음; postgres bound `127.0.0.1:5432` (private) |
 | IAM instance profile | `all-tomorrow-node` — `AmazonEC2ContainerRegistryReadOnly` + `AmazonSSMManagedInstanceCore` (no protected/approval credential on the node, per 04D-04) |
 | stack | `docker compose` (postgres@digest + app@ECR digest); secrets (pg password, session secret, admin password) generated on the node, never in the image or repo |
 | autostart | systemd `all-tomorrow.service` (enabled) — survives reboot (04D-01) |
@@ -103,6 +103,49 @@ and semantic Run identity is recovered (04D-05).
 | PostgreSQL restart | app reconnects (pool); Runs intact | 04D-01 |
 | disk/volume remount | data on `at_pgdata`/EBS; no loss | 04D-05 |
 | laptop offline | Work stays in durable WAIT; no forged progress | 04D-03 |
+
+## HTTPS ingress (Caddy, 2026-09-29)
+
+도메인을 별도로 구매하지 않고 `15.164.99.125.sslip.io` (공인 IP를 그대로 매핑해주는 무료 도메인)를 써서
+Caddy 컨테이너를 80/443 앞단에 세웠다. Caddy가 Let's Encrypt로 인증서를 자동 발급·갱신한다.
+
+- 접속 주소: `https://15.164.99.125.sslip.io`
+- 구성 파일: `/opt/all-tomorrow/Caddyfile` (호스트), `/opt/all-tomorrow/docker-compose.caddy.yaml` (compose override)
+- 기동 명령(호스트에서): `docker compose -f docker-compose.yaml -f docker-compose.caddy.yaml up -d`
+- 앱 쿠키: `ALL_TOMORROW_COOKIE_SECURE=true`로 전환(https 전제이므로 Secure 쿠키 사용)
+- 보안그룹: 80/443 오픈, 동작 확인 후 8080(직접 앱 접근)은 닫음. 22(SSM 전용 관리)는 유지.
+- 인증서 저장: Caddy 볼륨 `at_caddy_data`/`at_caddy_config`에 유지되어 재기동해도 재발급 없이 사용.
+
+## Postgres 자동 백업 (systemd timer, 2026-09-29)
+
+호스트의 systemd timer가 매일 Postgres를 덤프해 로컬 보관 + S3 업로드를 수행한다.
+
+- 스크립트: `/usr/local/bin/all-tomorrow-pg-backup.sh` (호스트) — `docker exec ... pg_dump` → 로컬 `/opt/all-tomorrow/backups/`에 저장 → `aws s3 cp`로 업로드 → 로컬 7일 초과 파일 삭제
+- 타이머: `all-tomorrow-backup.timer` (매일 03:00 UTC, `RandomizedDelaySec=300`) / 서비스: `all-tomorrow-backup.service`
+- 대상 버킷: `all-tomorrow-backups-761558630442` (ap-northeast-2), 버저닝 활성화, SSE(AES256) 암호화, 퍼블릭 액세스 전체 차단
+- 인스턴스 IAM 역할(`all-tomorrow-node`)에 해당 버킷 한정 `s3:PutObject`/`s3:GetObject`/`s3:ListBucket` 인라인 정책(`AllTomorrowBackupsS3Write`) 추가
+- 파일명 형식: `all_tomorrow-<UTC타임스탬프>.dump` (custom format, `pg_dump -F c`)
+
+### 복원 방법
+
+```bash
+# 1. S3에서 원하는 덤프를 내려받는다
+aws s3 cp s3://all-tomorrow-backups-761558630442/all_tomorrow-<TS>.dump ./restore.dump --region ap-northeast-2
+
+# 2. 임시(또는 실제) Postgres 컨테이너에 복사 후 복원
+docker cp ./restore.dump <postgres-container>:/tmp/restore.dump
+docker exec <postgres-container> pg_restore -U at_app -d <target-db> /tmp/restore.dump
+
+# 3. 검증: 테이블 수 비교
+docker exec <postgres-container> psql -U at_app -d <target-db> -t \
+  -c "select count(*) from information_schema.tables where table_schema='public';"
+```
+
+`OWNER TO at_app` 관련 경고(대상 DB에 같은 롤이 없는 경우)는 실제 운영 DB로 복원할 때는 발생하지 않으며,
+검증용 임시 DB로 복원할 때만 나타나는 부수 경고다(데이터/스키마 자체는 정상 복원됨).
+
+2026-09-29 수동 실행 검증: 덤프 `all_tomorrow-20260929T085454Z.dump` (50065 bytes)를 임시
+`postgres:16.4` 컨테이너에 복원 → `public` 스키마 테이블 수 25개, 원본 운영 DB 테이블 수 25개로 일치 확인.
 | deploy V1→V2 + in-flight Run | replay if compatible, else drain V1 (D-LOCK-03) | 04D-07 |
 | backup restore to test env | domain restored + reconciliation recovers identity | 04D-05 |
 
