@@ -48,6 +48,11 @@ class AnswerRequest(BaseModel):
     answer: str = Field(min_length=1, max_length=4000)
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=1024)
+    new_password: str = Field(min_length=8, max_length=1024)
+
+
 class EdgeDecisionRequest(BaseModel):
     intent: str = Field(min_length=1, max_length=128)
     needs_shared_memory: bool = False
@@ -65,6 +70,17 @@ class EdgeDecisionRequest(BaseModel):
 
 
 class Auth:
+    """Feature 10: password change, brute-force lockout, revoke-all-sessions.
+
+    Sessions are minted as before (signed, stateless, ``ttl_seconds`` absolute
+    expiry) for backward-compatible cookie verification, but the account itself
+    now goes through ``auth.AuthEngine`` (PBKDF2 password hash, 5-failed-attempt
+    lockout, per-login session id). A session id is embedded in the token so
+    ``revoke_all_sessions`` can invalidate every outstanding token at once by
+    bumping a generation counter -- an already-issued token whose session id
+    predates the bump is rejected even though its signature still checks out.
+    """
+
     def __init__(
         self,
         username: str,
@@ -76,17 +92,56 @@ class Auth:
         if not username or not password or len(secret) < 32:
             raise ValueError("web auth requires username, password, and a session secret of at least 32 characters")
         self.username = username
-        self._password_digest = hashlib.sha256(password.encode()).digest()
         self._secret = secret.encode()
         self.ttl_seconds = ttl_seconds
         self._edge_token_digest = hashlib.sha256(edge_token.encode()).digest() if edge_token else None
+        from all_tomorrow.auth import AuthEngine, Role
+
+        # Plan: 5 failed attempts -> 15 minute lockout.
+        self._engine = AuthEngine(max_failed=5, lockout_seconds=15 * 60)
+        self._engine.register(username, password, Role.OWNER)
+        self._generation = 0  # bumped by revoke_all_sessions; invalidates prior tokens
 
     def verify_password(self, username: str, password: str) -> bool:
-        candidate = hashlib.sha256(password.encode()).digest()
-        return hmac.compare_digest(username, self.username) and hmac.compare_digest(candidate, self._password_digest)
+        """Login check only (does not mint a token) -- used by tests and by the
+        login route, which calls ``issue()`` separately on success."""
+        from all_tomorrow.auth import AuthError
+
+        if username != self.username:
+            return False
+        try:
+            self._engine.login(username, password)
+            return True
+        except AuthError:
+            return False
+
+    def account_locked(self) -> bool:
+        from all_tomorrow.domain.ids import utc_now
+
+        acct = self._engine._accounts.get(self.username)
+        return bool(acct and acct.locked_until and utc_now() < acct.locked_until)
+
+    def change_password(self, current_password: str, new_password: str) -> None:
+        from all_tomorrow.auth import AuthError, Role, hash_password
+
+        if not self.verify_password(self.username, current_password):
+            raise AuthError("invalid credentials")
+        if not new_password or len(new_password) < 8:
+            raise AuthError("new password must be at least 8 characters")
+        acct = self._engine._accounts[self.username]
+        acct.password = hash_password(new_password)
+        # A password change invalidates every existing session -- same intent as
+        # "log out everywhere", so it reuses the same generation bump.
+        self.revoke_all_sessions()
+
+    def revoke_all_sessions(self) -> None:
+        self._generation += 1
 
     def issue(self) -> str:
-        payload = json.dumps({"sub": self.username, "exp": int(time.time()) + self.ttl_seconds}, separators=(",", ":"))
+        payload = json.dumps(
+            {"sub": self.username, "exp": int(time.time()) + self.ttl_seconds, "gen": self._generation},
+            separators=(",", ":"),
+        )
         encoded = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
         signature = hmac.new(self._secret, encoded.encode(), hashlib.sha256).hexdigest()
         return f"{encoded}.{signature}"
@@ -105,6 +160,8 @@ class Auth:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid session") from error
         if payload.get("sub") != self.username or int(payload.get("exp", 0)) <= int(time.time()):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="expired session")
+        if int(payload.get("gen", 0)) != self._generation:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="session revoked")
         return self.username
 
     def verify_edge_token(self, authorization: str | None) -> None:
@@ -162,7 +219,7 @@ ul{{list-style:none;padding:0;margin:0}}li{{padding:10px 0;border-bottom:1px sol
 .title{{word-break:break-word}}.meta{{font-size:13px;color:#999;margin-top:4px}}
 .qa{{display:flex;gap:8px;margin-top:8px}}.qa input{{flex:1}}
 </style></head><body><main>
-<header><h1>All Tomorrow</h1><span>{safe_user} <button onclick="logout()">로그아웃</button></span></header>
+<header><h1>All Tomorrow</h1><span>{safe_user} <button onclick="location='/account'">계정</button> <button onclick="logout()">로그아웃</button></span></header>
 <form class="ask" id="ask"><label for="text" class="muted">할 일을 요청하세요 (Ctrl+Enter로 보내기)</label>
 <textarea id="text" autofocus></textarea>
 <div class="row"><span id="askmsg" class="muted"></span><button class="primary" id="send">보내기</button></div></form>
@@ -198,6 +255,34 @@ async function logout(){{await fetch('/api/logout',{{method:'POST'}});location='
 refresh();setInterval(refresh,10000);
 </script></body></html>"""
 
+def _account_page(username: str) -> str:
+    safe_user = escape(username)
+    return f"""<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>계정 - All Tomorrow</title><style>{_BASE_CSS}
+main{{max-width:420px;margin:0 auto;padding:24px}}h1{{font-size:18px;font-weight:600}}
+form{{display:grid;gap:10px;margin-top:16px}}#pwmsg,#outmsg{{font-size:13px;min-height:1.2em}}
+a{{color:#fff}}
+</style></head><body><main>
+<p><a href="/">← 대시보드</a></p>
+<h1>계정 ({safe_user})</h1>
+<h2 style="font-size:14px;color:#bbb">비밀번호 변경</h2>
+<form id="pw">
+<input id="cur" type="password" autocomplete="current-password" placeholder="현재 비밀번호">
+<input id="new" type="password" autocomplete="new-password" placeholder="새 비밀번호 (8자 이상)">
+<button class="primary">변경</button><div id="pwmsg" class="err"></div>
+</form>
+<h2 style="font-size:14px;color:#bbb;margin-top:24px">모든 기기에서 로그아웃</h2>
+<button id="out">모든 기기에서 로그아웃</button><div id="outmsg" class="muted"></div>
+<script>
+pw.onsubmit=async(e)=>{{e.preventDefault();pwmsg.textContent='';
+const r=await fetch('/api/account/change-password',{{method:'POST',headers:{{'content-type':'application/json'}},
+body:JSON.stringify({{current_password:cur.value,new_password:new.value}})}});
+if(r.ok){{location='/';}}else{{pwmsg.textContent=(await r.json().catch(()=>({{}}))).detail||'변경 실패';}}}};
+out.onclick=async()=>{{await fetch('/api/account/logout-everywhere',{{method:'POST'}});location='/login';}};
+</script></main></body></html>"""
+
+
 def create_app(
     *,
     auth: Auth,
@@ -229,7 +314,11 @@ def create_app(
 
     @app.post("/api/login", status_code=204)
     async def login(payload: LoginRequest, response: Response) -> None:
+        if auth.account_locked():
+            raise HTTPException(status_code=423, detail="account temporarily locked")
         if not auth.verify_password(payload.username, payload.password):
+            if auth.account_locked():
+                raise HTTPException(status_code=423, detail="account temporarily locked")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
         response.set_cookie(
             SESSION_COOKIE,
@@ -244,6 +333,29 @@ def create_app(
     async def logout(response: Response) -> None:
         response.delete_cookie(SESSION_COOKIE)
 
+    @app.post("/api/account/change-password", status_code=204)
+    async def change_password(
+        payload: ChangePasswordRequest, response: Response, _: str = Depends(current_user),
+    ) -> None:
+        from all_tomorrow.auth import AuthError
+
+        try:
+            auth.change_password(payload.current_password, payload.new_password)
+        except AuthError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        # change_password already revoked every session (including this one's
+        # token generation); issue a fresh cookie for the caller who just proved
+        # they know the new password.
+        response.set_cookie(
+            SESSION_COOKIE, auth.issue(), httponly=True, secure=cookie_secure,
+            samesite="strict", max_age=auth.ttl_seconds,
+        )
+
+    @app.post("/api/account/logout-everywhere", status_code=204)
+    async def logout_everywhere(response: Response, _: str = Depends(current_user)) -> None:
+        auth.revoke_all_sessions()
+        response.delete_cookie(SESSION_COOKIE)
+
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(
         all_tomorrow_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
@@ -254,6 +366,16 @@ def create_app(
         except HTTPException:
             return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
         return HTMLResponse(_dashboard(user))
+
+    @app.get("/account", response_class=HTMLResponse)
+    async def account_page(
+        all_tomorrow_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+    ) -> Response:
+        try:
+            user = auth.verify(all_tomorrow_session)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+        return HTMLResponse(_account_page(user))
 
     @app.get("/api/projects")
     async def projects(_: str = Depends(current_user)) -> list[dict[str, Any]]:
