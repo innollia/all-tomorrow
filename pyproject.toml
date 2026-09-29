@@ -21,7 +21,7 @@ dependencies = [
 [dependency-groups]
 dev = [
   "pytest>=8.3,<9",
-  "pytest-asyncio>=0.24,<1",
+  "pytest-asyncio>=0.24,<2",
 ]
 
 [project.scripts]
@@ -30,7 +30,7 @@ all-tomorrow-worker = "all_tomorrow.local_workers:main"
 all-tomorrow-device-agent = "all_tomorrow.device_agent_client:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3,<9", "pytest-asyncio>=0.24,<1"]
+dev = ["pytest>=8.3,<9", "pytest-asyncio>=0.24,<2"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
