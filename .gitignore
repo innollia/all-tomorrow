@@ -14,3 +14,4 @@ coverage/
 .artifacts/
 scratch_*.py
 task_checklist.md
+config/workers.local.json
