@@ -71,3 +71,11 @@ All Tomorrow는 범용 인프라를 다시 구현하는 프로젝트가 아니�
 - **개발완료**: 다른 작업 완료 전 착수하지 않음
 
 파일이나 prototype이 존재한다는 이유만으로 개발완료로 표시하지 않는다.
+
+## 승인된 로컬 worker 연결
+
+2026-09-27 사용자 요청으로 OpenCode·Codex·Kiro·Antigravity를 기존 WorkerService에 연결하는 작업을 먼저 수행한다. Stage 0 gate의 예외는 이 로컬 CLI 연결과 직접 검증으로 한정한다. 00D/00E 및 Stage 1의 기존 완료조건과 상태는 유지한다.
+
+| 작업 | 상태 | 기록 |
+|---|---|---|
+| 네 로컬 worker 연결 | 개발완료 | [실행 방법과 검증 기록](worker-adapters.md) |

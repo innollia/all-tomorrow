@@ -40,6 +40,8 @@ class FakeProcess:
         self.killed = False
         self.communicate_called = False
         self.stdin_data: bytes | None = None
+        self.stdout = FakeStream(self, self._stdout)
+        self.stderr = FakeStream(self, self._stderr)
 
     async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
         self.communicate_called = True
@@ -59,6 +61,21 @@ class FakeProcess:
     @property
     def returncode(self) -> int:
         return self._returncode
+
+
+class FakeStream:
+    def __init__(self, process: FakeProcess, data: bytes) -> None:
+        self.process = process
+        self.data = data
+
+    async def read(self, size: int) -> bytes:
+        self.process.communicate_called = True
+        if self.process._should_timeout:
+            raise asyncio.TimeoutError()
+        if self.process._delay:
+            await asyncio.sleep(self.process._delay)
+        chunk, self.data = self.data[:size], self.data[size:]
+        return chunk
 
 
 def make_worker_request(
@@ -588,7 +605,7 @@ class TestOpenCodeWorker:
             worker = OpenCodeWorker(
                 allowed_roots=(str(tmp_path),),
             )
-            assert worker._argv_prefix == ["npx.cmd", "-y", "opencode-ai", "run"]
+            assert worker._argv_prefix == ["opencode", "run"]
 
     @pytest.mark.asyncio
     async def test_default_argv_prefix_on_unix(self, tmp_path: Path) -> None:
@@ -596,7 +613,7 @@ class TestOpenCodeWorker:
             worker = OpenCodeWorker(
                 allowed_roots=(str(tmp_path),),
             )
-            assert worker._argv_prefix == ["npx", "-y", "opencode-ai", "run"]
+            assert worker._argv_prefix == ["opencode", "run"]
 
 
 class TestProcessRunnerRobustness:
