@@ -69,6 +69,8 @@ services:
       PGPASSWORD_FILE: /run/secrets/pg_password
     secrets:
       - pg_password
+    volumes:
+      - at_artifacts:/app/data/artifacts   # Feature 7: file attachments
     ports:
       - "8080:8080"                  # the ONLY public surface (behind TLS ingress)
     healthcheck:
@@ -79,6 +81,7 @@ services:
 
 volumes:
   at_pgdata:
+  at_artifacts:
 
 secrets:
   pg_password:

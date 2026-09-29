@@ -102,6 +102,23 @@ import os
 import pytest
 
 
+def test_app_from_environment_passes_upload_dir_env_to_create_app(monkeypatch, tmp_path):
+    """Regression: PR #7's LocalArtifactStore defaulted to the relative path
+    'data/artifacts', which the non-root container user cannot create -- the
+    live deploy crash-looped on this. app_from_environment must forward
+    ALL_TOMORROW_UPLOAD_DIR through to create_app's upload_dir."""
+    from all_tomorrow.web import app_from_environment
+
+    monkeypatch.delenv("ALL_TOMORROW_DATABASE_URL", raising=False)
+    monkeypatch.setenv("ALL_TOMORROW_ADMIN_USER", "admin")
+    monkeypatch.setenv("ALL_TOMORROW_ADMIN_PASSWORD", "pw")
+    monkeypatch.setenv("ALL_TOMORROW_SESSION_SECRET", SECRET)
+    upload_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("ALL_TOMORROW_UPLOAD_DIR", str(upload_dir))
+    app_from_environment()
+    assert upload_dir.is_dir()
+
+
 @pytest.mark.skipif(not os.environ.get("AT_SEMANTIC_TEST_URL"), reason="needs AT_SEMANTIC_TEST_URL (live Postgres)")
 def test_web_uses_postgres_and_survives_restart(monkeypatch):
     from all_tomorrow.web import app_from_environment
