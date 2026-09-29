@@ -47,7 +47,13 @@ from all_tomorrow.domain.ids import (
     new_event_id,
     utc_now,
 )
-from all_tomorrow.domain.outcomes import CompletionEvidence, OutcomeRecord
+from all_tomorrow.domain.outcomes import (
+    CompletionEvidence,
+    OutcomeRecord,
+    OutcomeStatus,
+    TargetType,
+    verify_completion_evidence,
+)
 from all_tomorrow.domain.state import (
     GoalRecord,
     GoalStatus,
@@ -174,6 +180,10 @@ class GoalWorkRunStore(Protocol):
         execution_ref: ExecutionRef | None = None,
     ) -> RunRecord: ...
     async def find_reconciliation_candidates(self) -> list[RunRecord]: ...
+    async def current_run_revision(self, run_id: RunId) -> int: ...
+
+    # Work claiming (executor loop)
+    async def claim_pending_work(self, *, limit: int = 1) -> list[WorkRecord]: ...
 
     # Events / Outcomes
     async def list_events(
@@ -183,6 +193,8 @@ class GoalWorkRunStore(Protocol):
         work_id: WorkId | None = None,
         run_id: RunId | None = None,
     ) -> list[SemanticEvent]: ...
+
+    async def get_outcome(self, work_id: WorkId) -> OutcomeRecord | None: ...
 
     # Questions
     async def create_question(self, question: QuestionRecordSemantic) -> QuestionRecordSemantic: ...
@@ -218,10 +230,14 @@ class InMemoryGoalWorkRunStore:
         self._events: list[SemanticEvent] = []
         self._questions: dict[QuestionId, QuestionRecordSemantic] = {}
         self._delivery_signals: list[dict[str, Any]] = []
+        self._outcomes: dict[WorkId, OutcomeRecord] = {}
 
     def run_revision(self, run_id: RunId) -> int:
         """Current stored revision for a Run (1 at creation)."""
         return self._run_revisions.get(run_id, 1)
+
+    async def current_run_revision(self, run_id: RunId) -> int:
+        return self.run_revision(run_id)
 
     # -- Goal ---------------------------------------------------------------
     async def create_goal(self, goal: GoalRecord, event: SemanticEvent) -> GoalRecord:
@@ -294,6 +310,13 @@ class InMemoryGoalWorkRunStore:
             updated = transition_work(current, target, evidence)
             self._work[work_id] = updated
             self._events.append(event)
+            if target == WorkStatus.SUCCEEDED:
+                # transition_work already verified evidence -> OutcomeRecord; persist
+                # it so the artifact_refs it carries are queryable later (list_outcomes).
+                outcome = evidence if isinstance(evidence, OutcomeRecord) else verify_completion_evidence(
+                    TargetType.WORK, str(work_id), evidence
+                )
+                self._outcomes[work_id] = outcome
             return updated
 
     # -- Run ----------------------------------------------------------------
@@ -376,6 +399,26 @@ class InMemoryGoalWorkRunStore:
             if r.status == RunStatus.STARTING and r.execution_ref is None
         ]
 
+    async def claim_pending_work(self, *, limit: int = 1) -> list[WorkRecord]:
+        """Atomically move up to ``limit`` PENDING Work to RUNNING and return them.
+
+        The lock makes claim-then-transition atomic within this process, which is
+        the InMemory store's equivalent of the Postgres ``FOR UPDATE SKIP LOCKED``
+        claim: two concurrent callers never claim the same Work.
+        """
+        async with self._lock:
+            candidates = sorted(
+                (w for w in self._work.values() if w.status == WorkStatus.PENDING),
+                key=lambda w: (-w.priority, w.created_at),
+            )[:limit]
+            claimed: list[WorkRecord] = []
+            for w in candidates:
+                updated = transition_work(w, WorkStatus.RUNNING)
+                self._work[w.work_id] = updated
+                self._events.append(_evt_internal("executor", "work.claimed", work_id=w.work_id))
+                claimed.append(updated)
+            return claimed
+
     # -- Events -------------------------------------------------------------
     async def list_events(
         self,
@@ -392,6 +435,9 @@ class InMemoryGoalWorkRunStore:
         if run_id is not None:
             events = [e for e in events if e.run_id == run_id]
         return events
+
+    async def get_outcome(self, work_id: WorkId) -> OutcomeRecord | None:
+        return self._outcomes.get(work_id)
 
     # -- Questions ----------------------------------------------------------
     async def create_question(self, question: QuestionRecordSemantic) -> QuestionRecordSemantic:
@@ -661,6 +707,11 @@ class PostgresGoalWorkRunStore:
                 if await res.fetchone() is None:
                     raise StoreConflictError(f"work {work_id} revision conflict")
                 await self._append_event_conn(conn, event)
+                if target == WorkStatus.SUCCEEDED:
+                    outcome = evidence if isinstance(evidence, OutcomeRecord) else verify_completion_evidence(
+                        TargetType.WORK, str(work_id), evidence
+                    )
+                    await self._insert_outcome_conn(conn, outcome)
         return updated
 
     # -- Run ----------------------------------------------------------------
@@ -845,6 +896,113 @@ class PostgresGoalWorkRunStore:
             rows = await cur.fetchall()
         return [_run_from_row(r) for r in rows]
 
+    async def current_run_revision(self, run_id: RunId) -> int:
+        if run_id in _RUN_REVISIONS:
+            return _RUN_REVISIONS[run_id]
+        run = await self.get_run(run_id)
+        if run is None:
+            raise NotFoundError(f"run not found: {run_id}")
+        return _run_revision(run)
+
+    async def claim_pending_work(self, *, limit: int = 1) -> list[WorkRecord]:
+        """Atomically claim up to ``limit`` PENDING Work rows via row-level locking.
+
+        ``FOR UPDATE SKIP LOCKED`` is the DB-native equivalent of a distributed
+        lease: two executor processes racing this query never claim the same row,
+        and a row already locked by another claimant is simply skipped rather than
+        blocking this transaction.
+        """
+        async with self.pool.connection() as conn:
+            async with conn.transaction():
+                cur = await conn.execute(
+                    """
+                    SELECT work_id, goal_id, title, semantic_status, priority,
+                           revision, created_at, updated_at, terminal_at
+                    FROM work_items
+                    WHERE semantic_status = 'PENDING'
+                    ORDER BY priority DESC, created_at
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                rows = await cur.fetchall()
+                claimed: list[WorkRecord] = []
+                for row in rows:
+                    current = _work_from_row(row)
+                    updated = transition_work(current, WorkStatus.RUNNING)
+                    res = await conn.execute(
+                        """
+                        UPDATE work_items
+                        SET semantic_status = %s, revision = %s, updated_at = %s
+                        WHERE work_id = %s AND revision = %s
+                        RETURNING revision
+                        """,
+                        (updated.status.value, updated.revision, updated.updated_at,
+                         current.work_id, current.revision),
+                    )
+                    if await res.fetchone() is None:
+                        continue  # lost a race despite the row lock; skip, do not block
+                    await self._append_event_conn(
+                        conn, SemanticEvent(event_id=new_event_id(), actor="executor",
+                                            type="work.claimed", work_id=current.work_id)
+                    )
+                    claimed.append(updated)
+        return claimed
+
+    async def _insert_outcome_conn(self, conn: Any, outcome: OutcomeRecord) -> None:
+        evidence = outcome.evidence
+        await conn.execute(
+            """
+            INSERT INTO outcomes
+                (outcome_id, target_type, target_id, status, criterion_ref,
+                 evaluator_ref, evaluator_version, observed_values, evidence_refs,
+                 artifact_refs, details, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (outcome_id) DO NOTHING
+            """,
+            (
+                outcome.outcome_id, outcome.target_type.value, outcome.target_id,
+                outcome.status.value,
+                evidence.criterion_ref if evidence else None,
+                evidence.evaluator_ref if evidence else None,
+                evidence.evaluator_version if evidence else None,
+                Jsonb(evidence.observed_values if evidence else {}),
+                Jsonb(list(evidence.evidence_refs) if evidence else []),
+                Jsonb(list(evidence.artifact_refs) if evidence else []),
+                Jsonb(outcome.details),
+                outcome.created_at,
+            ),
+        )
+
+    async def get_outcome(self, work_id: WorkId) -> OutcomeRecord | None:
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                """
+                SELECT outcome_id, target_type, target_id, status, criterion_ref,
+                       evaluator_ref, evaluator_version, observed_values,
+                       evidence_refs, artifact_refs, details, created_at
+                FROM outcomes WHERE target_type = 'WORK' AND target_id = %s
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (work_id,),
+            )
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        evidence = None
+        if row[4] and row[5] and row[6]:
+            evidence = CompletionEvidence(
+                criterion_ref=row[4], evaluator_ref=row[5], evaluator_version=row[6],
+                observed_values=dict(row[7] or {}), evidence_refs=tuple(row[8] or ()),
+                artifact_refs=tuple(row[9] or ()),
+            )
+        return OutcomeRecord(
+            outcome_id=row[0], target_type=TargetType(row[1]), target_id=row[2],
+            status=OutcomeStatus(row[3]), evidence=evidence, details=dict(row[10] or {}),
+            created_at=row[11],
+        )
+
     # -- Events -------------------------------------------------------------
     async def _append_event_conn(self, conn: Any, event: SemanticEvent) -> None:
         await conn.execute(
@@ -1003,6 +1161,10 @@ class PostgresGoalWorkRunStore:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def _evt_internal(actor: str, type_: str, **kw: Any) -> SemanticEvent:
+    return SemanticEvent(event_id=new_event_id(), actor=actor, type=type_, **kw)
+
+
 def _check_revision(actual: int, expected: int, kind: str, ident: Any) -> None:
     if actual != expected:
         raise StoreConflictError(
