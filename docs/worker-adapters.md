@@ -24,6 +24,24 @@ This document describes the worker adapter subsystem for executing external AI c
 
 `list`는 실행 파일과 버전을 확인한다. 로그인·모델 가용성을 보증하지 않으며 `authentication: not_checked`를 반환한다. 실행 결과의 `SUCCESS`는 CLI protocol 완료이고, 요청한 기능의 성공은 실제 산출물로 추가 판정한다. smoke 명령은 매번 새 작업 폴더와 무작위 확인 문자열을 만들고 파일 내용까지 검증한다. 결과는 `.artifacts/local-workers/<실행 ID>/results.json`에 남긴다.
 
+## Device agent (Tailscale) — 2026-09-29
+
+- 상태: **개발완료**. 계획서: `docs/plans/device-agent-tailscale.md`. 다른 PC/기기를 tailnet으로 붙여 중앙 서버(`http://100.97.113.3:8080`)의 일을 pull 방식으로 처리한다.
+- 등록 코드는 admin 로그인 후 `/devices` 화면에서 1회용으로 발급한다. 발급 후 아래 명령을 새 기기에서 실행한다 (PowerShell, 절대경로, 관리자 권한 불필요).
+
+```powershell
+git clone https://github.com/innollia/all-tomorrow.git C:\all-tomorrow
+cd C:\all-tomorrow
+python -m venv .venv
+C:\all-tomorrow\.venv\Scripts\python.exe -m pip install -e .
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\all-tomorrow\scripts\install_device_agent.ps1 -ServerUrl "http://100.97.113.3:8080" -RegistrationCode "<발급받은 코드>" -RepoPath "C:\all-tomorrow"
+Start-ScheduledTask -TaskName "AllTomorrowDeviceAgent"
+```
+
+- 등록 후 토큰은 `%LOCALAPPDATA%\all-tomorrow\device_agent_state.json`에 저장되며 재부팅/재로그인 시 작업 스케줄러가 자동 재시작한다. 90초간 하트비트가 없으면 웹 화면에서 OFFLINE으로 표시된다. lease 만료로 대기 상태가 된 Work는 부수효과가 있었을 수 있으면 `ambiguous_side_effect`로 표시되고 자동 재실행되지 않는다.
+- 기기를 더 이상 쓰지 않으면 `/devices` 화면의 "기기 끊기"로 토큰을 폐기한다.
+
+
 CLI 탐색은 PATH를 우선 사용하고 Windows의 Codex/agy/Kiro 설치 위치와 OpenCode npm 캐시를 확인한다. OpenCode Desktop GUI 실행 파일을 CLI로 취급하거나 `npx -y`로 매 실행 새 버전을 내려받지 않는다. 캐시가 지워지면 명시적으로 unavailable이 된다. 고정 경로가 필요하면 worker 항목에 `argv` 배열을 지정한다(OpenCode는 끝에 `run` 포함).
 
 ### 실행과 권한
