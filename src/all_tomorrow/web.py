@@ -549,8 +549,9 @@ def app_from_environment() -> FastAPI:
     cookie_secure = os.environ.get("ALL_TOMORROW_COOKIE_SECURE", "true").lower() not in {"0", "false", "no"}
     auth = Auth(username, password, secret, edge_token=edge_token)
     database_url = os.environ.get("ALL_TOMORROW_DATABASE_URL", "")
+    upload_dir = os.environ.get("ALL_TOMORROW_UPLOAD_DIR")
     if not database_url:
-        return create_app(auth=auth, cookie_secure=cookie_secure)
+        return create_app(auth=auth, cookie_secure=cookie_secure, upload_dir=upload_dir)
 
     # Durable mode: the web reads and writes the canonical PostgreSQL store.
     from contextlib import asynccontextmanager
@@ -579,6 +580,7 @@ def app_from_environment() -> FastAPI:
     return create_app(
         auth=auth, cookie_secure=cookie_secure,
         control=WebControl(semantic, request_store), lifespan=lifespan,
+        upload_dir=upload_dir,
     )
 
 

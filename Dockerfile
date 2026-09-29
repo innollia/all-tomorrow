@@ -16,9 +16,14 @@ COPY migrations ./migrations
 COPY edge ./edge
 RUN pip install .
 
-# Non-root runtime user.
-RUN useradd --create-home --uid 10001 appuser
+# Non-root runtime user. Feature 7 (file attachments) writes under /app/data;
+# give appuser ownership before dropping root so LocalArtifactStore can mkdir it.
+RUN useradd --create-home --uid 10001 appuser && \
+    mkdir -p /app/data/artifacts && \
+    chown -R appuser:appuser /app/data
 USER appuser
+
+ENV ALL_TOMORROW_UPLOAD_DIR=/app/data/artifacts
 
 # Bind to all interfaces INSIDE the container; the host/ALB restricts exposure.
 ENV ALL_TOMORROW_HOST=0.0.0.0 \
