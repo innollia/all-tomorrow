@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from all_tomorrow.contracts import Project
-from all_tomorrow.edge import EdgeAnalysis, load_edge_policy
+from all_tomorrow.edge import EdgeAction, EdgeAnalysis, load_edge_policy
 from all_tomorrow.storage.semantic_store import InMemoryGoalWorkRunStore
 from all_tomorrow.web_control import NotFound, WebControl
 
@@ -57,6 +57,11 @@ class EdgeDecisionRequest(BaseModel):
     needs_long_running_task: bool = False
     needs_canonical_mutation: bool = False
     tool_risk: str | None = None
+    # Feature 8: present only on a Discord-originated decision request, so a
+    # CENTRAL_TASK verdict can be stored as the same Goal/Work as the web UI.
+    discord_user_id: str | None = None
+    discord_message_id: str | None = None
+    text: str | None = None
 
 
 class Auth:
@@ -371,7 +376,11 @@ def create_app(
 
     @app.post("/api/edge/discord/decide")
     async def decide(payload: EdgeDecisionRequest, _: str = Depends(current_user)) -> dict[str, Any]:
-        decision = policy.decide(EdgeAnalysis(**payload.model_dump()))
+        analysis_fields = {
+            k: v for k, v in payload.model_dump().items()
+            if k not in {"discord_user_id", "discord_message_id", "text"}
+        }
+        decision = policy.decide(EdgeAnalysis(**analysis_fields))
         return {
             "policy_id": policy.policy_id,
             "action": decision.action.value,
@@ -382,13 +391,29 @@ def create_app(
     @app.post("/internal/edge/discord/decide")
     async def internal_decide(payload: EdgeDecisionRequest, request: Request) -> dict[str, Any]:
         auth.verify_edge_token(request.headers.get("authorization"))
-        decision = policy.decide(EdgeAnalysis(**payload.model_dump()))
-        return {
+        analysis_fields = {
+            k: v for k, v in payload.model_dump().items()
+            if k not in {"discord_user_id", "discord_message_id", "text"}
+        }
+        decision = policy.decide(EdgeAnalysis(**analysis_fields))
+        result: dict[str, Any] = {
             "policy_id": policy.policy_id,
             "action": decision.action.value,
             "reason": decision.reason,
             "matched_rule": decision.matched_rule,
         }
+        if (
+            decision.action == EdgeAction.CENTRAL_TASK
+            and payload.discord_user_id
+            and payload.discord_message_id
+            and payload.text
+        ):
+            stored = await ctl.submit_from_discord(
+                payload.discord_user_id, payload.text, payload.discord_message_id,
+            )
+            result["goal_id"] = stored["goal_id"]
+            result["is_new"] = stored["is_new"]
+        return result
 
     return app
 

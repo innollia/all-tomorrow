@@ -14,7 +14,7 @@ from all_tomorrow.domain.errors import DomainError
 from all_tomorrow.domain.ids import GoalId, QuestionId, WorkId, new_event_id, new_goal_id, new_work_id
 from all_tomorrow.domain.state import GoalRecord, WorkRecord, WorkStatus
 from all_tomorrow.execution_service import ExecutionService
-from all_tomorrow.ingress_adapters import web_api_ingress
+from all_tomorrow.ingress_adapters import discord_ingress, web_api_ingress
 from all_tomorrow.report.store import Report, ReportStore
 from all_tomorrow.repair import RepairError, RepairItem, RepairService, RepairStatus
 from all_tomorrow.requests import RequestStore
@@ -104,10 +104,16 @@ class WebControl:
                     "runs": [{"run_id": str(r.run_id), "status": str(r.status),
                               "attempt": r.attempt_number} for r in runs],
                 })
+            created_events = await self.store.list_events(goal_id=goal.goal_id)
+            transport = "web"
+            for e in created_events:
+                if e.type == "goal.created":
+                    transport = e.payload.get("transport", "web")
+                    break
             goals_out.append({
                 "goal_id": str(goal.goal_id), "title": goal.title, "status": str(goal.status),
                 "revision": goal.revision, "terminal": goal.is_terminal(),
-                "created_at": _ts(goal.created_at), "works": works_out,
+                "created_at": _ts(goal.created_at), "works": works_out, "transport": transport,
             })
         return {"goals": goals_out, "questions": questions_out}
 
@@ -267,6 +273,34 @@ class WebControl:
                             payload={"retried_from": work_id}),
         )
         return {"original_work_id": work_id, "new_work_id": str(new_work.work_id)}
+
+    # -- Feature 8: Discord CENTRAL_TASK requests -> same Goal/Work store, ---------
+    #    visible in the web list as transport=discord. Dedup key = discord message id.
+    async def submit_from_discord(self, user: str, text: str, message_id: str) -> dict[str, Any]:
+        text = text.strip()
+        if not text:
+            raise ValueError("요청 내용이 비어 있습니다")
+        text = text[:MAX_TEXT]
+        async with self._lock:
+            result = await discord_ingress(
+                self.requests, user_id=user, text=text, message_id=message_id,
+            )
+            request_id = result.request.request_id
+            goal_id = self._goal_for_request.get(request_id)
+            if goal_id is None:
+                goal = GoalRecord(goal_id=new_goal_id(), user_id=user, title=text)
+                await self.store.create_goal(
+                    goal, _evt(user, "goal.created", goal_id=goal.goal_id, external_ref=request_id,
+                               payload={"transport": "discord", "discord_message_id": message_id}),
+                )
+                work = WorkRecord(work_id=new_work_id(), goal_id=goal.goal_id, title=text)
+                await self.store.create_work(
+                    work, _evt(user, "work.created", goal_id=goal.goal_id, work_id=work.work_id,
+                               payload={"transport": "discord"}),
+                )
+                goal_id = goal.goal_id
+                self._goal_for_request[request_id] = goal_id
+        return {"goal_id": str(goal_id), "is_new": result.is_new, "transport": "discord"}
 
     async def clean_up_broken_work(self, user: str, work_id: str, *, operator: str) -> dict[str, Any]:
         """Abandon a broken Work -- recorded through RepairService, never a blind
