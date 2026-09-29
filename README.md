@@ -113,7 +113,7 @@ Pipeline은 작업 계층에서 하나의 WorkItem을 실행하는 versioned rec
 사용자가 체감할 제품 순서는 **Researcher → Reliable assistant → Personal manager**다. 그 앞에 제품 기능이 아닌 **Stage 0 — OSS Assembly & Architecture Proof**를 둔다. 여기서 durable execution, agent/tool plumbing, model gateway, telemetry/eval처럼 이미 잘 풀린 문제를 직접 재구현하지 않고 실제 OSS 조합으로 failure skeleton을 먼저 통과시킨다.
 
 - **[Stage 0 — OSS Assembly & Architecture Proof](docs/roadmap/stage-00-assembly/index.md)**  
-  PydanticAI를 공통 agent 층으로 두고 DBOS와 Restate를 같은 failure skeleton로 비교한다. tool 표면은 FastMCP gateway 후보로 모으고, 그 뒤 LiteLLM과 OpenTelemetry/GitHub Actions를 한 seam씩 추가한다. 이 단계가 끝나기 전에는 새 queue/lease/LLM client/MCP aggregator를 직접 구현하지 않는다.
+  PydanticAI를 공통 agent 층으로 두고, 비교 검증을 거쳐 DBOS와 LiteLLM model/tool gateway를 선택했다. 현재 OpenTelemetry/eval/GitHub Actions를 연결하는 00D가 개발중이다. 이 단계가 끝나기 전에는 새 queue/lease/LLM client/MCP aggregator를 직접 구현하지 않는다.
 
 - **[1차 완성 — Durable Self-Improving Researcher](docs/roadmap-01-foundation.md)**  
   Goal/Work/Event의 최소 durable kernel 위에 실제 researcher loop를 올린다. 시스템이 스스로 문제와 기회를 발견하고 새 Goal을 만들며 자기 prompt·policy·code까지 평가·개선하는 폐쇄 루프를 먼저 완성한다. AWS를 항상 켜진 중앙 runtime으로 사용하고, repo mutation은 우선 노트북 단일 executor에 제한한다.
@@ -128,9 +128,11 @@ Pipeline은 작업 계층에서 하나의 WorkItem을 실행하는 versioned rec
 
 ## Current Implementation Snapshot
 
-2026-09-19 기준 현재 구현은 최종 시스템 전체가 아니라 **1차 완성의 초기 실행 엔진**이다.
+현재 진행 상태는 [로드맵](docs/roadmap.md)과 [Stage 0 상태판](docs/roadmap/stage-00-assembly/index.md)을 따른다. 00A~00C는 개발완료, 00D는 개발중이며 Stage 1은 선행작업 대기다. 00D의 CI 증거와 미충족 조건은 [00D 기록](docs/roadmap/stage-00-assembly/00d-observability-eval-ci.md)에 있다.
 
-현재 존재하는 것:
+아래 목록은 **2026-09-19 당시 초기 실행 엔진의 기록**이다. 이후 Stage 0의 실제 PostgreSQL·crash/restart 검증 결과는 각 packet 기록을 따른다.
+
+당시 존재한 것:
 
 - provider-independent core contracts
 - 버전 관리되는 YAML pipeline runtime
@@ -143,7 +145,7 @@ Pipeline은 작업 계층에서 하나의 WorkItem을 실행하는 versioned rec
 - 최소 로그인 Web UI와 read-only 수준의 표시 API
 - lesson/evaluation/scheduler의 초기 도메인 골격
 
-현재 존재한다고 간주하면 안 되는 것:
+당시 미완료 또는 미확인 항목:
 
 - 운영 검증된 durable 중앙 서버
 - 완성된 Goal/Work graph
@@ -176,6 +178,7 @@ Pipeline은 작업 계층에서 하나의 WorkItem을 실행하는 versioned rec
 ## Documents
 
 - [전체 계획 인덱스](docs/roadmap.md)
+- [문서 역할과 파일 지도](docs/roadmap/README.md)
 - [Stage 0 — OSS Assembly & Architecture Proof](docs/roadmap/stage-00-assembly/index.md)
 - [1차 완성 계획](docs/roadmap-01-foundation.md)
 - [2차 완성 계획](docs/roadmap-02-autonomy.md)
@@ -186,6 +189,7 @@ Pipeline은 작업 계층에서 하나의 WorkItem을 실행하는 versioned rec
 - [Durable Work 아키텍처 결정](docs/decisions/0002-durable-work-above-pipeline.md)
 - [병렬 메타인지 아키텍처 결정](docs/decisions/0003-generic-planning-over-hardcoded-pipelines.md)
 - [자가수정 권한과 외부 승인 경계](docs/decisions/0004-self-modification-and-approval-boundary.md)
+- [OSS 조립 결정](docs/decisions/0005-assemble-open-source-substrates.md)
 - [Worker adapter와 pipeline 연결](docs/worker-adapters.md)
 
 ## Development Verification
