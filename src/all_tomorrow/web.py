@@ -69,6 +69,29 @@ class EdgeDecisionRequest(BaseModel):
     text: str | None = None
 
 
+class DeviceRegisterRequest(BaseModel):
+    registration_code: str = Field(min_length=1, max_length=200)
+    name: str = Field(min_length=1, max_length=200)
+    capabilities: list[str] = Field(default_factory=list)
+    max_concurrent: int = Field(default=1, ge=1, le=8)
+
+
+class DeviceAuthRequest(BaseModel):
+    device_id: str = Field(min_length=1, max_length=200)
+    token: str = Field(min_length=1, max_length=500)
+
+
+class DeviceLeaseActionRequest(DeviceAuthRequest):
+    lease_id: str = Field(min_length=1, max_length=200)
+
+
+class DeviceCompleteRequest(DeviceLeaseActionRequest):
+    succeeded: bool
+    output_text: str | None = Field(default=None, max_length=200_000)
+    error: str | None = Field(default=None, max_length=4000)
+    duration_ms: int = Field(default=0, ge=0)
+
+
 class Auth:
     """Feature 10: password change, brute-force lockout, revoke-all-sessions.
 
@@ -219,7 +242,7 @@ ul{{list-style:none;padding:0;margin:0}}li{{padding:10px 0;border-bottom:1px sol
 .title{{word-break:break-word}}.meta{{font-size:13px;color:#999;margin-top:4px}}
 .qa{{display:flex;gap:8px;margin-top:8px}}.qa input{{flex:1}}
 </style></head><body><main>
-<header><h1>All Tomorrow</h1><span>{safe_user} <button onclick="location='/account'">계정</button> <button onclick="logout()">로그아웃</button></span></header>
+<header><h1>All Tomorrow</h1><span>{safe_user} <button onclick="location='/devices'">기기</button> <button onclick="location='/account'">계정</button> <button onclick="logout()">로그아웃</button></span></header>
 <form class="ask" id="ask"><label for="text" class="muted">할 일을 요청하세요 (Ctrl+Enter로 보내기)</label>
 <textarea id="text" autofocus></textarea>
 <div class="row"><span id="askmsg" class="muted"></span><button class="primary" id="send">보내기</button></div></form>
@@ -283,6 +306,55 @@ out.onclick=async()=>{{await fetch('/api/account/logout-everywhere',{{method:'PO
 </script></main></body></html>"""
 
 
+_DEVICE_STATUS_KO = {"ONLINE": "온라인", "OFFLINE": "오프라인", "REVOKED": "끊김"}
+
+
+def _devices_page(username: str) -> str:
+    safe_user = escape(username)
+    status_ko = json.dumps(_DEVICE_STATUS_KO, ensure_ascii=False)
+    return f"""<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>기기 - All Tomorrow</title><style>{_BASE_CSS}
+main{{max-width:640px;margin:0 auto;padding:24px}}h1{{font-size:18px;font-weight:600}}
+a{{color:#fff}}ul{{list-style:none;padding:0;margin:16px 0}}
+li{{padding:12px 0;border-bottom:1px solid #222;display:flex;justify-content:space-between;align-items:center;gap:8px}}
+.name{{font-weight:600}}.meta{{font-size:13px;color:#999}}
+.dot{{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}}
+.dot.on{{background:#3c3}}.dot.off{{background:#888}}.dot.rv{{background:#f66}}
+#codebox{{margin-top:8px;font-size:13px}}#codebox code{{background:#111;padding:2px 6px;border-radius:4px}}
+</style></head><body><main>
+<p><a href="/">← 대시보드</a></p>
+<h1>기기 ({safe_user})</h1>
+<button class="primary" id="issue">새 기기 등록 코드 발급</button>
+<div id="codebox" class="muted"></div>
+<ul id="list"><li class="muted">불러오는 중</li></ul>
+<script>
+const KO={status_ko};const ko=s=>KO[s]||s;
+function el(tag,cls,text){{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}}
+async function api(path,body){{const r=await fetch(path,{{method:body?'POST':'GET',headers:body?{{'content-type':'application/json'}}:{{}},body:body?JSON.stringify(body):undefined}});
+if(r.status===401){{location='/login';throw new Error('auth');}}if(!r.ok)throw new Error((await r.json().catch(()=>({{}}))).detail||r.status);return r.json();}}
+async function refresh(){{let list;try{{list=await api('/api/devices');}}catch(e){{return;}}
+const ul=document.getElementById('list');ul.innerHTML='';
+if(!list.length){{ul.appendChild(el('li','muted','등록된 기기가 없습니다'));return;}}
+for(const dev of list){{const li=el('li');const left=el('div');
+const dot=document.createElement('span');dot.className='dot '+(dev.status==='ONLINE'?'on':dev.status==='REVOKED'?'rv':'off');
+const nameRow=el('div');nameRow.appendChild(dot);nameRow.appendChild(document.createTextNode(dev.name));nameRow.className='name';
+left.appendChild(nameRow);
+const meta=ko(dev.status)+(dev.last_heartbeat_at?(' · 마지막 신호 '+new Date(dev.last_heartbeat_at).toLocaleString('ko-KR')):' · 신호 없음')+(dev.current_work_id?' · 작업 실행 중':'');
+left.appendChild(el('div','meta',meta));li.appendChild(left);
+if(dev.status!=='REVOKED'){{const b=el('button',null,'기기 끊기');
+b.onclick=async()=>{{if(!confirm(dev.name+' 기기를 끊을까요? (되돌릴 수 없음)'))return;b.disabled=true;
+try{{await api('/api/devices/'+encodeURIComponent(dev.device_id)+'/revoke',{{}});}}catch(err){{alert('실패: '+err.message);}}await refresh();}};
+li.appendChild(b);}}
+ul.appendChild(li);}}}}
+issue.onclick=async()=>{{issue.disabled=true;try{{const r=await api('/api/devices/registration-code',{{}});
+codebox.innerHTML='';codebox.appendChild(document.createTextNode('등록 코드 (10분 유효): '));
+const c=document.createElement('code');c.textContent=r.registration_code;codebox.appendChild(c);}}
+catch(err){{codebox.textContent='실패: '+err.message;}}issue.disabled=false;}};
+refresh();setInterval(refresh,10000);
+</script></main></body></html>"""
+
+
 def create_app(
     *,
     auth: Auth,
@@ -292,6 +364,7 @@ def create_app(
     control: WebControl | None = None,
     lifespan: Any = None,
     upload_dir: str | None = None,
+    device_service: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="All Tomorrow Control Plane", version="0.1.0", lifespan=lifespan)
     state_store = web_state or WebState()
@@ -300,6 +373,23 @@ def create_app(
     from all_tomorrow.storage.artifact_store import LocalArtifactStore
 
     uploads = LocalArtifactStore(upload_dir or "data/artifacts")
+
+    from all_tomorrow.device_agent import DeviceAgentService
+
+    devices = device_service or DeviceAgentService(ctl.store)
+
+    public_host = os.environ.get("ALL_TOMORROW_PUBLIC_HOST")
+
+    @app.middleware("http")
+    async def _block_device_api_on_public_host(request: Request, call_next):
+        # Defense in depth alongside the Caddy-level block: even if a public
+        # hostname is ever mis-routed to /api/device/*, refuse it here too.
+        # Tailnet-address and no-Host-configured requests pass through.
+        if public_host and request.url.path.startswith("/api/device/"):
+            host_header = (request.headers.get("host") or "").split(":", 1)[0]
+            if host_header == public_host:
+                return Response(status_code=404, content=b"not found")
+        return await call_next(request)
 
     def current_user(all_tomorrow_session: str | None = Cookie(default=None, alias=SESSION_COOKIE)) -> str:
         return auth.verify(all_tomorrow_session)
@@ -510,6 +600,114 @@ def create_app(
             "matched_rule": decision.matched_rule,
         }
 
+    # -- Device agent: user-facing (session-authenticated) endpoints ------
+    @app.get("/devices", response_class=HTMLResponse)
+    async def devices_page(
+        all_tomorrow_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+    ) -> Response:
+        try:
+            user = auth.verify(all_tomorrow_session)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+        return HTMLResponse(_devices_page(user))
+
+    @app.get("/api/devices")
+    async def list_devices(user: str = Depends(current_user)) -> list[dict[str, Any]]:
+        result = devices.devices_view(user)
+        if hasattr(result, "__await__"):
+            result = await result
+        return result
+
+    @app.post("/api/devices/registration-code")
+    async def issue_registration_code(user: str = Depends(current_user)) -> dict[str, Any]:
+        code = await devices.issue_registration_code(user)
+        return {"registration_code": code, "expires_in_seconds": 600}
+
+    @app.post("/api/devices/{device_id}/revoke")
+    async def revoke_device(device_id: str, user: str = Depends(current_user)) -> dict[str, Any]:
+        from all_tomorrow.domain.device import DeviceError
+
+        try:
+            updated = await devices.revoke_device(user, device_id)
+        except DeviceError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"device_id": device_id, "status": updated.status.value}
+
+    # -- Device agent: device-authenticated (bearer token) endpoints -----
+    # Intentionally NOT protected by the human session cookie: a device proves
+    # itself with its own token (device_id + token, verified inside the
+    # service), which is a separate authority plane from the human web
+    # session (plan requirement: "사용자 세션과 분리"). These routes are meant
+    # to be reachable over the tailnet address only; the deployment's public
+    # HTTPS path blocks /api/device/* at the reverse proxy (see Caddyfile).
+    @app.post("/api/device/register")
+    async def device_register(payload: DeviceRegisterRequest) -> dict[str, Any]:
+        from all_tomorrow.device_agent import RegistrationCodeError
+
+        try:
+            device, token = await devices.register_device(
+                payload.registration_code, name=payload.name,
+                capabilities=frozenset(payload.capabilities), max_concurrent=payload.max_concurrent,
+            )
+        except RegistrationCodeError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return {"device_id": device.device_id, "token": token}
+
+    @app.post("/api/device/heartbeat")
+    async def device_heartbeat(payload: DeviceAuthRequest) -> dict[str, Any]:
+        from all_tomorrow.domain.device import DeviceError
+
+        try:
+            device = await devices.heartbeat(payload.device_id, payload.token)
+        except DeviceError as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+        return {"device_id": device.device_id, "status": device.effective_status().value}
+
+    @app.post("/api/device/claim")
+    async def device_claim(payload: DeviceAuthRequest) -> dict[str, Any]:
+        from all_tomorrow.domain.device import DeviceError
+
+        try:
+            lease = await devices.claim_work(payload.device_id, payload.token)
+        except DeviceError as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+        if lease is None:
+            return {"lease": None}
+        from all_tomorrow.domain.ids import WorkId
+
+        work = await ctl.store.get_work(WorkId(lease.work_id))
+        return {
+            "lease": {
+                "lease_id": lease.lease_id, "work_id": lease.work_id,
+                "expires_at": lease.expires_at.isoformat(),
+                "title": work.title if work is not None else None,
+            }
+        }
+
+    @app.post("/api/device/lease/renew")
+    async def device_renew(payload: DeviceLeaseActionRequest) -> dict[str, Any]:
+        from all_tomorrow.domain.device import DeviceError
+
+        try:
+            lease = await devices.renew_lease(payload.device_id, payload.token, payload.lease_id)
+        except DeviceError as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+        return {"lease_id": lease.lease_id, "expires_at": lease.expires_at.isoformat()}
+
+    @app.post("/api/device/complete")
+    async def device_complete(payload: DeviceCompleteRequest) -> dict[str, Any]:
+        from all_tomorrow.domain.device import DeviceError
+
+        try:
+            result = await devices.complete_work(
+                payload.device_id, payload.token, payload.lease_id,
+                succeeded=payload.succeeded, output_text=payload.output_text,
+                error=payload.error, duration_ms=payload.duration_ms,
+            )
+        except DeviceError as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+        return result
+
     @app.post("/internal/edge/discord/decide")
     async def internal_decide(payload: EdgeDecisionRequest, request: Request) -> dict[str, Any]:
         auth.verify_edge_token(request.headers.get("authorization"))
@@ -566,6 +764,10 @@ def app_from_environment() -> FastAPI:
     request_store = PostgresRequestStore(database_url, pool=semantic.pool)
     migration_dir = os.environ.get("ALL_TOMORROW_MIGRATIONS", "migrations")
 
+    from all_tomorrow.device_agent import PostgresDeviceAgentService
+
+    device_service = PostgresDeviceAgentService(semantic, semantic.pool)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         migrator = PostgresStore(database_url, pool=semantic.pool)
@@ -580,7 +782,7 @@ def app_from_environment() -> FastAPI:
     return create_app(
         auth=auth, cookie_secure=cookie_secure,
         control=WebControl(semantic, request_store), lifespan=lifespan,
-        upload_dir=upload_dir,
+        upload_dir=upload_dir, device_service=device_service,
     )
 
 
