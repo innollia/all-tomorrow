@@ -9,6 +9,8 @@
 
 Stage 0 gate가 활성인 동안 04B/04C를 포함한 Stage 1 구현을 시작하지 않는다. child 상태도 parent와 일치시킨다.
 
+2026-09-27 사용자 요청으로 [네 로컬 worker 연결](../../worker-adapters.md)을 한정 선행 작업으로 완료했다(네 CLI 실제 파일 생성 확인). 해당 연결은 기존 WorkerService의 호스트 실행 경로이며, 04B의 전체 계약이나 04C workspace resolver의 완료 판정으로 확대하지 않는다.
+
 ## Packet Status
 
 | 순서 | 작업 | 상태 | 지금 시작 가능 | 선행조건 |

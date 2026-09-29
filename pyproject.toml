@@ -26,6 +26,7 @@ dev = [
 
 [project.scripts]
 all-tomorrow-api = "all_tomorrow.web:run"
+all-tomorrow-worker = "all_tomorrow.local_workers:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3,<9", "pytest-asyncio>=0.24,<1"]
