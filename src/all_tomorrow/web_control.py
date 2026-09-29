@@ -54,7 +54,9 @@ class WebControl:
         self._goal_for_request: dict[str, GoalId] = {}
         self._lock = asyncio.Lock()
 
-    async def submit(self, user: str, text: str, idempotency_key: str) -> dict[str, Any]:
+    async def submit(
+        self, user: str, text: str, idempotency_key: str, *, attachment_refs: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
         text = text.strip()
         if not text:
             raise ValueError("요청 내용이 비어 있습니다")
@@ -70,8 +72,11 @@ class WebControl:
                 await self.store.create_goal(goal, _evt(user, "goal.created", goal_id=goal.goal_id,
                                                         external_ref=request_id))
                 work = WorkRecord(work_id=new_work_id(), goal_id=goal.goal_id, title=text)
-                await self.store.create_work(work, _evt(user, "work.created", goal_id=goal.goal_id,
-                                                        work_id=work.work_id))
+                await self.store.create_work(
+                    work, _evt(user, "work.created", goal_id=goal.goal_id, work_id=work.work_id,
+                               artifact_refs=attachment_refs,
+                               payload={"attachment_refs": list(attachment_refs)}),
+                )
                 goal_id = goal.goal_id
                 self._goal_for_request[request_id] = goal_id
         return {"goal_id": str(goal_id), "is_new": result.is_new}

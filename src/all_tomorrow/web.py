@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 from html import escape
 from typing import Any
 
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -18,6 +18,10 @@ from all_tomorrow.contracts import Project
 from all_tomorrow.edge import EdgeAnalysis, load_edge_policy
 from all_tomorrow.storage.semantic_store import InMemoryGoalWorkRunStore
 from all_tomorrow.web_control import NotFound, WebControl
+
+# Feature 7: attachment limits (per plan: max 10MB, max 5 files per request).
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+MAX_ATTACHMENTS = 5
 
 
 SESSION_COOKIE = "all_tomorrow_session"
@@ -197,11 +201,15 @@ def create_app(
     cookie_secure: bool = True,
     control: WebControl | None = None,
     lifespan: Any = None,
+    upload_dir: str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="All Tomorrow Control Plane", version="0.1.0", lifespan=lifespan)
     state_store = web_state or WebState()
     policy = load_edge_policy(policy_path)
     ctl = control or WebControl(InMemoryGoalWorkRunStore())
+    from all_tomorrow.storage.artifact_store import LocalArtifactStore
+
+    uploads = LocalArtifactStore(upload_dir or "data/artifacts")
 
     def current_user(all_tomorrow_session: str | None = Cookie(default=None, alias=SESSION_COOKIE)) -> str:
         return auth.verify(all_tomorrow_session)
@@ -262,6 +270,31 @@ def create_app(
     async def submit_request(payload: SubmitRequest, user: str = Depends(current_user)) -> dict[str, Any]:
         try:
             return await ctl.submit(user, payload.text, payload.idempotency_key)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.post("/api/requests/with-attachments")
+    async def submit_request_with_attachments(
+        text: str,
+        idempotency_key: str,
+        user: str = Depends(current_user),
+        files: list[UploadFile] = File(default=[]),
+    ) -> dict[str, Any]:
+        if len(files) > MAX_ATTACHMENTS:
+            raise HTTPException(status_code=422, detail=f"최대 {MAX_ATTACHMENTS}개까지 첨부할 수 있습니다")
+        attachment_refs: list[str] = []
+        for upload in files:
+            data = await upload.read()
+            if len(data) > MAX_ATTACHMENT_BYTES:
+                raise HTTPException(status_code=422, detail=f"{upload.filename}: 10MB를 초과합니다")
+            # Attachment content is untrusted DATA, never inline text and never a
+            # source of authority (ingress_policy.attachment_grants_authority).
+            ref = await uploads.store(
+                data, media_type=upload.content_type or "application/octet-stream", owner_id=user,
+            )
+            attachment_refs.append(ref.content_hash)
+        try:
+            return await ctl.submit(user, text, idempotency_key, attachment_refs=tuple(attachment_refs))
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
