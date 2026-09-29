@@ -32,7 +32,7 @@
       "path": "docs/roadmap/stage-00-assembly/00a-substrate-spike.md",
       "parent_id": "S0",
       "stage": 0,
-      "status": "개발중",
+      "status": "개발완료",
       "prerequisites": [],
       "requirement_prefix": "S0-00A-",
       "required_evidence_levels": [
@@ -45,7 +45,7 @@
       "path": "docs/roadmap/stage-00-assembly/00a-1-common-harness.md",
       "parent_id": "S0-00A",
       "stage": 0,
-      "status": "시작안했음",
+      "status": "개발완료",
       "prerequisites": [],
       "requirement_prefix": "S0-00A1-",
       "required_evidence_levels": [
@@ -57,7 +57,7 @@
       "path": "docs/roadmap/stage-00-assembly/00a-2-dbos-spike.md",
       "parent_id": "S0-00A",
       "stage": 0,
-      "status": "선행작업 대기",
+      "status": "개발완료",
       "prerequisites": [
         "S0-00A1"
       ],
@@ -72,7 +72,7 @@
       "path": "docs/roadmap/stage-00-assembly/00a-3-restate-spike.md",
       "parent_id": "S0-00A",
       "stage": 0,
-      "status": "선행작업 대기",
+      "status": "개발완료",
       "prerequisites": [
         "S0-00A1"
       ],
@@ -87,7 +87,7 @@
       "path": "docs/roadmap/stage-00-assembly/00a-4-gateway-spike.md",
       "parent_id": "S0-00A",
       "stage": 0,
-      "status": "선행작업 대기",
+      "status": "개발완료",
       "prerequisites": [
         "S0-00A1"
       ],
@@ -101,7 +101,7 @@
       "path": "docs/roadmap/stage-00-assembly/00a-5-selection.md",
       "parent_id": "S0-00A",
       "stage": 0,
-      "status": "선행작업 대기",
+      "status": "개발완료",
       "prerequisites": [
         "S0-00A2",
         "S0-00A3",
@@ -118,7 +118,7 @@
       "path": "docs/roadmap/stage-00-assembly/00b-ownership-contracts.md",
       "parent_id": "S0",
       "stage": 0,
-      "status": "선행작업 대기",
+      "status": "개발완료",
       "prerequisites": [
         "S0-00A"
       ],
@@ -133,7 +133,7 @@
       "path": "docs/roadmap/stage-00-assembly/00b-ownership-contracts/00b-1-domain-identity-state.md",
       "parent_id": "S0-00B",
       "stage": 0,
-      "status": "선행작업 대기",
+      "status": "개발완료",
       "prerequisites": [
         "S0-00A"
       ],
@@ -147,7 +147,7 @@
       "path": "docs/roadmap/stage-00-assembly/00b-ownership-contracts/00b-2-adapter-ports-errors.md",
       "parent_id": "S0-00B",
       "stage": 0,
-      "status": "선행작업 대기",
+      "status": "개발완료",
       "prerequisites": [
         "S0-00B1",
         "S0-00A5"
@@ -163,7 +163,7 @@
       "path": "docs/roadmap/stage-00-assembly/00b-ownership-contracts/00b-3-delivery-reconciliation.md",
       "parent_id": "S0-00B",
       "stage": 0,
-      "status": "선행작업 대기",
+      "status": "개발완료",
       "prerequisites": [
         "S0-00B1"
       ],
@@ -178,7 +178,7 @@
       "path": "docs/roadmap/stage-00-assembly/00b-ownership-contracts/00b-4-retry-timeouts-budget.md",
       "parent_id": "S0-00B",
       "stage": 0,
-      "status": "선행작업 대기",
+      "status": "개발완료",
       "prerequisites": [
         "S0-00B2",
         "S0-00A5"
@@ -194,7 +194,7 @@
       "path": "docs/roadmap/stage-00-assembly/00b-ownership-contracts/00b-5-tool-worker-authorization.md",
       "parent_id": "S0-00B",
       "stage": 0,
-      "status": "선행작업 대기",
+      "status": "개발완료",
       "prerequisites": [
         "S0-00B2",
         "S0-00A5"
@@ -210,7 +210,7 @@
       "path": "docs/roadmap/stage-00-assembly/00b-ownership-contracts/00b-6-acceptance.md",
       "parent_id": "S0-00B",
       "stage": 0,
-      "status": "선행작업 대기",
+      "status": "개발완료",
       "prerequisites": [
         "S0-00B1",
         "S0-00B2",
@@ -229,7 +229,7 @@
       "path": "docs/roadmap/stage-00-assembly/00c-failure-walking-skeleton.md",
       "parent_id": "S0",
       "stage": 0,
-      "status": "선행작업 대기",
+      "status": "개발완료",
       "prerequisites": [
         "S0-00A",
         "S0-00B"
@@ -245,7 +245,7 @@
       "path": "docs/roadmap/stage-00-assembly/00d-observability-eval-ci.md",
       "parent_id": "S0",
       "stage": 0,
-      "status": "선행작업 대기",
+      "status": "개발중",
       "prerequisites": [
         "S0-00C"
       ],

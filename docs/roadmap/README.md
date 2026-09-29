@@ -4,12 +4,14 @@
 
 ## 전체 상태
 
-| Stage | 상태 | 지금 시작 가능 | 선행조건 | 인덱스 |
-|---|---|---:|---|---|
-| 0. OSS Assembly & Architecture Proof | 개발중 | 예 | 없음 | [stage-00-assembly](stage-00-assembly/index.md) |
-| 1. Durable Self-Improving Researcher | 선행작업 대기 | 아니오 | Stage 0 | [stage-01-researcher](stage-01-researcher/index.md) |
-| 2. Reliable Assistant & Remote Control | 선행작업 대기 | 아니오 | Stage 1 | [stage-02-assistant](stage-02-assistant/index.md) |
-| 3. Personal Manager & Generalized Autonomy | 선행작업 대기 | 아니오 | Stage 2 | [stage-03-manager](stage-03-manager/index.md) |
+현재 Stage와 착수 가능 여부는 [전체 로드맵](../roadmap.md)을 따른다. packet별 상태와 증거는 해당 Stage index에서 찾는다.
+
+| Stage | 상태판 |
+|---|---|
+| 0. OSS Assembly & Architecture Proof | [stage-00-assembly](stage-00-assembly/index.md) |
+| 1. Durable Self-Improving Researcher | [stage-01-researcher](stage-01-researcher/index.md) |
+| 2. Reliable Assistant & Remote Control | [stage-02-assistant](stage-02-assistant/index.md) |
+| 3. Personal Manager & Generalized Autonomy | [stage-03-manager](stage-03-manager/index.md) |
 
 ## 공통 계약
 
@@ -24,8 +26,6 @@
 - [Operations, Security & Compatibility Contract](operations-security-contract.md)
 - [Roadmap Automation Contract](roadmap-automation-contract.md)
 - [Machine-readable Roadmap Manifest](manifest.json)
-- [00B+ Plan Hardening Audit](plan-hardening-audit-2026-09-20.md)
-- [Second-pass Hardening Audit](plan-hardening-audit-2-2026-09-20.md)
 
 packet이 공통 계약과 충돌하면 packet을 구현하기 전에 먼저 계획을 수정한다.
 
@@ -57,5 +57,14 @@ Stage 0 작업자는 기존 Stage 1 세부 packet을 구현 지시로 사용하�
 - stage-00-assembly: 외부 OSS를 실제로 연결해 foundation을 검증
 - stage-*/index.md: 상태판 + 파일 라우터
 - stage 세부 파일: 구현 범위, 선행조건, packet 고유 acceptance
-- docs/architecture.md: 검증 뒤 확정되는 공통 architecture reference
+- docs/architecture.md: 목표 architecture reference; 구현 완료 상태는 roadmap과 packet 증거 참조
 - docs/decisions/*.md: 확정된 구조 결정
+
+## 과거 기록과 호환 링크
+
+- [기존 시스템 inventory](../inventory.md): 2026-09-18 조사 기록
+- [00B+ Plan Hardening Audit](plan-hardening-audit-2026-09-20.md): 당시 계획 감사
+- [Second-pass Hardening Audit](plan-hardening-audit-2-2026-09-20.md): 당시 후속 감사
+- `docs/roadmap-01-foundation.md`, `roadmap-02-autonomy.md`, `roadmap-03-evolution.md`: 기존 링크 호환용 포인터. 세부 계획은 Stage index에서 관리한다.
+
+과거 기록의 결과를 현재 실행 검증으로 취급하지 않는다. 상태 변경 시 packet 증거를 기준으로 Stage index, 전체 로드맵, manifest를 함께 맞춘다.

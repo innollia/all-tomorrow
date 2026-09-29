@@ -11,7 +11,7 @@
 
 00B 이후 계획은 `../plan-verification-contract.md`, `../domain-contracts.md`, `../failure-recovery-contract.md`, `../data-security-artifact-contract.md`를 공통 계약으로 사용한다. 계획 구체화 감사는 `../plan-hardening-audit-2026-09-20.md`에 기록한다.
 
-## 현재 우선 조합
+## 선택된 조합
 
 공통 조각:
 
@@ -21,14 +21,14 @@
 - Code/evaluation rail: GitHub + Actions
 - 기존 All Tomorrow: Goal/Work 의미, source ownership, metacognition, authority, worker adapters
 
-Stage 0에서는 두 결정을 분리한다.
+[00A-5 선택 기록](00a-5-selection.md)에 따라 두 결정을 분리해 확정했다.
 
-- **Durable backend:** DBOS vs Restate
-- **Tool gateway:** LiteLLM MCP Gateway 우선 spike, concrete gap이 있으면 FastMCP fallback
+- **Durable backend:** DBOS (Restate 비교 완료)
+- **Tool gateway:** LiteLLM MCP Gateway (FastMCP fallback 미사용)
 
 LiteLLM MCP가 실패해도 durable candidate를 탈락시키지 않는다. 반대도 마찬가지다.
 
-## Durable Candidates
+## 비교한 Durable Candidates
 
 - **DBOS**: Python/PostgreSQL 중심, PydanticAI native durability, 얇은 single-node 시작
 - **Restate**: PydanticAI SDK integration, single-binary self-host, journal/state/signals/long wait
@@ -58,9 +58,9 @@ production durable engine은 하나만 채택한다.
 
 ## 지금 시작할 작업
 
-**00A, 00B, 00C 완료.** 00C Failure Walking Skeleton(C-01~C-10, real OS crash/restart, durable DBOS PostgreSQL backend, LiteLLM E2E, data retention canary isolation 5-canary/6-surface, C-07 제품 경로 supervisor timeout/evidence, C-09 독립 reconciler ThreadPool/DB barrier 기반 PostgreSQL CAS 실제 경합 및 관측 검증, C-10 제품 tool 어댑터 경로(PydanticAIGatewayAdapter + MCP tool 업스트림) 정상→다운→복구 통과 및 UNAVAILABLE evidence/위조 부재 직접 단언, DBOS unreachable status probe 검증 유지 및 범위 명시, DBOS SDK public API 정리, artifact probe)이 100% 통과하여 00D Observability / Eval / CI Seam을 시작할 수 있다. Stage 0 전체는 계속 개발중이며 Stage 1은 대기한다.
+00A(기반 선택), 00B(소유권 및 어댑터 계약), 00C(Failure Walking Skeleton)는 개발완료이며, 현재 **00D(Observability / Eval / CI Seam)가 개발중**이다. 00D 기록에는 CI 6개 lane 성공, deployed-smoke skipped, 실제 dependency update PR artifact 부재(D-UP-01 미충족)가 남아 있다. 세부 증거와 완료 판정은 [00D](00d-observability-eval-ci.md)를 따른다. 00E와 Stage 1은 선행작업 대기다.
 
-00A-1이 끝나기 전에 DBOS/Restate implementation convenience에 맞춰 harness나 domain semantics를 바꾸지 않는다.
+00C의 검증 범위와 failure별 증거는 [00C 기록](00c-failure-walking-skeleton.md)에 유지한다.
 
 ## Stage 핵심 질문
 

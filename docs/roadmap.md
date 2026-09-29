@@ -13,13 +13,10 @@
 
 ## 지금 바로 작업 가능한 것
 
-Stage 0만 진행한다. 00A(기반 선택), 00B(소유권 및 어댑터 계약), 00C(Failure Walking Skeleton)를 완료했다. C07 제품 supervisor timeout/evidence 경로, C09 독립 reconciler ThreadPool/DB barrier 기반 PostgreSQL CAS 실제 경합 및 관측 검증, C10 제품 tool 어댑터 경로(PydanticAIGatewayAdapter + MCP tool 업스트림)의 정상→다운→복구 통과 및 UNAVAILABLE evidence/위조 부재 직접 검증(DBOS unavailable은 정적 endpoint status probe로 검증 유지 및 범위 명시), 5-canary/6-surface retention isolation, DBOS public SDK API 경계 정리를 포함한 00C 후속 보완 및 검증을 완료했다. 현재 00D(Observability / Eval / CI Seam)를 시작할 수 있다.
+Stage 0만 진행한다. 00A(기반 선택), 00B(소유권 및 어댑터 계약), 00C(Failure Walking Skeleton)는 개발완료이며, 현재 **00D(Observability / Eval / CI Seam)가 개발중**이다. 00D 기록에는 CI 6개 lane 성공, deployed-smoke skipped, 실제 dependency update PR artifact 부재(D-UP-01 미충족)가 남아 있다. 세부 증거와 완료 판정은 [00D](roadmap/stage-00-assembly/00d-observability-eval-ci.md)를 따른다. 00E와 Stage 1은 선행작업 대기다.
 
-- OSS substrate spike
-- All Tomorrow와 외부 엔진의 ownership boundary 확정
-- 실제 PostgreSQL을 포함한 crash/restart walking skeleton
-- observability/eval/CI seam 검증
-- 결과에 따라 Stage 1 schema와 packet을 확정
+- 현재: 00D의 남은 evidence와 완료조건 충족
+- 00D 완료 후: 00E에서 architecture lock과 Stage 1 schema/packet 재작성
 
 Stage 0가 끝나기 전에는 새 durable queue, lease/heartbeat, LLM client, agent framework를 직접 구현하지 않는다.
 
