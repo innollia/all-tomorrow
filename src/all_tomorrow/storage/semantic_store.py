@@ -174,6 +174,10 @@ class GoalWorkRunStore(Protocol):
         execution_ref: ExecutionRef | None = None,
     ) -> RunRecord: ...
     async def find_reconciliation_candidates(self) -> list[RunRecord]: ...
+    async def current_run_revision(self, run_id: RunId) -> int: ...
+
+    # Work claiming (executor loop)
+    async def claim_pending_work(self, *, limit: int = 1) -> list[WorkRecord]: ...
 
     # Events / Outcomes
     async def list_events(
@@ -222,6 +226,9 @@ class InMemoryGoalWorkRunStore:
     def run_revision(self, run_id: RunId) -> int:
         """Current stored revision for a Run (1 at creation)."""
         return self._run_revisions.get(run_id, 1)
+
+    async def current_run_revision(self, run_id: RunId) -> int:
+        return self.run_revision(run_id)
 
     # -- Goal ---------------------------------------------------------------
     async def create_goal(self, goal: GoalRecord, event: SemanticEvent) -> GoalRecord:
@@ -375,6 +382,26 @@ class InMemoryGoalWorkRunStore:
             for r in self._runs.values()
             if r.status == RunStatus.STARTING and r.execution_ref is None
         ]
+
+    async def claim_pending_work(self, *, limit: int = 1) -> list[WorkRecord]:
+        """Atomically move up to ``limit`` PENDING Work to RUNNING and return them.
+
+        The lock makes claim-then-transition atomic within this process, which is
+        the InMemory store's equivalent of the Postgres ``FOR UPDATE SKIP LOCKED``
+        claim: two concurrent callers never claim the same Work.
+        """
+        async with self._lock:
+            candidates = sorted(
+                (w for w in self._work.values() if w.status == WorkStatus.PENDING),
+                key=lambda w: (-w.priority, w.created_at),
+            )[:limit]
+            claimed: list[WorkRecord] = []
+            for w in candidates:
+                updated = transition_work(w, WorkStatus.RUNNING)
+                self._work[w.work_id] = updated
+                self._events.append(_evt_internal("executor", "work.claimed", work_id=w.work_id))
+                claimed.append(updated)
+            return claimed
 
     # -- Events -------------------------------------------------------------
     async def list_events(
@@ -845,6 +872,60 @@ class PostgresGoalWorkRunStore:
             rows = await cur.fetchall()
         return [_run_from_row(r) for r in rows]
 
+    async def current_run_revision(self, run_id: RunId) -> int:
+        if run_id in _RUN_REVISIONS:
+            return _RUN_REVISIONS[run_id]
+        run = await self.get_run(run_id)
+        if run is None:
+            raise NotFoundError(f"run not found: {run_id}")
+        return _run_revision(run)
+
+    async def claim_pending_work(self, *, limit: int = 1) -> list[WorkRecord]:
+        """Atomically claim up to ``limit`` PENDING Work rows via row-level locking.
+
+        ``FOR UPDATE SKIP LOCKED`` is the DB-native equivalent of a distributed
+        lease: two executor processes racing this query never claim the same row,
+        and a row already locked by another claimant is simply skipped rather than
+        blocking this transaction.
+        """
+        async with self.pool.connection() as conn:
+            async with conn.transaction():
+                cur = await conn.execute(
+                    """
+                    SELECT work_id, goal_id, title, semantic_status, priority,
+                           revision, created_at, updated_at, terminal_at
+                    FROM work_items
+                    WHERE semantic_status = 'PENDING'
+                    ORDER BY priority DESC, created_at
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                rows = await cur.fetchall()
+                claimed: list[WorkRecord] = []
+                for row in rows:
+                    current = _work_from_row(row)
+                    updated = transition_work(current, WorkStatus.RUNNING)
+                    res = await conn.execute(
+                        """
+                        UPDATE work_items
+                        SET semantic_status = %s, revision = %s, updated_at = %s
+                        WHERE work_id = %s AND revision = %s
+                        RETURNING revision
+                        """,
+                        (updated.status.value, updated.revision, updated.updated_at,
+                         current.work_id, current.revision),
+                    )
+                    if await res.fetchone() is None:
+                        continue  # lost a race despite the row lock; skip, do not block
+                    await self._append_event_conn(
+                        conn, SemanticEvent(event_id=new_event_id(), actor="executor",
+                                            type="work.claimed", work_id=current.work_id)
+                    )
+                    claimed.append(updated)
+        return claimed
+
     # -- Events -------------------------------------------------------------
     async def _append_event_conn(self, conn: Any, event: SemanticEvent) -> None:
         await conn.execute(
@@ -1003,6 +1084,10 @@ class PostgresGoalWorkRunStore:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def _evt_internal(actor: str, type_: str, **kw: Any) -> SemanticEvent:
+    return SemanticEvent(event_id=new_event_id(), actor=actor, type=type_, **kw)
+
+
 def _check_revision(actual: int, expected: int, kind: str, ident: Any) -> None:
     if actual != expected:
         raise StoreConflictError(
