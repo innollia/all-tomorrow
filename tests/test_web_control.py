@@ -3,6 +3,7 @@ import asyncio
 from fastapi.testclient import TestClient
 
 from all_tomorrow.domain.ids import new_question_id
+from all_tomorrow.requests import RequestStore
 from all_tomorrow.storage.semantic_store import InMemoryGoalWorkRunStore, QuestionRecordSemantic
 from all_tomorrow.web import Auth, create_app
 from all_tomorrow.web_control import NotFound, WebControl
@@ -67,13 +68,33 @@ def test_other_users_objects_are_invisible():
         raise AssertionError("bob must not cancel alice's goal")
 
 
+def test_submit_survives_in_process_cache_loss():
+    """Feature 11: a WebControl that lost its in-memory request->Goal cache
+    (e.g. a process restart, same durable RequestStore) must not create a
+    second Goal for a retried idempotency key -- it recovers the original
+    Goal from the event log instead."""
+    store = InMemoryGoalWorkRunStore()
+    requests_store = RequestStore()
+    ctl_a = WebControl(store, requests_store)
+    goal_id_1 = asyncio.run(ctl_a.submit("admin", "재시작 테스트", "key-restart-1"))["goal_id"]
+
+    # A brand-new WebControl sharing only the durable RequestStore -- its
+    # _goal_for_request cache starts empty, simulating a restart.
+    ctl_b = WebControl(store, requests_store)
+    result_2 = asyncio.run(ctl_b.submit("admin", "재시작 테스트", "key-restart-1"))
+    assert result_2["is_new"] is False
+    assert result_2["goal_id"] == goal_id_1
+
+    goals = asyncio.run(store.list_goals(user_id="admin"))
+    assert len(goals) == 1  # not duplicated
+
+
 def test_api_requires_login_and_page_is_dark():
     app = create_app(auth=Auth("admin", "pw", SECRET), cookie_secure=False)
     client = TestClient(app)
     assert client.get("/api/overview").status_code == 401
     assert client.post("/api/requests", json={"text": "x", "idempotency_key": "key-00000005"}).status_code == 401
     assert "background:#000" in client.get("/login").text
-
 
 
 import os

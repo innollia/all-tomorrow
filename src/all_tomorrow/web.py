@@ -556,10 +556,13 @@ def app_from_environment() -> FastAPI:
     from contextlib import asynccontextmanager
     from pathlib import Path
 
+    from all_tomorrow.requests import PostgresRequestStore
     from all_tomorrow.storage.postgres import PostgresStore
     from all_tomorrow.storage.semantic_store import PostgresGoalWorkRunStore
 
     semantic = PostgresGoalWorkRunStore(database_url)
+    # Feature 11: idempotency keys survive a restart too (same pool, same DB).
+    request_store = PostgresRequestStore(database_url, pool=semantic.pool)
     migration_dir = os.environ.get("ALL_TOMORROW_MIGRATIONS", "migrations")
 
     @asynccontextmanager
@@ -573,7 +576,10 @@ def app_from_environment() -> FastAPI:
         finally:
             await semantic.close()
 
-    return create_app(auth=auth, cookie_secure=cookie_secure, control=WebControl(semantic), lifespan=lifespan)
+    return create_app(
+        auth=auth, cookie_secure=cookie_secure,
+        control=WebControl(semantic, request_store), lifespan=lifespan,
+    )
 
 
 def run() -> None:

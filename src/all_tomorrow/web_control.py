@@ -40,19 +40,33 @@ class WebControl:
     def __init__(
         self,
         store: GoalWorkRunStore,
-        requests: RequestStore | None = None,
+        requests: "RequestStore | Any" = None,
         *,
         artifact_store: ArtifactStoreProtocol | None = None,
         report_store: ReportStore | None = None,
         repair_service: RepairService | None = None,
     ) -> None:
         self.store = store
-        self.requests = requests or RequestStore()
+        # Accepts a PostgresRequestStore too (Feature 11: durable idempotency) --
+        # both share the same ingest()/get_request()/deliveries_for() contract.
+        self.requests = requests if requests is not None else RequestStore()
         self.artifact_store = artifact_store
         self.report_store = report_store or ReportStore()
         self.repair_service = repair_service or RepairService()
         self._goal_for_request: dict[str, GoalId] = {}
         self._lock = asyncio.Lock()
+
+    async def _find_goal_by_request(self, user: str, request_id: str) -> GoalId | None:
+        """Feature 11: recover the Goal a durable idempotency key already points
+        to when the in-process request->Goal cache is empty (server restart).
+        Walks the user's Goals' event logs for the ``goal.created`` event whose
+        ``external_ref`` matches -- slower than a cache hit, but only taken on
+        that one cold path, and correctness (no duplicate Goal) matters more."""
+        for goal in await self.store.list_goals(user_id=user):
+            for event in await self.store.list_events(goal_id=goal.goal_id):
+                if event.type == "goal.created" and event.external_ref == request_id:
+                    return goal.goal_id
+        return None
 
     async def submit(
         self, user: str, text: str, idempotency_key: str, *, attachment_refs: tuple[str, ...] = (),
@@ -67,6 +81,10 @@ class WebControl:
             )
             request_id = result.request.request_id
             goal_id = self._goal_for_request.get(request_id)
+            if goal_id is None and not result.is_new:
+                goal_id = await self._find_goal_by_request(user, request_id)
+                if goal_id is not None:
+                    self._goal_for_request[request_id] = goal_id
             if goal_id is None:
                 goal = GoalRecord(goal_id=new_goal_id(), user_id=user, title=text)
                 await self.store.create_goal(goal, _evt(user, "goal.created", goal_id=goal.goal_id,
@@ -287,6 +305,10 @@ class WebControl:
             )
             request_id = result.request.request_id
             goal_id = self._goal_for_request.get(request_id)
+            if goal_id is None and not result.is_new:
+                goal_id = await self._find_goal_by_request(user, request_id)
+                if goal_id is not None:
+                    self._goal_for_request[request_id] = goal_id
             if goal_id is None:
                 goal = GoalRecord(goal_id=new_goal_id(), user_id=user, title=text)
                 await self.store.create_goal(
