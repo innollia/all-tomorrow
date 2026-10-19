@@ -191,3 +191,17 @@ operator to apply them on the live account.
   - 노드 env: `ALL_TOMORROW_TAILNET_LOGINS=<소유자 Tailscale 로그인>`, `ALL_TOMORROW_TAILSCALE_SERVE_PORT=8081`.
 - **세션 30일**: `ALL_TOMORROW_SESSION_TTL_DAYS`(기본 30).
 - **비밀번호 변경 유지**: 계정 화면에서 바꾼 비밀번호(PBKDF2 해시)와 "모든 기기 로그아웃" 세대값을 `ALL_TOMORROW_AUTH_STATE`(기본 `<콘솔 데이터>/auth-state.json`, 600)에 저장한다. 이후에는 env의 `ALL_TOMORROW_ADMIN_PASSWORD`가 아니라 저장된 해시가 쓰인다. 초기화하려면 그 파일을 지운다. `at_console` 볼륨이 이 파일과 콘솔 데이터를 보존한다.
+
+### 배포 기록 (2026-10-20)
+
+- 대상: `all-tomorrow-node` (i-034a2f4ca37b9e293, t3.small). 이 노드가 tailnet의 `all-tomorrow-central`(100.97.113.3)이다.
+- 이전 상태: 앱 `all-tomorrow:0.3.0@sha256:fd08b5b0e17d…`(노드 `/opt/all-tomorrow/deploy-prev-image.txt`에 기록), `ALL_TOMORROW_COOKIE_SECURE=true`. 배포 전 DB 백업 `all_tomorrow-20261019T150427Z.dump`를 S3에 업로드했다.
+- 방법: 이 브랜치 소스(`046b680`)를 S3 임시 객체로 넘겨 노드에서 `docker build`(작업 PC에 Docker 없음, 노드 x86_64). 이미지 `all-tomorrow:console-046b680`(로컬 태그, ECR 미등록).
+- 반영: `/opt/all-tomorrow/docker-compose.override.yaml`(systemd의 `docker compose up -d`가 자동 포함)로 앱만 교체했다. 콘솔 데이터는 `at_console` 볼륨에 두고, 수집기 토큰은 `/opt/all-tomorrow/console.env`(600)에 두었다. postgres·caddy는 그대로다.
+- `tailscale serve --bg --https=443 http://127.0.0.1:8081` → `https://all-tomorrow-central.tailc5ef02.ts.net/` (tailnet only).
+- 확인:
+  - 작업 PC(aaaa, tailnet)에서 serve 주소 `/login`이 303으로 세션 쿠키를 받았고, `/`와 `/api/devices`가 200이었다. 브라우저에서도 비밀번호 없이 콘솔 홈으로 들어가 9개 화면이 오류 없이 렌더링됐다.
+  - 직접 `:8080`과 공개 Caddy로 위조 헤더를 보내면 로그인 폼(200)만 나왔다.
+  - 공개 `/healthz` 200을 확인했다. 사용량·프로젝트 스냅숏 push는 204였다.
+- 롤백: `docker-compose.override.yaml` 삭제 → `docker compose -f docker-compose.yaml -f docker-compose.caddy.yaml up -d --no-deps all-tomorrow-app` → `tailscale serve --https=443 off`.
+- 남은 일: 이 이미지를 ECR에 올리고 digest로 고정하는 정식 릴리스 절차(PR 병합 후), 아이디어 공장 실행기(`IDEA_FACTORY_ENABLED`)와 gateway는 노드에서 켜지 않았다(읽기 전용 화면만 동작).
