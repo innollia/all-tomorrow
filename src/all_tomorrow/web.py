@@ -13,6 +13,7 @@ from typing import Any
 
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from all_tomorrow.contracts import Project
@@ -154,40 +155,23 @@ button{background:#6d5dfc;border:0;font-weight:700;cursor:pointer}#error{color:#
 <script>login.onsubmit=async(e)=>{e.preventDefault();const r=await fetch('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:username.value,password:password.value})});if(r.ok)location='/';else error.textContent='로그인 실패';}</script></body></html>"""
 
 
+STATIC_DIR = Path(__file__).parent / "static"
+
+
 def _dashboard(username: str) -> str:
-    safe_user = escape(username)
-    return f"""<!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>All Tomorrow</title><style>
-body{{font:15px system-ui;margin:0;background:#0c1018;color:#e9edf5}}header{{padding:18px 24px;background:#161c29;display:flex;justify-content:space-between}}
-main{{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;padding:20px}}section{{background:#171e2c;padding:18px;border-radius:14px;min-height:180px}}
-pre{{white-space:pre-wrap;color:#b8c4dc}}
-#usage{{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;padding:20px 20px 0}}
-.uc{{background:#141414;border:1px solid #2a2a2a;border-radius:14px;padding:16px}}.uh{{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}}
-.uh b{{font-size:17px}}.uh small{{color:#8a8f99;margin-left:6px}}.ok{{color:#4ccf8a}}.bad{{color:#ff9a9a}}.ub{{background:#222;border-radius:12px;padding:10px 16px}}
-.ur{{padding:9px 0}}.ul{{display:flex;justify-content:space-between;font-size:14px}}.ul span{{color:#9aa0aa;font-family:ui-monospace,monospace;font-size:12.5px}}
-.bar{{height:5px;background:#333;border-radius:3px;margin-top:7px}}.bar i{{display:block;height:100%;border-radius:3px;background:#f26b1d}}.bar i.hi{{background:#e2685f}}.stale{{color:#8a8f99;font-size:12px;margin-top:6px}}button{{background:#6d5dfc;color:white;border:0;padding:8px 12px;border-radius:7px;cursor:pointer}}
-</style></head><body><header><strong>All Tomorrow Control Plane</strong><span>{safe_user} <button onclick="logout()">로그아웃</button></span></header>
-<div id="usage"></div>
-<main><section><h2>Chat</h2><p>Edge routing preview가 먼저 적용됩니다. 실행 pipeline 연결은 다음 단계입니다.</p></section>
-<section><h2>Projects</h2><pre id="projects">loading…</pre></section><section><h2>Runs</h2><pre id="runs">loading…</pre></section>
-<section><h2>Pending Questions</h2><pre id="questions">loading…</pre></section></main>
-<script>async function load(id,path){{const r=await fetch(path);document.getElementById(id).textContent=r.ok?JSON.stringify(await r.json(),null,2):'불러오기 실패';}}
-function left(t){{const ms=new Date(t)-Date.now();if(!(ms>0))return null;const m=Math.floor(ms/60000),d=Math.floor(m/1440),h=Math.floor(m%1440/60);return d?`${{d}}일 ${{h}}시간`:h?`${{h}}시간 ${{m%60}}분`:`${{m%60}}분`;}}
-function esc(v){{return String(v??'').replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');}}
-async function loadUsage(){{const box=document.getElementById('usage');const r=await fetch('/api/usage');if(!r.ok){{box.textContent='사용량 불러오기 실패';return;}}
-const snap=await r.json();if(!snap){{box.innerHTML='<div class="uc">사용량 데이터 없음 — 로컬 PC에서 all-tomorrow-usage push 실행 필요</div>';return;}}
-box.innerHTML=snap.providers.map(p=>{{const ok=p.status==='connected';const rows=p.windows.map(w=>{{const l=left(w.resets_at);const pct=l===null?0:Math.round(w.percent);
-return `<div class="ur"><div class="ul">${{esc(w.label)}}<span>${{pct}}% 사용 · ${{l===null?'초기화됨':l+' 후 초기화'}}</span></div><div class="bar"><i class="${{pct>=80?'hi':''}}" style="width:${{Math.min(pct,100)}}%"></i></div></div>`;}}).join('');
-const age=Math.round((Date.now()-new Date(p.observed_at))/60000);
-return `<div class="uc"><div class="uh"><div><b>${{esc(p.name)}}</b><small>${{esc(p.plan)}}</small></div><span class="${{ok?'ok':'bad'}}">● ${{ok?'연결됨':esc(p.status)}}</span></div><div class="ub">${{rows||'데이터 없음'}}</div>${{age>30?`<div class="stale">${{age<1440?Math.round(age/60)+'시간':Math.round(age/1440)+'일'}} 전 관측값</div>`:''}}</div>`;}}).join('');}}
-loadUsage();setInterval(loadUsage,60000);
-load('projects','/api/projects');load('runs','/api/runs');load('questions','/api/questions');
-async function logout(){{await fetch('/api/logout',{{method:'POST'}});location='/login';}}</script></body></html>"""
+    return (STATIC_DIR / "console.html").read_text(encoding="utf-8").replace("__USER__", escape(username))
 
 
-def create_app(*, auth: Auth, web_state: WebState | None = None, policy_path: str = "edge/discord/default.yaml") -> FastAPI:
-    app = FastAPI(title="All Tomorrow Control Plane", version="0.1.0")
+def create_app(
+    *,
+    auth: Auth,
+    web_state: WebState | None = None,
+    policy_path: str = "edge/discord/default.yaml",
+    factory: Any = None,
+    lifespan: Any = None,
+) -> FastAPI:
+    app = FastAPI(title="All Tomorrow Control Plane", version="0.1.0", lifespan=lifespan)
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     state_store = web_state or WebState()
     policy = load_edge_policy(policy_path)
 
@@ -265,7 +249,39 @@ def create_app(*, auth: Auth, web_state: WebState | None = None, policy_path: st
             "matched_rule": decision.matched_rule,
         }
 
+    if factory is not None:
+        from all_tomorrow.idea_factory.web_routes import build_router
+
+        app.include_router(build_router(factory, current_user))
+
     return app
+
+
+def _factory_from_environment() -> tuple[Any, Any]:
+    """Idea factory runtime when IDEA_FACTORY_ENABLED=1; DBOS launches with the web process."""
+    if os.environ.get("IDEA_FACTORY_ENABLED") != "1":
+        return None, None
+    from contextlib import asynccontextmanager
+
+    from all_tomorrow.idea_factory import pipeline
+    from all_tomorrow.idea_factory.config import REPO_ROOT, load_roster
+    from all_tomorrow.idea_factory.store import Store
+    from all_tomorrow.idea_factory.web_routes import FactoryRuntime
+
+    store = Store(os.environ.get("IDEA_FACTORY_STORE", REPO_ROOT / ".artifacts" / "idea-factory.sqlite"))
+    runtime = FactoryRuntime(store=store, roster=load_roster(),
+                             start_topic=lambda text, actor: pipeline.start_topic(text, actor),
+                             kill_all=lambda actor: pipeline.kill_all(actor))
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        from dbos import DBOS
+
+        pipeline.launch(store, roster_obj=runtime.roster)
+        yield
+        DBOS.destroy()
+
+    return runtime, lifespan
 
 
 def app_from_environment() -> FastAPI:
@@ -275,9 +291,12 @@ def app_from_environment() -> FastAPI:
     edge_token = os.environ.get("ALL_TOMORROW_EDGE_TOKEN")
     usage_token = os.environ.get("ALL_TOMORROW_USAGE_TOKEN")
     usage_path = Path(os.environ.get("ALL_TOMORROW_USAGE_PATH", ".artifacts/usage.json"))
+    factory, lifespan = _factory_from_environment()
     return create_app(
         auth=Auth(username, password, secret, edge_token=edge_token, usage_token=usage_token),
         web_state=WebState(usage_path=usage_path),
+        factory=factory,
+        lifespan=lifespan,
     )
 
 

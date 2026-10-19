@@ -1,6 +1,7 @@
 # 사업 아이디어 공장 + 통제 콘솔 계획서
 
-- 상태: **개발중** — P0 진행 중 (2026-10-19 사용자 승인, Stage 0 gate 예외). Stage 1 Researcher 완료를 뜻하지 않는다.
+- 상태: **개발중** — P1~P3 구현·로컬 검증 완료, 특허 소스(KIPRIS 키)·AWS 배포·P4 남음 (2026-10-19 사용자 승인, Stage 0 gate 예외). Stage 1 Researcher 완료를 뜻하지 않는다.
+- 실행 방법·검증 기록: 이 문서 끝의 [구현과 검증](#구현과-검증-2026-10-19).
 - 참고: 사용자가 공유한 데코 시스템 화면(자율 레이어 통제면, 기획안, fleet 운영 콘솔 메뉴). 구조는 따르고, 시각 디자인은 따르지 않는다.
 
 ## 1. 완료된 상태
@@ -68,7 +69,8 @@
 | 스켑틱 | 왜 실패하는가, 숨은 전제와 리스크 |
 
 - 각 라운드마다 네 명이 모두 `지지 / 반대 / 조건부` 선언과 근거를 남긴다.
-- 통과 조건 초안: 스켑틱의 반대 근거에 오퍼레이터 또는 애드보킷이 반박했고, 최종 라운드에서 3명 이상 지지. (운영 데이터로 조정)
+- 통과 조건: 최종 라운드에서 4명 중 3명 이상 `support`. **최종 라운드에는 `conditional`이 없다**(구현 중 변경: 첫 실제 실행에서 4명 모두 두 라운드 내내 `conditional`만 내 회의가 결론을 못 냈다). 최종 라운드의 무응답·조건부는 반대로 센다.
+- 초안의 "스켑틱 반대에 반박했는지" 조건은 자동 판정 근거가 약해 넣지 않았다. 운영 데이터로 다시 본다.
 - 같은 모델이 네 명을 모두 연기하면 의견이 수렴하므로, 직원마다 다른 모델·프로바이더를 배정한다(화면의 gemini-free-lite / groq / gemini-free처럼).
 
 ## 3. 직원 제도 (승진·퇴출)
@@ -205,3 +207,61 @@
 2. (선택) Cerebras 키 발급 (`gpt-oss-120b` 무료).
 
 키 풀 조건은 충족했다. P0에서 남은 것은 특허 소스 하나뿐이다.
+
+## 구현과 검증 (2026-10-19)
+
+### 구성
+
+| 부분 | 위치 | 비고 |
+|---|---|---|
+| 직원·모델 그룹·정책 | `config/idea-factory.yaml` | 키 값 없음. OpenRouter는 `:free` 모델만 허용(로드 시 검사) |
+| 키 원본 | `config/key-pool.local.env` (Git 제외) | gateway master key(`IDEA_FACTORY_GATEWAY_KEY`)도 여기 |
+| gateway | LiteLLM proxy 1.101.0, `.artifacts/gateway-venv` | 설정은 `idea_factory gateway`가 생성(키는 `os.environ/이름` 참조만). 54 deployment, 실패 시 `g-fast` fallback |
+| 파이프라인 | `src/all_tomorrow/idea_factory/pipeline.py` | DBOS workflow. LLM·검색 호출 하나가 step 하나. 로컬은 SQLite, AWS는 `IDEA_FACTORY_DBOS_URL`로 Postgres |
+| 앱 상태 | `.artifacts/idea-factory.sqlite` (`IDEA_FACTORY_STORE`) | 주제·아이디어·회의·기획안·직원·이벤트·감사 로그 |
+| 특허 | `patents.py` | `KIPRIS_API_KEY` 있으면 KIPRIS. 없으면 모든 아이디어 `보류`. `IDEA_FACTORY_PATENTS=unchecked`면 통과시키되 기획안에 "특허 미검사" 표시 |
+| 평가 | `evaluation.py` | 사용자 판정만 정답. 승진·퇴출 후에는 그 시점 이후 표본만 센다 |
+| 콘솔 | `static/console.*`, `idea_factory/web_routes.py` | `IDEA_FACTORY_ENABLED=1`이면 웹 프로세스가 DBOS를 함께 띄움 |
+
+### 실행
+
+```powershell
+# 1) gateway (별도 창)
+.venv/Scripts/python.exe -m all_tomorrow.idea_factory gateway --litellm .artifacts/gateway-venv/Scripts/litellm.exe
+# 2-a) CLI로 주제 하나
+.venv/Scripts/python.exe -m all_tomorrow.idea_factory run "주제"
+# 2-b) 또는 웹 콘솔 (통제면에서 주제 던지기)
+$env:IDEA_FACTORY_ENABLED="1"; .venv/Scripts/python.exe -c "from all_tomorrow.web import run; run()"
+# KIPRIS 키가 생기기 전까지 기획안까지 보고 싶으면: $env:IDEA_FACTORY_PATENTS="unchecked"
+```
+
+DBOS를 띄우는 프로세스는 한 번에 하나만 둔다(CLI와 웹을 동시에 띄우면 같은 workflow를 둘이 복구하려 한다).
+
+### 단계별 판정
+
+| 단계 | 판정 | 직접 증거 |
+|---|---|---|
+| P0 | **부분** | 키 풀 충족(위 기록). 허용된 특허 소스 미확보 |
+| P1 | **부분 충족** | 실제 주제 5개 실행. 생성→회의→기획안까지 실제 모델로 관통(기획안 1건 이상, 아래). 폐기(근거 포함) 경로는 **실제 소스로는 미검증**: Google Patents는 첫 주제의 첫 아이디어(검색 18건, 통과) 뒤 503 차단 페이지를 반환해 이후 4개는 `보류`. 폐기 경로는 가짜 소스 테스트로만 확인(`test_workflow_kills_patented_idea_and_reports_the_other`). 크래시 복구: 2번째 주제를 회의 1라운드 4표 직후 프로세스 강제 종료 → `resume` 시 DBOS가 workflow 1개 복구, 1라운드 4표 본문이 그대로(재실행 없음), 2라운드부터 이어서 `DONE` |
+| P2 | **충족** | 새 메뉴 9개 화면(홈·구독 사용량·통제면·폐기 검토·기획안·직원·프로젝트·감사 로그·비상 통제), 375px에서 전 화면 가로 스크롤 없음·콘솔 오류 없음. 일시정지 45초 동안 gateway 호출 60→60·이벤트 4→4, 재개 후 호출 재개. KILL 후 45초 동안 이벤트 4→4, 새 주제 409. KILL 시점에 진행 중이던 요청 1건은 완료됐다(DBOS 취소는 실행 중 step을 끊지 않음) |
+| P3 | **로직 충족, 실제 판정 없음** | 승인/거부·폐기 검토 → 점수 → 승진/퇴출 → 감사 로그를 테스트로 확인(`test_user_judgments_promote_and_retire_staff`, `test_console_api_controls_loop_and_records_decisions`). 실제 기획안에 대한 사용자 판정은 아직 없음. 사용자 대신 승인/거부하지 않았다(그 판정이 평가의 정답이라서) |
+| P4 | 시작 안 함 | 실제 특허 소스가 있어야 폐기 표본이 생김 |
+
+### 구현 중 발견하고 고친 것
+
+- 회의가 결론을 못 냄 → 최종 라운드 `conditional` 제거(§2 회의 규칙).
+- KILL 버튼 500: DBOS 동기 API를 async 핸들러에서 호출 → 스레드에서 호출.
+- KILL이 일부만 적용된 주제가 크래시 후 복구되면 `해제` 시 다시 돌던 문제 → checkpoint가 주제 상태도 확인, KILL은 취소 전에 주제를 KILLED로 기록(`test_killed_topic_stays_killed_after_loop_reset`).
+- 승진 직후 같은 표본으로 또 승진하던 문제(초 단위 시각 비교) → 마이크로초 시각 + 엄격 비교.
+
+### 관찰 (판단 필요)
+
+- 회의 통과율이 낮다. 2번째 주제는 5개 모두 탈락(지지 1~2/4). 오퍼레이터·스켑틱이 "무료 키·1인 개발자" 제약으로 자주 반대한다. 기준을 결과에 맞춰 낮추지 않았다. 통과율을 볼 주제가 더 쌓인 뒤 §8에서 정한다.
+- Gemma 무료 모델은 upstream 429가 잦아 비저너리 호출 상당수가 `g-fast`로 넘어간다(fallback). 직원별 모델 다양성이 그만큼 줄어든다.
+
+### 남은 일
+
+1. **KIPRIS Plus 키 발급(사용자)** → `KIPRIS_API_KEY` 설정 → 실제 폐기 경로 검증, P0·P1 완결.
+2. **AWS 배포**: 서버 접속 정보가 없어 하지 않았다. 필요한 것: gateway-venv(또는 `pip install -r deploy/gateway/requirements.txt`), `config/key-pool.local.env` 복사, Postgres `IDEA_FACTORY_DBOS_URL`, `IDEA_FACTORY_ENABLED=1`, gateway와 웹 두 프로세스 상시 실행.
+3. 실제 기획안 판정(사용자) → P3 실제 증거.
+4. P4 폐기 표본 검토 20건.

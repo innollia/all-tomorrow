@@ -1,0 +1,41 @@
+# Idea factory roster and model groups. No key values here: keys come from
+# config/key-pool.local.env, matched by provider prefix (OPENROUTER__*, GROQ__*, HUGGINGFACE__*).
+
+ideas_per_topic: 5
+council_rounds: 2
+council_pass_votes: 3        # supports needed in the final round (of 4)
+evaluation_min_samples: 5    # no promote/retire decision before this many judged samples
+promote_above: 0.7
+retire_below: 0.3
+
+# Model groups → deployments. Every key of the provider is added for each model.
+# OpenRouter entries must be :free models (some OpenRouter keys are on paid accounts).
+model_groups:
+  g-nemotron-super:
+    - {provider: openrouter, model: "nvidia/nemotron-3-super-120b-a12b:free"}
+  g-nemotron-ultra:
+    - {provider: openrouter, model: "nvidia/nemotron-3-ultra-550b-a55b:free"}
+  g-gemma:
+    - {provider: openrouter, model: "google/gemma-4-31b-it:free"}
+    - {provider: openrouter, model: "google/gemma-4-26b-a4b-it:free"}
+  g-gpt-oss-120b:
+    - {provider: groq, model: "openai/gpt-oss-120b"}
+    - {provider: huggingface, model: "openai/gpt-oss-120b"}
+  g-fast:
+    - {provider: groq, model: "openai/gpt-oss-20b"}
+    - {provider: huggingface, model: "openai/gpt-oss-20b"}
+    - {provider: openrouter, model: "nvidia/nemotron-3.5-lightning:free"}
+
+fallback_group: g-fast
+
+# Promotion moves a staff member one step up this ladder; retirement hires a replacement
+# on the next group that the retired member was not using.
+tiers: [g-fast, g-gemma, g-nemotron-super, g-gpt-oss-120b, g-nemotron-ultra]
+
+staff:
+  - {role: ideator,     name: 아이디에이터, model_group: g-nemotron-super}
+  - {role: synthesizer, name: 신서사이저,   model_group: g-gpt-oss-120b}
+  - {role: visionary,   name: 비저너리,     model_group: g-gemma}
+  - {role: operator,    name: 오퍼레이터,   model_group: g-nemotron-ultra}
+  - {role: advocate,    name: 애드보킷,     model_group: g-nemotron-super}
+  - {role: skeptic,     name: 스켑틱,       model_group: g-gpt-oss-120b}
