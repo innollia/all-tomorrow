@@ -30,10 +30,21 @@ class WebState:
     questions: list[dict[str, Any]] = field(default_factory=list)
     usage: dict[str, Any] | None = None
     usage_path: Path | None = None
+    project_snapshot: dict[str, Any] | None = None
+    project_snapshot_path: Path | None = None
 
     def __post_init__(self) -> None:
         if self.usage is None and self.usage_path and self.usage_path.exists():
             self.usage = json.loads(self.usage_path.read_text(encoding="utf-8"))
+        if self.project_snapshot is None and self.project_snapshot_path and self.project_snapshot_path.exists():
+            self.project_snapshot = json.loads(self.project_snapshot_path.read_text(encoding="utf-8"))
+
+    def store_project_snapshot(self, snapshot: dict[str, Any]) -> None:
+        # Collected on the user's PC; the server only keeps the latest copy.
+        self.project_snapshot = snapshot
+        if self.project_snapshot_path:
+            self.project_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+            self.project_snapshot_path.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
 
     def store_usage(self, snapshot: dict[str, Any]) -> None:
         self.usage = snapshot
@@ -156,6 +167,7 @@ button{background:#6d5dfc;border:0;font-weight:700;cursor:pointer}#error{color:#
 
 
 STATIC_DIR = Path(__file__).parent / "static"
+MAX_PROJECT_SNAPSHOT_BYTES = 1_000_000
 
 
 def _dashboard(username: str) -> str:
@@ -228,6 +240,22 @@ def create_app(
         auth.verify_usage_token(request.headers.get("authorization"))
         state_store.store_usage(payload.model_dump())
 
+    @app.get("/api/project-snapshot")
+    async def project_snapshot(_: str = Depends(current_user)) -> dict[str, Any] | None:
+        return state_store.project_snapshot
+
+    @app.post("/internal/projects", status_code=204)
+    async def ingest_projects(request: Request) -> None:
+        # Same collector credential as usage. Size-capped: the server is small.
+        auth.verify_usage_token(request.headers.get("authorization"))
+        body = await request.body()
+        if len(body) > MAX_PROJECT_SNAPSHOT_BYTES:
+            raise HTTPException(status_code=413, detail="snapshot too large")
+        snapshot = json.loads(body)
+        if not isinstance(snapshot, dict) or not isinstance(snapshot.get("projects"), list):
+            raise HTTPException(status_code=422, detail="snapshot must have a projects list")
+        state_store.store_project_snapshot(snapshot)
+
     @app.post("/api/edge/discord/decide")
     async def decide(payload: EdgeDecisionRequest, _: str = Depends(current_user)) -> dict[str, Any]:
         decision = policy.decide(EdgeAnalysis(**payload.model_dump()))
@@ -291,10 +319,11 @@ def app_from_environment() -> FastAPI:
     edge_token = os.environ.get("ALL_TOMORROW_EDGE_TOKEN")
     usage_token = os.environ.get("ALL_TOMORROW_USAGE_TOKEN")
     usage_path = Path(os.environ.get("ALL_TOMORROW_USAGE_PATH", ".artifacts/usage.json"))
+    snapshot_path = Path(os.environ.get("ALL_TOMORROW_PROJECTS_PATH", ".artifacts/projects-snapshot.json"))
     factory, lifespan = _factory_from_environment()
     return create_app(
         auth=Auth(username, password, secret, edge_token=edge_token, usage_token=usage_token),
-        web_state=WebState(usage_path=usage_path),
+        web_state=WebState(usage_path=usage_path, project_snapshot_path=snapshot_path),
         factory=factory,
         lifespan=lifespan,
     )

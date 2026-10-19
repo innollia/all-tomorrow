@@ -132,11 +132,40 @@ const pages = {
   },
 
   async "/projects"() {
-    const [projects, runs, questions] = await Promise.all([api("/api/projects"), api("/api/runs"), api("/api/questions")]);
-    return `<h1>프로젝트</h1><div class="sub">이 서버에 등록된 프로젝트와 실행</div>
-      <h2>프로젝트</h2>${list(projects.map(p => `<div><span class="k mono">${esc(p.project_id)}</span><span>${esc(p.name)}</span></div>`))}
-      <h2>실행</h2>${list(runs.map(r => `<div><span class="k mono">${esc(r.run_id)}</span><span>${esc(r.status)}</span></div>`))}
-      <h2>대기 질문</h2>${list(questions.map(q => `<div><span class="k mono">${esc(q.question_id)}</span><span>${esc(q.question)}</span></div>`))}`;
+    const snap = await api("/api/project-snapshot");
+    if (!snap) return `<h1>프로젝트</h1><div class="empty">데이터 없음. 로컬 PC에서 projects_snapshot push 실행 필요</div>`;
+    const rows = snap.projects.slice().sort((a, b) => String(b.last_activity || "").localeCompare(String(a.last_activity || ""))).map(p => {
+      const g = p.git || {};
+      const counts = {};
+      (p.status_table || []).forEach(r => counts[r.status] = (counts[r.status] || 0) + 1);
+      const badge = g.problem ? `<span class="pill">git 문제</span>` : g.dirty_files ? `<span class="pill">변경 ${g.dirty_files}</span>` : "";
+      return `<div><span class="k mono">${esc(p.last_activity || "-")}</span>
+        <a href="#/project/${encodeURIComponent(p.id)}" style="flex:1">${esc(p.name)}${p.panel ? ' <span class="mute small">· 패널</span>' : ""}</a>
+        <span class="small mute">${Object.entries(counts).map(([k, v]) => `${esc(k)} ${v}`).join(" · ")}</span>${badge}
+        ${(p.links || []).map(l => `<a class="pill" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)} ↗</a>`).join("")}</div>`;
+    });
+    return `<h1>프로젝트</h1><div class="sub">수집 ${ago(snap.collected_at)} · 최근 활동순</div>${list(rows)}`;
+  },
+
+  async "/project"(id) {
+    const snap = await api("/api/project-snapshot");
+    const p = (snap?.projects || []).find(x => x.id === id);
+    if (!p) return `<h1>프로젝트</h1><div class="empty">없는 프로젝트</div>`;
+    const g = p.git;
+    const facts = [
+      ["최근 활동", p.last_activity || "-"],
+      ...(g ? (g.problem ? [["git", g.problem]] : [["브랜치", g.branch], ["마지막 커밋", `${g.last_commit} ${g.last_subject || ""}`], ["30일 커밋", g.commits_30d], ["미커밋 변경", g.dirty_files]]) : [["git", "저장소 아님"]]),
+      ...(p.notes ? [["메모", p.notes]] : []),
+    ].map(([k, v]) => `<div><span class="k">${esc(k)}</span><span>${esc(v)}</span></div>`);
+    const table = (p.status_table || []).map(r => `<div><span style="flex:1">${esc(r.item)}</span><span class="pill">${esc(r.status)}</span></div>`);
+    let panel = "";
+    if (p.panel) {
+      const render = await loadPanel(p.id);
+      panel = p.panel.error ? `<div class="empty">패널 수집 실패: ${esc(p.panel.error)}</div>`
+        : render ? render(p.panel, p, { esc, list, ago }) : `<pre class="small mono">${esc(JSON.stringify(p.panel, null, 2))}</pre>`;
+    }
+    return `<h1>${esc(p.name)}</h1><div class="sub">${(p.links || []).map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)} ↗</a>`).join(" · ") || "&nbsp;"}</div>
+      ${list(facts)}${panel ? `<h2>패널</h2>${panel}` : ""}${table.length ? `<h2>상태표</h2>${list(table)}` : ""}`;
   },
 
   async "/audit"() {
@@ -152,19 +181,36 @@ const pages = {
 };
 const REFRESH = { "/autonomy": 5000, "/": 15000 };
 
+// Project panels: static/panels/<id>.js sets window.AT_PANELS[id] = (panel, project, helpers) => html.
+// Loaded only when that project's page opens, so the console stays light.
+window.AT_PANELS = window.AT_PANELS || {};
+const panelLoads = {};
+function loadPanel(id) {
+  if (window.AT_PANELS[id]) return Promise.resolve(window.AT_PANELS[id]);
+  panelLoads[id] = panelLoads[id] || new Promise(resolve => {
+    const s = document.createElement("script");
+    s.src = `/static/panels/${encodeURIComponent(id)}.js`;
+    s.onload = () => resolve(window.AT_PANELS[id] || null);
+    s.onerror = () => resolve(null);  // no custom panel: fall back to raw data
+    document.head.appendChild(s);
+  });
+  return panelLoads[id];
+}
+
 // ---------------------------------------------------------------- router
 async function render() {
   const [path, arg] = parseHash();
   clearTimeout(timer);
-  document.querySelectorAll("#navlinks a").forEach(a => a.classList.toggle("on", a.getAttribute("href") === "#" + (path === "/topic" ? "/autonomy" : path)));
+  document.querySelectorAll("#navlinks a").forEach(a => a.classList.toggle("on", a.getAttribute("href") === "#" + (path === "/topic" ? "/autonomy" : path === "/project" ? "/projects" : path)));
   $("#nav").classList.remove("open");
   const page = pages[path] || pages["/"];
   try { view.innerHTML = await page(arg); } catch (e) { if (e.message !== "auth") view.innerHTML = `<h1>오류</h1><div class="empty">${esc(e.message)}</div>`; }
-  if (REFRESH[path]) timer = setTimeout(() => { if (!document.activeElement || !view.contains(document.activeElement) || document.activeElement.tagName === "BUTTON") render(); else timer = setTimeout(render, REFRESH[path]); }, REFRESH[path]);
+  // Polling stops while the tab is hidden; the server is small (resumes on visibilitychange).
+  if (REFRESH[path] && !document.hidden) timer = setTimeout(() => { if (!document.activeElement || !view.contains(document.activeElement) || document.activeElement.tagName === "BUTTON") render(); else timer = setTimeout(render, REFRESH[path]); }, REFRESH[path]);
 }
 function parseHash() {
   const h = location.hash.slice(1) || "/";
-  const m = h.match(/^\/(topic|proposals)\/(.+)$/);
+  const m = h.match(/^\/(topic|proposals|project)\/(.+)$/);
   return m ? ["/" + m[1], decodeURIComponent(m[2])] : [h, undefined];
 }
 
@@ -199,4 +245,5 @@ $("#navsearch").addEventListener("input", e => {
 $("#menu").addEventListener("click", () => $("#nav").classList.toggle("open"));
 $("#logout").addEventListener("click", async () => { await fetch("/api/logout", { method: "POST" }); location = "/login"; });
 window.addEventListener("hashchange", render);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && REFRESH[parseHash()[0]]) render(); });
 render();
