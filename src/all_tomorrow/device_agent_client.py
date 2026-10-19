@@ -20,6 +20,7 @@ import argparse
 import asyncio
 import json
 import logging
+import logging.handlers
 import os
 import platform
 import stat
@@ -274,11 +275,24 @@ async def _main_async(args: argparse.Namespace) -> int:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
     parser = _build_arg_parser()
     args = parser.parse_args()
+    log_format = "%(asctime)s %(levelname)s %(message)s"
+    if sys.stdout is None or sys.stderr is None:
+        # Started windowless (pythonw from the logon task): there is no console, so log to a
+        # rotating file next to the state file instead of losing everything (2026-10-20: the
+        # task looked "Running" while nothing could be seen).
+        log_path = (args.state_file or _default_state_path()).with_name("device_agent.log")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.handlers.RotatingFileHandler(log_path, maxBytes=2_000_000, backupCount=2, encoding="utf-8")
+        handler.setFormatter(logging.Formatter(log_format))
+        logging.basicConfig(level=logging.INFO, handlers=[handler])
+        sys.stdout = sys.stderr = open(log_path.with_suffix(".stdout.log"), "a", encoding="utf-8", buffering=1)
+    else:
+        logging.basicConfig(level=logging.INFO, format=log_format)
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8")
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # claim polling every 5 s would flood the log
     try:
         raise SystemExit(asyncio.run(_main_async(args)))
     except DeviceAgentClientError as error:

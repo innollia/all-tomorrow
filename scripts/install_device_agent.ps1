@@ -26,7 +26,8 @@ if (-not (Test-Path $RepoPath)) {
     throw "RepoPath가 존재하지 않습니다: $RepoPath"
 }
 
-$venvPython = Join-Path $RepoPath ".venv\Scripts\python.exe"
+# pythonw: no console window at logon; the agent then logs to %LOCALAPPDATA%\all-tomorrow\device_agent.log
+$venvPython = Join-Path $RepoPath ".venv\Scripts\pythonw.exe"
 if ($PythonExe -eq "") {
     if (Test-Path $venvPython) {
         $PythonExe = $venvPython
@@ -52,7 +53,8 @@ if ($RegistrationCode -ne "") {
 $argString = ($argList | ForEach-Object { '"' + $_ + '"' }) -join " "
 
 $action = New-ScheduledTaskAction -Execute $PythonExe -Argument $argString -WorkingDirectory $RepoPath
-$trigger = New-ScheduledTaskTrigger -AtLogOn
+# This user's logon only: an any-user logon trigger needs admin rights (Access is denied).
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1)
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
@@ -63,4 +65,4 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Se
 Write-Output "설치 완료: 작업 스케줄러 항목 '$TaskName' 등록됨."
 Write-Output "지금 바로 시작하려면: Start-ScheduledTask -TaskName '$TaskName'"
 Write-Output "상태 확인: Get-ScheduledTaskInfo -TaskName '$TaskName'"
-Write-Output "로그 확인: 표준출력은 작업 스케줄러가 캡처하지 않으므로, 필요하면 -Argument 뒤에 콘솔 출력을 파일로 리다이렉트하는 방식으로 바꾸세요."
+Write-Output "로그 확인: %LOCALAPPDATA%\all-tomorrow\device_agent.log"
