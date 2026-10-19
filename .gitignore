@@ -15,7 +15,7 @@ coverage/
 scratch_*.py
 task_checklist.md
 config/workers.local.json
+config/projects.local.json
 .ssm/
 device_agent_state.json
 .ssm_params.json
-.venv/
