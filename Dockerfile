@@ -14,16 +14,18 @@ COPY pyproject.toml ./
 COPY src ./src
 COPY migrations ./migrations
 COPY edge ./edge
+# Console idea factory roster only; local config (*.local.*) never goes into the image.
+COPY config/idea-factory.yaml ./config/idea-factory.yaml
 RUN pip install .
 
 # Non-root runtime user. Feature 7 (file attachments) writes under /app/data;
 # give appuser ownership before dropping root so LocalArtifactStore can mkdir it.
 RUN useradd --create-home --uid 10001 appuser && \
-    mkdir -p /app/data/artifacts && \
+    mkdir -p /app/data/artifacts /app/data/console && \
     chown -R appuser:appuser /app/data
 USER appuser
 
-ENV ALL_TOMORROW_UPLOAD_DIR=/app/data/artifacts
+ENV ALL_TOMORROW_UPLOAD_DIR=/app/data/artifacts     ALL_TOMORROW_CONSOLE_DATA=/app/data/console     IDEA_FACTORY_ROSTER=/app/config/idea-factory.yaml
 
 # Bind to all interfaces INSIDE the container; the host/ALB restricts exposure.
 ENV ALL_TOMORROW_HOST=0.0.0.0 \
