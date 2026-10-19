@@ -18,7 +18,11 @@ class FakePatents:
         return [PatentHit("KR1", "주사위 굴림 동기화 장치", "dice sync", "fake", "https://example.test/KR1")]
 
 
+SENT_PROMPTS: list[str] = []
+
+
 def fake_chat_json(group, system, user, **kwargs):
+    SENT_PROMPTS.append(system + " " + user)
     if "아이디어 담당" in system:
         return {"ideas": [{"title": "주사위 동기화", "problem": "p", "approach": "a"},
                           {"title": "세션 요약 봇", "problem": "p", "approach": "a"}]}, "fake"
@@ -78,6 +82,9 @@ def test_workflow_kills_patented_idea_and_reports_the_other(tmp_path, monkeypatc
         assert killed["evidence"][0]["number"] == "KR1"
         assert len(s.votes(f"{topic_id}-i2")) == 8
         assert s.proposals("PENDING")[0]["body"]["patent_check"].startswith("관련 특허 없음")
+        # prompts go to third-party providers: no user or system operating context
+        leaked = [term for term in ("1인", "무료", "프리티어", "AWS", "API 키") if any(term in p for p in SENT_PROMPTS)]
+        assert leaked == []
 
         pipeline.kill_all("test")
         with pytest.raises(RuntimeError):

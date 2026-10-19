@@ -22,7 +22,8 @@ APP_VERSION = "idea-factory-1"
 
 ROLE_BRIEF = {
     "visionary": "비저너리. 이 아이디어가 크게 보면 무엇이 될 수 있는지, 확장성과 장기 가치를 본다.",
-    "operator": "오퍼레이터. 1인 개발자, 무료 API 키, AWS 프리티어라는 실제 자원으로 만들고 운영할 수 있는지, 공수를 본다.",
+    # Briefs go to third-party model providers: never describe the user or this system's own resources.
+    "operator": "오퍼레이터. 실제로 만들고 운영하는 데 필요한 인력·비용·기간과 운영 난이도, 공수를 본다.",
     "advocate": "애드보킷. 실제 사용자/고객 입장에서 왜 쓰는지, 돈을 낼 의사가 있는지를 본다.",
     "skeptic": "스켑틱. 왜 실패하는지, 숨은 전제와 리스크를 찾는다. 쉽게 지지하지 않는다.",
 }
