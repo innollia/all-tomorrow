@@ -126,9 +126,9 @@ const pages = {
   async "/staff"() {
     const d = await api("/api/factory/staff");
     const rows = d.staff.map(m => `<tr><td>${esc(m.name)} <span class="mute small">${m.generation}세대</span></td><td class="mono">${esc(m.model_group)}</td>
-      <td>${m.samples ?? "-"}</td><td>${m.score == null ? "-" : m.score.toFixed(2)}</td><td><span class="pill">${VERDICT[m.verdict] || m.verdict}</span></td><td class="small mute">${ago(m.hired_at)}</td></tr>`).join("");
+      <td class="small">L${m.access_level ?? 0}${(m.access_scopes || []).length ? ' · ' + esc(m.access_scopes.join(", ")) : ""}</td><td>${m.samples ?? "-"}</td><td>${m.score == null ? "-" : m.score.toFixed(2)}</td><td><span class="pill">${VERDICT[m.verdict] || m.verdict}</span></td><td class="small mute">${ago(m.hired_at)}</td></tr>`).join("");
     return `<h1>직원</h1><div class="sub">표본 ${d.policy.min_samples}개 이상부터 판정 · ${d.policy.promote_above} 초과 승진 · ${d.policy.retire_below} 미만 퇴출</div>
-      <table><tr><th>이름</th><th>모델 그룹</th><th>표본</th><th>점수</th><th>판정</th><th>채용</th></tr>${rows}</table>`;
+      <table><tr><th>이름</th><th>모델 그룹</th><th>의뢰인 정보 권한</th><th>표본</th><th>점수</th><th>판정</th><th>채용</th></tr>${rows}</table>`;
   },
 
   async "/projects"() {

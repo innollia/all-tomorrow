@@ -56,6 +56,14 @@ class Store:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(SCHEMA)
+        # Columns added after the first local stores were created; checked one by one so a crash
+        # between ALTERs cannot leave a half-migrated table.
+        columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(staff)")}
+        for name, ddl in (("access_level", "INTEGER NOT NULL DEFAULT 0"),
+                          ("access_scopes", "TEXT NOT NULL DEFAULT '[]'"),
+                          ("promotion_bonus", "INTEGER NOT NULL DEFAULT 0")):
+            if name not in columns:
+                self._conn.execute(f"ALTER TABLE staff ADD COLUMN {name} {ddl}")
 
     def _exec(self, sql: str, args: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -170,22 +178,41 @@ class Store:
         self.audit(actor, "proposal_decision", {"proposal_id": proposal_id, "decision": decision, "reason": reason})
 
     # staff -----------------------------------------------------------------
-    def hire(self, role: str, name: str, model_group: str, generation: int = 1) -> str:
+    def hire(self, role: str, name: str, model_group: str, generation: int = 1, *,
+             access_level: int = 0, access_scopes: list[str] | None = None) -> str:
         staff_id = f"{role}-g{generation}"
         stamp = now()
-        self._exec("INSERT OR IGNORE INTO staff VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, NULL, ?)",
-                   (staff_id, role, name, model_group, generation, stamp, stamp))
+        self._exec("INSERT OR IGNORE INTO staff (id, role, name, model_group, generation, status, hired_at, "
+                   "retired_at, changed_at, access_level, access_scopes) VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, NULL, ?, ?, ?)",
+                   (staff_id, role, name, model_group, generation, stamp, stamp, access_level,
+                    json.dumps(access_scopes or [], ensure_ascii=False)))
         return staff_id
+
+    def set_access(self, staff_id: str, base_level: int, scopes: list[str], bonus: int | None = None) -> int:
+        """Effective level = config base + promotion bonus (max 3). Config owns base and scopes,
+        so lowering them in config revokes access on the next launch."""
+        if bonus is None:
+            row = self._exec("SELECT promotion_bonus FROM staff WHERE id=?", (staff_id,)).fetchone()
+            bonus = row["promotion_bonus"] if row else 0
+        level = max(0, min(3, base_level + bonus))
+        self._exec("UPDATE staff SET access_level=?, access_scopes=?, promotion_bonus=? WHERE id=?",
+                   (level, json.dumps(scopes, ensure_ascii=False), bonus, staff_id))
+        return level
+
+    @staticmethod
+    def _staff_row(row: dict[str, Any]) -> dict[str, Any]:
+        row["access_scopes"] = json.loads(row.get("access_scopes") or "[]")
+        return row
 
     def staff(self, include_retired: bool = True) -> list[dict[str, Any]]:
         sql = "SELECT * FROM staff" + ("" if include_retired else " WHERE status='ACTIVE'")
-        return self._rows(sql + " ORDER BY role, generation")
+        return [self._staff_row(r) for r in self._rows(sql + " ORDER BY role, generation")]
 
     def active_staff(self, role: str) -> dict[str, Any]:
         rows = self._rows("SELECT * FROM staff WHERE role=? AND status='ACTIVE' ORDER BY generation DESC", (role,))
         if not rows:
             raise LookupError(f"no active staff for role {role}")
-        return rows[0]
+        return self._staff_row(rows[0])
 
     def set_staff_group(self, staff_id: str, model_group: str) -> None:
         self._exec("UPDATE staff SET model_group=?, changed_at=? WHERE id=?", (model_group, now(), staff_id))

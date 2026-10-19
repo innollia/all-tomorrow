@@ -11,18 +11,18 @@ from typing import Any
 
 from dbos import DBOS, SetWorkflowID
 
-from all_tomorrow.idea_factory import llm
-from all_tomorrow.idea_factory.config import REPO_ROOT, Roster, load_roster
+from all_tomorrow.idea_factory import llm, profile
+from all_tomorrow.idea_factory.config import REPO_ROOT, Roster, export_secrets_to_env, load_roster
 from all_tomorrow.idea_factory.patents import PatentSource, default_source
 from all_tomorrow.idea_factory.store import Store
 
 COUNCIL = ("visionary", "operator", "advocate", "skeptic")
 STANCES = ("support", "oppose", "conditional")
-APP_VERSION = "idea-factory-1"
+APP_VERSION = "idea-factory-2"  # step signatures changed (profile access)
 
 ROLE_BRIEF = {
     "visionary": "비저너리. 이 아이디어가 크게 보면 무엇이 될 수 있는지, 확장성과 장기 가치를 본다.",
-    # Briefs go to third-party model providers: never describe the user or this system's own resources.
+    # Briefs stay generic. User facts reach a member only through profile access (level + scopes).
     "operator": "오퍼레이터. 실제로 만들고 운영하는 데 필요한 인력·비용·기간과 운영 난이도, 공수를 본다.",
     "advocate": "애드보킷. 실제 사용자/고객 입장에서 왜 쓰는지, 돈을 낼 의사가 있는지를 본다.",
     "skeptic": "스켑틱. 왜 실패하는지, 숨은 전제와 리스크를 찾는다. 쉽게 지지하지 않는다.",
@@ -47,11 +47,17 @@ def configure(store_obj: Store, roster_obj: Roster | None = None, patents: Paten
     _state["store"] = store_obj
     _state["roster"] = roster_obj or load_roster()
     _state["patents"] = patents or default_source()
+    profile.validate(_state["roster"].profile_sources, _state["roster"].staff)
     for member in _state["roster"].staff:
-        store_obj.hire(member["role"], member["name"], member["model_group"])
+        store_obj.hire(member["role"], member["name"], member["model_group"],
+                       access_level=member.get("access_level", 0), access_scopes=member.get("access_scopes", []))
+        # Config owns base level and scopes (the role's function); promotions add a bonus on top.
+        active = store_obj.active_staff(member["role"])
+        store_obj.set_access(active["id"], member.get("access_level", 0), member.get("access_scopes", []))
 
 
 def launch(store_obj: Store, system_database_url: str | None = None, **kwargs: Any) -> None:
+    export_secrets_to_env()
     configure(store_obj, **kwargs)
     url = system_database_url or os.environ.get(
         "IDEA_FACTORY_DBOS_URL", f"sqlite:///{(REPO_ROOT / '.artifacts' / 'idea-factory-dbos.sqlite').as_posix()}")
@@ -80,15 +86,30 @@ def checkpoint(topic_id: str) -> bool:
     return state != "KILLED"
 
 
+@DBOS.step()
+def load_profile(topic_id: str) -> dict[str, Any]:
+    """One profile snapshot per topic, recorded by DBOS so a resumed run sees the same facts."""
+    sources = roster().profile_sources
+    snapshot = profile.fetch_profile(sources) if sources and os.environ.get("NOTION_TOKEN") else {}
+    grants = {m["name"]: sorted(profile.visible(snapshot, m["access_level"], m["access_scopes"]))
+              for m in store().staff(include_retired=False)}
+    store().audit("factory", "profile_access", {"topic_id": topic_id, "grants": grants,
+                                                "errors": {k: v["error"] for k, v in snapshot.items() if "error" in v}})
+    shared = ", ".join(f"{name} {len(items)}" for name, items in grants.items() if items) or "없음"
+    store().event("access", f"의뢰인 정보 제공: {shared}", topic_id=topic_id, dedupe=f"access:{topic_id}")
+    return snapshot
+
+
 @DBOS.step(retries_allowed=True, max_attempts=3, interval_seconds=10)
-def generate_ideas(topic_id: str, topic: str, count: int) -> list[dict[str, Any]]:
+def generate_ideas(topic_id: str, topic: str, count: int, snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     member = store().active_staff("ideator")
     data, served = llm.chat_json(
         member["model_group"],
         "너는 사업 아이디어 공장의 아이디어 담당이다. 주제에 맞는, 서로 확실히 다른 사업/제품 아이디어를 낸다. "
         "흔한 아이디어보다 구체적인 틈새를 노린다. 모든 문장은 한국어로 쓴다.",
         f"주제: {topic}\n아이디어 {count}개를 "
-        '{"ideas":[{"title":"짧은 이름","problem":"해결하는 문제 한두 문장","approach":"어떻게 푸는지 한두 문장"}]} 형식으로.',
+        '{"ideas":[{"title":"짧은 이름","problem":"해결하는 문제 한두 문장","approach":"어떻게 푸는지 한두 문장"}]} 형식으로.'
+        + profile.context_block(snapshot, member),
     )
     ideas = []
     for index, raw in enumerate((data.get("ideas") if isinstance(data, dict) else data) or []):
@@ -162,20 +183,40 @@ def synthesize(idea: dict[str, Any]) -> dict[str, Any]:
     return {"status": "PASSED", "evidence": [], "checked": len(hits)}
 
 
+def _sources_of(member: dict[str, Any], snapshot: dict[str, Any]) -> list[str]:
+    return sorted(profile.visible(snapshot, member["access_level"], member["access_scopes"]))
+
+
+def _transcript_for(listener_sources: list[str], transcript: list[dict[str, Any]], tag: str = "라운드") -> str:
+    """A reason may carry the speaker's profile facts, so it only reaches listeners who could see
+    every source the speaker saw; others get the stance alone."""
+    allowed = set(listener_sources)
+    lines = []
+    for v in transcript:
+        # Votes recorded before this filter existed have no "sources": unknown counts as not allowed.
+        known = v.get("sources")
+        reason = v["reason"] if known is not None and set(known) <= allowed else "(권한 밖 근거 생략)"
+        lines.append(f"[{v['round']}{tag} {v['name']}] {v['stance']}: {reason}")
+    return "\n".join(lines)
+
+
 @DBOS.step(retries_allowed=True, max_attempts=3, interval_seconds=10)
-def council_vote(idea: dict[str, Any], round_no: int, role: str, transcript: list[dict[str, Any]]) -> dict[str, Any]:
+def council_vote(idea: dict[str, Any], round_no: int, role: str, transcript: list[dict[str, Any]],
+                 snapshot: dict[str, Any]) -> dict[str, Any]:
     member = store().active_staff(role)
     final_round = round_no == roster().council_rounds
     patent_note = "미검사" if getattr(patent_source(), "unchecked", False) else "겹치는 특허 없음"
     ask = ('최종 라운드다. 조건부는 없다. 조건이 충족 가능하다고 보면 support, 아니면 oppose. '
            '{"stance":"support|oppose","reason":"근거 두세 문장"}' if final_round
            else '{"stance":"support|oppose|conditional","reason":"근거 두세 문장"}')
-    earlier ="\n".join(f"[{v['round']}라운드 {v['name']}] {v['stance']}: {v['reason']}" for v in transcript) or "(첫 발언)"
+    sources = _sources_of(member, snapshot)
+    earlier = _transcript_for(sources, transcript) or "(첫 발언)"
     data, _ = llm.chat_json(
         member["model_group"],
         f"너는 사업 아이디어 회의의 {ROLE_BRIEF[role]} 다른 사람 의견에 휩쓸리지 말고 네 관점으로 판단한다. 한국어로 쓴다.",
         f"아이디어: {idea['title']}\n문제: {idea['problem']}\n접근: {idea['approach']}\n"
-        f"특허 조사: {patent_note}\n\n지금까지 회의:\n{earlier}\n\n{round_no}라운드 발언. {ask}",
+        f"특허 조사: {patent_note}\n\n지금까지 회의:\n{earlier}\n\n{round_no}라운드 발언. {ask}"
+        + profile.context_block(snapshot, member),
         temperature=0.7,
     )
     stance = str(data.get("stance", "")).lower() if isinstance(data, dict) else ""
@@ -183,7 +224,7 @@ def council_vote(idea: dict[str, Any], round_no: int, role: str, transcript: lis
         # The final round must decide; no decision counts as no support.
         stance = "oppose" if final_round else "conditional"
     vote = {"round": round_no, "role": role, "staff_id": member["id"], "name": member["name"],
-            "stance": stance, "reason": str(data.get("reason", ""))[:1200]}
+            "stance": stance, "reason": str(data.get("reason", ""))[:1200], "sources": sources}
     store().put_vote(idea["id"], round_no, member["id"], stance, vote["reason"])
     store().event("council", f"{member['name']} {stance}: {vote['reason'][:120]}", topic_id=idea["topic_id"],
                   staff_id=member["id"], dedupe=f"vote:{idea['id']}:{round_no}:{role}")
@@ -191,15 +232,17 @@ def council_vote(idea: dict[str, Any], round_no: int, role: str, transcript: lis
 
 
 @DBOS.step(retries_allowed=True, max_attempts=3, interval_seconds=10)
-def write_proposal(idea: dict[str, Any], transcript: list[dict[str, Any]], checked: int) -> dict[str, Any]:
+def write_proposal(idea: dict[str, Any], transcript: list[dict[str, Any]], checked: int,
+                   snapshot: dict[str, Any]) -> dict[str, Any]:
     member = store().active_staff("operator")
-    talk = "\n".join(f"[{v['round']}R {v['name']}] {v['stance']}: {v['reason']}" for v in transcript)
+    talk = _transcript_for(_sources_of(member, snapshot), transcript, tag="R")
     data, _ = llm.chat_json(
         member["model_group"],
         "너는 회의 결과를 사용자에게 보고할 기획안으로 정리한다. 회의에서 나온 리스크를 숨기지 않는다. 한국어로 쓴다.",
         f"아이디어: {idea['title']}\n문제: {idea['problem']}\n접근: {idea['approach']}\n회의:\n{talk}\n\n"
         '{"title":"","problem":"","approach":"","dod":["완료 조건"],"risks":["리스크"],'
-        '"market":"시장·경쟁 상황","effort":"S|M|L","first_step":"가장 먼저 할 일"}',
+        '"market":"시장·경쟁 상황","effort":"S|M|L","first_step":"가장 먼저 할 일"}'
+        + profile.context_block(snapshot, member),
         temperature=0.3,
     )
     body = {k: data.get(k) for k in ("title", "problem", "approach", "dod", "risks", "market", "effort", "first_step")}
@@ -236,7 +279,8 @@ def factory_run(topic_id: str, topic: str) -> str:
     if not checkpoint(topic_id):
         finish_topic(topic_id, "KILLED")
         return "KILLED"
-    ideas = generate_ideas(topic_id, topic, settings.ideas_per_topic)
+    snapshot = load_profile(topic_id)
+    ideas = generate_ideas(topic_id, topic, settings.ideas_per_topic, snapshot)
     for idea in ideas:
         if not checkpoint(topic_id):
             finish_topic(topic_id, "KILLED")
@@ -250,11 +294,11 @@ def factory_run(topic_id: str, topic: str) -> str:
                 if not checkpoint(topic_id):
                     finish_topic(topic_id, "KILLED")
                     return "KILLED"
-                transcript.append(council_vote(idea, round_no, role, transcript))
+                transcript.append(council_vote(idea, round_no, role, transcript, snapshot))
         final = [v for v in transcript if v["round"] == settings.council_rounds]
         supports = sum(1 for v in final if v["stance"] == "support")
         if supports >= settings.council_pass_votes:
-            write_proposal(idea, transcript, verdict.get("checked", 0))
+            write_proposal(idea, transcript, verdict.get("checked", 0), snapshot)
         else:
             reject_in_council(idea, supports)
     finish_topic(topic_id, "DONE")

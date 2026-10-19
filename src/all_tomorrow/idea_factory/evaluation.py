@@ -73,7 +73,11 @@ def apply_policy(store: Store, roster: Roster, actor: str = "policy") -> list[di
             if target is None:
                 continue
             store.set_staff_group(row["id"], target)
-            store.audit(actor, "staff_promote", {**detail, "to": target})
+            # Promotion also widens profile access: one more level on top of the role's base.
+            base = next((m for m in roster.staff if m["role"] == row["role"]), {})
+            new_level = store.set_access(row["id"], base.get("access_level", 0), base.get("access_scopes", []),
+                                         bonus=row.get("promotion_bonus", 0) + 1)
+            store.audit(actor, "staff_promote", {**detail, "to": target, "access_level": new_level})
             store.event("staff", f"{row['name']} 승진: {row['model_group']} → {target} (점수 {row['score']:.2f}, 표본 {row['samples']})",
                         staff_id=row["id"])
             actions.append({"action": "promote", **detail, "to": target})
@@ -82,7 +86,9 @@ def apply_policy(store: Store, roster: Roster, actor: str = "policy") -> list[di
             if target == row["model_group"]:
                 target = roster.tiers[0]
             store.retire(row["id"])
-            new_id = store.hire(row["role"], row["name"], target, generation=row["generation"] + 1)
+            base = next((m for m in roster.staff if m["role"] == row["role"]), {})
+            new_id = store.hire(row["role"], row["name"], target, generation=row["generation"] + 1,
+                                access_level=base.get("access_level", 0), access_scopes=base.get("access_scopes", []))
             store.audit(actor, "staff_retire", {**detail, "replacement": new_id, "to": target})
             store.event("staff", f"{row['name']} {row['generation']}세대 퇴출 (점수 {row['score']:.2f}, 표본 {row['samples']}) → "
                         f"{row['generation'] + 1}세대 채용 ({target})", staff_id=new_id)

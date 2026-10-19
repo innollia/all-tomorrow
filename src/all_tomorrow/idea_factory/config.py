@@ -30,7 +30,8 @@ class Roster:
     model_groups: dict[str, list[dict[str, str]]]
     fallback_group: str
     tiers: list[str]
-    staff: list[dict[str, str]] = field(default_factory=list)
+    staff: list[dict[str, Any]] = field(default_factory=list)
+    profile_sources: list[dict[str, Any]] = field(default_factory=list)
 
 
 def load_roster(path: Path = ROSTER_PATH) -> Roster:
@@ -84,3 +85,11 @@ def gateway_config(roster: Roster, key_names: list[str], master_key_env: str = "
         "litellm_settings": {"callbacks": [], "drop_params": True, "request_timeout": 120},
         "general_settings": {"master_key": f"os.environ/{master_key_env}"},
     }
+
+
+def export_secrets_to_env(names: tuple[str, ...] = ("IDEA_FACTORY_GATEWAY_KEY", "NOTION_TOKEN")) -> None:
+    """Runtime secrets live in the key-pool file; the process environment wins when set."""
+    pool = load_key_pool()
+    for name in names:
+        if pool.get(name):
+            os.environ.setdefault(name, pool[name])
