@@ -459,15 +459,14 @@ def create_app(
         if tailnet is None:
             return None
         # A Secure cookie over plain HTTP would be dropped, looping back to /login.
-        if cookie_secure and request.url.scheme != "https":
+        if cookie_secure and request.url.scheme != "https" and not tailnet.https(request.scope, request.headers):
             return None
-        host = request.client.host if request.client else None
-        login = tailnet.login_for(host)
+        login = tailnet.login_for(request.scope, request.headers)
         if not login:
             return None
         import logging
 
-        logging.getLogger(__name__).info("tailnet login: %s from %s", login, host)
+        logging.getLogger(__name__).info("tailnet login: %s", login)
         response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
         _session_cookie(response)
         response.delete_cookie(NO_AUTO_COOKIE)
@@ -899,10 +898,29 @@ def app_from_environment() -> FastAPI:
 
 
 def run() -> None:
+    import asyncio
+
     import uvicorn
 
-    uvicorn.run(
-        app_from_environment(),
-        host=os.environ.get("ALL_TOMORROW_HOST", "127.0.0.1"),
-        port=int(os.environ.get("ALL_TOMORROW_PORT", "8080")),
-    )
+    app = app_from_environment()
+    host = os.environ.get("ALL_TOMORROW_HOST", "127.0.0.1")
+    port = int(os.environ.get("ALL_TOMORROW_PORT", "8080"))
+    serve_port = os.environ.get("ALL_TOMORROW_TAILSCALE_SERVE_PORT")
+    if not serve_port:
+        uvicorn.run(app, host=host, port=port)
+        return
+
+    # Second listener for `tailscale serve` only (see tailnet_auth); same app, lifespan
+    # runs once on the main listener so DBOS/Postgres start a single time.
+    main = uvicorn.Server(uvicorn.Config(app, host=host, port=port))
+    trusted = uvicorn.Server(uvicorn.Config(app, host=host, port=int(serve_port), lifespan="off"))
+
+    async def serve_both() -> None:
+        second = asyncio.create_task(trusted.serve())
+        try:
+            await main.serve()
+        finally:
+            trusted.should_exit = True
+            await second
+
+    asyncio.run(serve_both())

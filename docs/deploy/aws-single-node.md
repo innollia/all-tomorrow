@@ -183,10 +183,11 @@ operator to apply them on the live account.
 
 `feat/port-console-features`의 콘솔(사용량·프로젝트 패널·아이디어 공장)과 로그인 변경을 이 노드에 올릴 때 필요한 것. 아직 배포하지 않았다(작업한 PC에 AWS 자격 증명이 없어 SSM 접근 불가).
 
-- **tailnet 기기 자동 로그인**: 요청 출발지가 tailnet 주소(100.64.0.0/10, fd7a:115c:a1e0::/48)이면 앱이 호스트 tailscaled LocalAPI `whois`로 그 주소의 Tailscale 로그인을 확인하고, `ALL_TOMORROW_TAILNET_LOGINS`(쉼표 목록)에 있으면 비밀번호 없이 세션을 준다. 헤더는 믿지 않는다. Caddy(공개 HTTPS)를 거친 요청은 출발지가 Caddy라서 항상 비밀번호 로그인이다.
-  - compose: 호스트 `/var/run/tailscale/tailscaled.sock`을 앱 컨테이너에 마운트(위 compose에 반영).
-  - 노드 env: `ALL_TOMORROW_TAILNET_LOGINS=<소유자 Tailscale 로그인>`.
-  - tailnet에서 평문 HTTP(`http://100.97.113.3:8080`)로 쓰면 `ALL_TOMORROW_COOKIE_SECURE=false`여야 한다. `true`이면 HTTP에서는 자동 로그인을 하지 않는다(쿠키가 버려져 로그인 화면으로 계속 돌아오는 것을 막기 위함). tailnet 구간은 WireGuard로 암호화된다.
-  - 배포 후 확인: 앱 로그에 `tailnet login: <login> from 100.x.y.z`가 찍히는지(도커 포트 공개가 출발지 주소를 보존하는지)를 실제 기기로 확인한다. 출발지가 도커 브리지 주소로 바뀌어 보이면 자동 로그인은 동작하지 않고 비밀번호 로그인만 된다.
+- **tailnet 기기 자동 로그인**: 노드 호스트에서 `tailscale serve --bg --https=443 http://127.0.0.1:8081`로 tailnet 이름(`https://all-tomorrow-central.<tailnet>.ts.net`)에 HTTPS를 연다. serve는 연결한 tailnet 사용자를 `Tailscale-User-Login` 헤더로 붙인다. 앱은 이 헤더를 **8081 포트로 들어온 요청에서만** 믿고, 로그인이 `ALL_TOMORROW_TAILNET_LOGINS`에 있으면 비밀번호 없이 세션을 준다.
+  - 8081은 호스트 loopback에만 공개(`127.0.0.1:8081:8081`)하므로 serve만 닿는다. 8080(공개 Caddy·tailnet 직접·device agent)으로 들어온 헤더는 무시한다.
+  - 출발지 주소로 확인(whois)하지 않는 이유: 2026-10-19 측정에서 tailnet 요청이 앱에 `172.18.0.1`(도커 브리지)로 도착해 tailnet 주소가 보이지 않았다.
+  - serve 경로는 HTTPS라 `ALL_TOMORROW_COOKIE_SECURE=true` 그대로 동작한다. 평문 `http://100.97.113.3:8080`에서는 Secure 쿠키가 버려져 로그인이 유지되지 않는다(기존부터 그랬음). tailnet에서는 serve 주소를 쓴다.
+  - tailnet 관리 화면에서 MagicDNS와 HTTPS 인증서가 켜져 있어야 serve HTTPS가 동작한다.
+  - 노드 env: `ALL_TOMORROW_TAILNET_LOGINS=<소유자 Tailscale 로그인>`, `ALL_TOMORROW_TAILSCALE_SERVE_PORT=8081`.
 - **세션 30일**: `ALL_TOMORROW_SESSION_TTL_DAYS`(기본 30).
 - **비밀번호 변경 유지**: 계정 화면에서 바꾼 비밀번호(PBKDF2 해시)와 "모든 기기 로그아웃" 세대값을 `ALL_TOMORROW_AUTH_STATE`(기본 `<콘솔 데이터>/auth-state.json`, 600)에 저장한다. 이후에는 env의 `ALL_TOMORROW_ADMIN_PASSWORD`가 아니라 저장된 해시가 쓰인다. 초기화하려면 그 파일을 지운다. `at_console` 볼륨이 이 파일과 콘솔 데이터를 보존한다.

@@ -71,15 +71,15 @@ services:
       # owner's Tailscale devices log in without a password (login names from the node env).
       ALL_TOMORROW_CONSOLE_DATA: /app/data/console
       ALL_TOMORROW_TAILNET_LOGINS: ${ALL_TOMORROW_TAILNET_LOGINS:-}
+      ALL_TOMORROW_TAILSCALE_SERVE_PORT: "8081"   # second listener, trusted for Tailscale-User-Login
     secrets:
       - pg_password
     volumes:
       - at_artifacts:/app/data/artifacts   # Feature 7: file attachments
       - at_console:/app/data/console       # console features + auth-state.json (changed password, revocations)
-      # host tailscaled LocalAPI, for "who owns this tailnet address" (whois) on login
-      - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
     ports:
       - "8080:8080"                  # the ONLY public surface (behind TLS ingress)
+      - "127.0.0.1:8081:8081"        # host loopback only: `tailscale serve` -> identity header port
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=3).status==200 else 1)"]
       interval: 15s
