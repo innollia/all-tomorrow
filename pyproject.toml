@@ -43,4 +43,4 @@ asyncio_mode = "auto"
 where = ["src"]
 
 [tool.setuptools.package-data]
-all_tomorrow = ["static/*"]
+all_tomorrow = ["static/*", "static/panels/*"]

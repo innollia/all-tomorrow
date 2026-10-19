@@ -43,4 +43,6 @@ def test_snapshot_ingest_needs_collector_token_and_login_to_read(tmp_path) -> No
         assert client.get("/api/project-snapshot").status_code == 401
         client.post("/api/login", json={"username": "owner", "password": "pw"})
         assert client.get("/api/project-snapshot").json()["projects"][0]["id"] == "p"
+        etag = client.get("/api/project-snapshot").headers["etag"]
+        assert client.get("/api/project-snapshot", headers={"if-none-match": etag}).status_code == 304
     assert WebState(project_snapshot_path=tmp_path / "snap.json").project_snapshot["projects"][0]["name"] == "P"

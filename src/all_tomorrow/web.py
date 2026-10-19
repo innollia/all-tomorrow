@@ -32,16 +32,26 @@ class WebState:
     usage_path: Path | None = None
     project_snapshot: dict[str, Any] | None = None
     project_snapshot_path: Path | None = None
+    # Encoded once per push, so repeated reads cost no JSON work and can answer 304.
+    project_snapshot_body: bytes | None = None
+    project_snapshot_etag: str | None = None
 
     def __post_init__(self) -> None:
         if self.usage is None and self.usage_path and self.usage_path.exists():
             self.usage = json.loads(self.usage_path.read_text(encoding="utf-8"))
         if self.project_snapshot is None and self.project_snapshot_path and self.project_snapshot_path.exists():
             self.project_snapshot = json.loads(self.project_snapshot_path.read_text(encoding="utf-8"))
+        if self.project_snapshot is not None:
+            self._encode_project_snapshot()
+
+    def _encode_project_snapshot(self) -> None:
+        self.project_snapshot_body = json.dumps(self.project_snapshot, ensure_ascii=False).encode()
+        self.project_snapshot_etag = '"' + hashlib.sha256(self.project_snapshot_body).hexdigest()[:16] + '"'
 
     def store_project_snapshot(self, snapshot: dict[str, Any]) -> None:
         # Collected on the user's PC; the server only keeps the latest copy.
         self.project_snapshot = snapshot
+        self._encode_project_snapshot()
         if self.project_snapshot_path:
             self.project_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
             self.project_snapshot_path.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
@@ -241,8 +251,13 @@ def create_app(
         state_store.store_usage(payload.model_dump())
 
     @app.get("/api/project-snapshot")
-    async def project_snapshot(_: str = Depends(current_user)) -> dict[str, Any] | None:
-        return state_store.project_snapshot
+    async def project_snapshot(request: Request, _: str = Depends(current_user)) -> Response:
+        if state_store.project_snapshot_body is None:
+            return Response("null", media_type="application/json")
+        headers = {"ETag": state_store.project_snapshot_etag, "Cache-Control": "private, no-cache"}
+        if request.headers.get("if-none-match") == state_store.project_snapshot_etag:
+            return Response(status_code=304, headers=headers)
+        return Response(state_store.project_snapshot_body, media_type="application/json", headers=headers)
 
     @app.post("/internal/projects", status_code=204)
     async def ingest_projects(request: Request) -> None:
