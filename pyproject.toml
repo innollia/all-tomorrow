@@ -16,6 +16,7 @@ dependencies = [
   "pydantic-ai==2.46.0",
   "dbos==3.1.0",
   "opentelemetry-sdk==1.44.0",
+  "fastmcp>=4.0.5,<5",
 ]
 
 [dependency-groups]
@@ -28,6 +29,8 @@ dev = [
 all-tomorrow-api = "all_tomorrow.web:run"
 all-tomorrow-worker = "all_tomorrow.local_workers:main"
 all-tomorrow-device-agent = "all_tomorrow.device_agent_client:main"
+all-tomorrow-usage = "all_tomorrow.usage:main"
+all-tomorrow-mcp = "all_tomorrow.mcp_server:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3,<9", "pytest-asyncio>=0.24,<1"]

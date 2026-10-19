@@ -76,3 +76,14 @@ All Tomorrow는 범용 인프라를 다시 구현하는 프로젝트가 아니�
 | 작업 | 상태 | 기록 |
 |---|---|---|
 | 네 로컬 worker 연결 | 개발완료 | [실행 방법과 검증 기록](worker-adapters.md) |
+
+## 콘솔 기능 이식
+
+2026-10-19 사용자 요청으로 만든 콘솔 기능을 main으로 옮기는 중이다. 처음 구현은 main의 Stage 1–3·device agent 이전에 갈라진 `feat/stage-00d-close`에서 했고, `feat/port-console-features`로 이식한다(2026-10-19). Stage 표의 상태와는 별개다.
+
+| 작업 | 상태 | 기록 |
+|---|---|---|
+| 구독 사용량 패널 | 개발중 | [구조와 남은 일](usage-panel.md) |
+| Claude→All Tomorrow MCP 연결 | 개발중 | [구조·검증·남은 일](mcp-control.md) |
+| 사업 아이디어 공장 + 통제 콘솔 | 개발중 | [계획서·검증 기록](idea-factory-plan.md) |
+| 중앙 콘솔 프로젝트 패널 | 개발중 | [구조·결정·보안 사항](project-panels.md) |
