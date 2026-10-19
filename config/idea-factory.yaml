@@ -4,6 +4,11 @@
 ideas_per_topic: 5
 council_rounds: 2
 council_pass_votes: 3        # supports needed in the final round (of 4)
+# How a reason built on client facts reaches council members with less access:
+#   summary  = the speaker's fact-free summary (rejected if it still contains digits or hidden facts)
+#   full     = everyone hears every reason in full
+#   filtered = stance only
+council_share: summary
 evaluation_min_samples: 5    # no promote/retire decision before this many judged samples
 promote_above: 0.7
 retire_below: 0.3

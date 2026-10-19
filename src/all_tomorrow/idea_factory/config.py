@@ -32,6 +32,7 @@ class Roster:
     tiers: list[str]
     staff: list[dict[str, Any]] = field(default_factory=list)
     profile_sources: list[dict[str, Any]] = field(default_factory=list)
+    council_share: str = "summary"  # summary | full | filtered (see pipeline._transcript_for)
 
 
 def load_roster(path: Path = ROSTER_PATH) -> Roster:

@@ -34,7 +34,12 @@ def fake_chat_json(group, system, user, **kwargs):
     if "회의" in system and "기획안" not in system:
         # worst case: the model echoes every private fact it was given into its reason
         echoed = [m for m in ("GOALMARK", "CAPACITYMARK", "BUDGETMARK", "INTERESTMARK") if m in user.split("[의뢰인 정보")[-1]]
-        return {"stance": "support", "reason": "좋다 " + " ".join(echoed) if "[의뢰인 정보" in user else "좋다"}, "fake"
+        vote = {"stance": "support", "reason": "좋다 " + " ".join(echoed) if "[의뢰인 정보" in user else "좋다"}
+        if "reason_public" in user:
+            # the operator writes a clean summary; the skeptic's "summary" still leaks a fact
+            vote["reason_public"] = ("의뢰인 사정상 자금 여유가 없다" if "오퍼레이터." in system
+                                     else "의뢰인 사정상 어렵다 " + " ".join(echoed))
+        return vote, "fake"
     return {"title": "세션 요약 봇", "problem": "p", "approach": "a", "dod": ["d"], "risks": ["r"],
             "market": "m", "effort": "S", "first_step": "f"}, "fake"
 
@@ -106,7 +111,8 @@ def test_workflow_kills_patented_idea_and_reports_the_other(tmp_path, monkeypatc
         assert not any(m in p for p in advocate for m in marks)
         visionary = by_role("비저너리.")
         assert visionary and not any(m in p for p in visionary for m in ("CAPACITYMARK", "BUDGETMARK"))
-        assert any("(권한 밖 근거 생략)" in p for p in advocate)
+        assert any("(권한 밖 근거 생략)" in p for p in advocate)  # the skeptic's leaky summary is dropped
+        assert any("(요약) 의뢰인 사정상 자금 여유가 없다" in p for p in advocate)  # the operator's clean one passes
         # the operator may read the skeptic's reasons: the skeptic saw nothing the operator can't
         assert any("[1라운드 스켑틱] support: 좋다 " in p and "CAPACITYMARK" in p.split("[1라운드 스켑틱]")[1][:80]
                    for p in by_role("오퍼레이터.") if "2라운드 발언" in p)
@@ -260,3 +266,12 @@ def test_budget_digest_states_monthly_totals_without_double_counting(monkeypatch
                                                     "income": ["수입"], "spend": ["구독", "고정지출", "변동지출"]}})
     assert text.splitlines()[0].startswith("[월 합계] 수입 50,000원, 반복 지출 57,000원, 차액 -7,000원")
     assert "해지됨" not in text
+
+
+def test_summary_leak_check_rejects_digits_and_hidden_facts() -> None:
+    from all_tomorrow.idea_factory.pipeline import _leaks
+
+    hidden = ["- 항목=코덱스; 구분=구독; 금액=30000", "- 목표/프로젝트=Flesh Pit 인디게임"]
+    assert _leaks("월 3만 원이라 어렵다", hidden)
+    assert _leaks("코덱스 구독료 때문에 어렵다", hidden)
+    assert not _leaks("의뢰인 사정상 자금 여유가 없다", hidden)

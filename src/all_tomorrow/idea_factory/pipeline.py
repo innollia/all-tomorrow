@@ -6,6 +6,7 @@ finished step. Pause/KILL are read from the store at checkpoints between steps.
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from typing import Any
 
@@ -48,6 +49,8 @@ def configure(store_obj: Store, roster_obj: Roster | None = None, patents: Paten
     _state["roster"] = roster_obj or load_roster()
     _state["patents"] = patents or default_source()
     profile.validate(_state["roster"].profile_sources, _state["roster"].staff)
+    if _state["roster"].council_share not in SHARE_MODES:
+        raise ValueError(f"council_share must be one of {SHARE_MODES}")
     for member in _state["roster"].staff:
         store_obj.hire(member["role"], member["name"], member["model_group"],
                        access_level=member.get("access_level", 0), access_scopes=member.get("access_scopes", []))
@@ -187,15 +190,40 @@ def _sources_of(member: dict[str, Any], snapshot: dict[str, Any]) -> list[str]:
     return sorted(profile.visible(snapshot, member["access_level"], member["access_scopes"]))
 
 
-def _transcript_for(listener_sources: list[str], transcript: list[dict[str, Any]], tag: str = "라운드") -> str:
-    """A reason may carry the speaker's profile facts, so it only reaches listeners who could see
-    every source the speaker saw; others get the stance alone."""
+OMITTED = "(권한 밖 근거 생략)"
+SHARE_MODES = ("summary", "full", "filtered")
+
+
+def _leaks(text: str, hidden_texts: list[str]) -> bool:
+    """True if a summary still carries specifics: any digit, or a word that only appears in
+    sources the listener may not see."""
+    if re.search(r"\d", text):
+        return True
+    words = {w for t in hidden_texts for w in re.findall(r"[\w가-힣]{3,}", t)}
+    return any(w in text for w in words)
+
+
+def _transcript_for(listener_sources: list[str], transcript: list[dict[str, Any]],
+                    snapshot: dict[str, Any], tag: str = "라운드") -> str:
+    """A reason may carry the speaker's profile facts. It reaches a listener in full only if the
+    listener could see every source the speaker saw (or council_share is "full"). Otherwise,
+    in "summary" mode the speaker's own fact-free summary is passed if it passes the leak check;
+    else only the stance."""
+    mode = roster().council_share
     allowed = set(listener_sources)
+    visible_texts = [snapshot[s]["text"] for s in allowed if s in snapshot]
     lines = []
     for v in transcript:
         # Votes recorded before this filter existed have no "sources": unknown counts as not allowed.
         known = v.get("sources")
-        reason = v["reason"] if known is not None and set(known) <= allowed else "(권한 밖 근거 생략)"
+        if mode == "full" or (known is not None and set(known) <= allowed):
+            reason = v["reason"]
+        elif mode == "summary" and known is not None and v.get("reason_public"):
+            hidden = [snapshot[s]["text"] for s in set(known) - allowed if s in snapshot]
+            hidden = [t for t in hidden if t not in visible_texts]
+            reason = OMITTED if _leaks(v["reason_public"], hidden) else "(요약) " + v["reason_public"]
+        else:
+            reason = OMITTED
         lines.append(f"[{v['round']}{tag} {v['name']}] {v['stance']}: {reason}")
     return "\n".join(lines)
 
@@ -210,7 +238,11 @@ def council_vote(idea: dict[str, Any], round_no: int, role: str, transcript: lis
            '{"stance":"support|oppose","reason":"근거 두세 문장"}' if final_round
            else '{"stance":"support|oppose|conditional","reason":"근거 두세 문장"}')
     sources = _sources_of(member, snapshot)
-    earlier = _transcript_for(sources, transcript) or "(첫 발언)"
+    earlier = _transcript_for(sources, transcript, snapshot) or "(첫 발언)"
+    if sources and roster().council_share == "summary":
+        # A second, fact-free version of the reason for colleagues with less access.
+        ask = ask[:-1] + (',"reason_public":"같은 판단을 의뢰인 정보의 구체 내용(숫자·금액·프로젝트명·일정) 없이 '
+                          '\'의뢰인 사정상 ~\' 수준으로만 쓴 한두 문장"}')
     data, _ = llm.chat_json(
         member["model_group"],
         f"너는 사업 아이디어 회의의 {ROLE_BRIEF[role]} 다른 사람 의견에 휩쓸리지 말고 네 관점으로 판단한다. 한국어로 쓴다.",
@@ -225,6 +257,8 @@ def council_vote(idea: dict[str, Any], round_no: int, role: str, transcript: lis
         stance = "oppose" if final_round else "conditional"
     vote = {"round": round_no, "role": role, "staff_id": member["id"], "name": member["name"],
             "stance": stance, "reason": str(data.get("reason", ""))[:1200], "sources": sources}
+    if sources and isinstance(data, dict) and data.get("reason_public"):
+        vote["reason_public"] = str(data["reason_public"])[:600]
     store().put_vote(idea["id"], round_no, member["id"], stance, vote["reason"])
     store().event("council", f"{member['name']} {stance}: {vote['reason'][:120]}", topic_id=idea["topic_id"],
                   staff_id=member["id"], dedupe=f"vote:{idea['id']}:{round_no}:{role}")
@@ -235,7 +269,7 @@ def council_vote(idea: dict[str, Any], round_no: int, role: str, transcript: lis
 def write_proposal(idea: dict[str, Any], transcript: list[dict[str, Any]], checked: int,
                    snapshot: dict[str, Any]) -> dict[str, Any]:
     member = store().active_staff("operator")
-    talk = _transcript_for(_sources_of(member, snapshot), transcript, tag="R")
+    talk = _transcript_for(_sources_of(member, snapshot), transcript, snapshot, tag="R")
     data, _ = llm.chat_json(
         member["model_group"],
         "너는 회의 결과를 사용자에게 보고할 기획안으로 정리한다. 회의에서 나온 리스크를 숨기지 않는다. 한국어로 쓴다.",
