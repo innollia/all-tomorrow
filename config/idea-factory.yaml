@@ -1,0 +1,93 @@
+# Idea factory roster and model groups. No key values here: keys come from
+# ~/.all-tomorrow/key-pool.env (IDEA_FACTORY_KEY_POOL), matched by provider prefix (OPENROUTER__*, GROQ__*, HUGGINGFACE__*).
+
+version: "1"
+ideas_per_topic: 5
+council_rounds: 2
+council_pass_votes: 3        # supports needed in the final round (of 4)
+# How a reason built on client facts reaches council members with less access:
+#   summary  = the speaker's fact-free summary (rejected if it still contains digits or hidden facts)
+#   full     = everyone hears every reason in full
+#   filtered = stance only
+council_share: summary
+evaluation_min_samples: 5    # no promote/retire decision before this many judged samples
+promote_above: 0.7
+retire_below: 0.3
+
+# Model groups → deployments. Every key of the provider is added for each model.
+# OpenRouter entries must be :free models (some OpenRouter keys are on paid accounts).
+model_groups:
+  g-nemotron-super:
+    - {provider: openrouter, model: "nvidia/nemotron-3-super-120b-a12b:free"}
+  g-nemotron-ultra:
+    - {provider: openrouter, model: "nvidia/nemotron-3-ultra-550b-a55b:free"}
+  g-gemma:
+    - {provider: openrouter, model: "google/gemma-4-31b-it:free"}
+    - {provider: openrouter, model: "google/gemma-4-26b-a4b-it:free"}
+  g-gpt-oss-120b:
+    - {provider: groq, model: "openai/gpt-oss-120b"}
+    - {provider: huggingface, model: "openai/gpt-oss-120b"}
+  g-fast:
+    - {provider: groq, model: "openai/gpt-oss-20b"}
+    - {provider: huggingface, model: "openai/gpt-oss-20b"}
+    - {provider: openrouter, model: "nvidia/nemotron-3.5-lightning:free"}
+
+fallback_group: g-fast
+
+# Promotion moves a staff member one step up this ladder; retirement hires a replacement
+# on the next group that the retired member was not using.
+tiers: [g-fast, g-gemma, g-nemotron-super, g-gpt-oss-120b, g-nemotron-ultra]
+
+# Staff see a profile source when source.level <= access_level and source.scope is in access_scopes.
+# Promotion raises access_level by one (max 3). Scopes are the member's function and do not change.
+staff:
+  - {role: ideator,     name: 아이디에이터, model_group: g-nemotron-super, access_level: 3, access_scopes: [goals, interests]}
+  - {role: synthesizer, name: 신서사이저,   model_group: g-gpt-oss-120b,   access_level: 0, access_scopes: []}
+  - {role: visionary,   name: 비저너리,     model_group: g-gemma,          access_level: 1, access_scopes: [goals]}
+  - {role: operator,    name: 오퍼레이터,   model_group: g-nemotron-ultra, access_level: 2, access_scopes: [capacity, budget, goals]}
+  - {role: advocate,    name: 애드보킷,     model_group: g-nemotron-super, access_level: 0, access_scopes: []}
+  - {role: skeptic,     name: 스켑틱,       model_group: g-gpt-oss-120b,   access_level: 2, access_scopes: [capacity, budget]}
+
+# User profile from Notion (NOTION_TOKEN). Business-relevant sources only: diaries, health,
+# medication, sexual/gender, self-harm and relationship records are deliberately absent, and
+# profile.SENSITIVE drops matching lines from the sources below as a second guard.
+profile_sources:
+  - name: 진행 중인 목표·프로젝트
+    kind: rows
+    data_source: c527805b-cf11-4412-aade-5e3352053707
+    fields: [목표/프로젝트, 상태, 영역, 기한]
+    only_values: {영역: [개발, 창작, 입시, 기타], 상태: [탐색, 진행, 주력]}
+    level: 1
+    scope: goals
+  - name: 일정 부하
+    kind: workload
+    data_source: 70bc9f2e-57b9-48a3-a83e-f0e8edf96e5d
+    level: 1
+    scope: capacity
+  - name: 다가오는 마감
+    kind: deadlines
+    data_source: 70bc9f2e-57b9-48a3-a83e-f0e8edf96e5d
+    days: 30
+    areas: [학교/숙제, 공부, 개발, 입시, 창작]
+    level: 3
+    scope: capacity
+  - name: 고정 지출·구독·수입
+    kind: rows
+    data_source: 8d526c20-c2c9-44a6-bbf5-83b3a512c00c
+    fields: [항목, 구분, 금액, 주기]
+    only_checked: 활성
+    monthly_totals: {period: 주기, kind: 구분, amount: 금액, income: [수입], spend: [구독, 고정지출, 변동지출]}
+    level: 2
+    scope: budget
+  - name: 취향·선호
+    kind: sections
+    page: 3cf4b985-2216-81bf-81a8-e4eee4f4dae6
+    sections: [선호, 불호]
+    level: 3
+    scope: interests
+  - name: 소비·사용 취향
+    kind: sections
+    page: 3db4b985-2216-817d-a7b7-c2b620849c7f
+    sections: [예술·인물 취향, 소비·착용, 물건·기기 사용]
+    level: 3
+    scope: interests
