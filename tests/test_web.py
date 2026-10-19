@@ -56,3 +56,33 @@ def test_internal_edge_decision_uses_separate_service_credential() -> None:
         )
         assert response.status_code == 200
         assert response.json()["action"] == "LOCAL_REPLY"
+
+
+def test_usage_ingest_requires_its_own_token_and_is_shown_after_login(tmp_path) -> None:
+    state = WebState(usage_path=tmp_path / "usage.json")
+    app = create_app(auth=Auth("owner", "correct horse", "s" * 32, edge_token="edge-secret", usage_token="usage-secret"), web_state=state)
+    snapshot = {
+        "collected_at": "2026-10-19T00:00:00+00:00",
+        "providers": [{"id": "claude", "name": "Claude", "plan": "Max 20x", "status": "connected",
+                       "observed_at": "2026-10-19T00:00:00+00:00",
+                       "windows": [{"label": "5-hour", "percent": 3, "resets_at": "2026-10-19T03:00:00+00:00"}]}],
+    }
+    with TestClient(app, base_url="https://testserver") as client:
+        assert client.post("/internal/usage", json=snapshot, headers={"authorization": "Bearer edge-secret"}).status_code == 401
+        assert client.post("/internal/usage", json=snapshot, headers={"authorization": "Bearer usage-secret"}).status_code == 204
+        assert client.get("/api/usage").status_code == 401
+        client.post("/api/login", json={"username": "owner", "password": "correct horse"})
+        assert client.get("/api/usage").json()["providers"][0]["windows"][0]["percent"] == 3
+        assert 'id="usage"' in client.get("/").text
+    assert WebState(usage_path=tmp_path / "usage.json").usage["providers"][0]["plan"] == "Max 20x"
+
+
+def test_claude_limits_map_to_dashboard_windows() -> None:
+    from all_tomorrow.usage import claude_windows
+
+    windows = claude_windows({"limits": [
+        {"kind": "session", "percent": 3, "resets_at": "a"},
+        {"kind": "weekly_all", "percent": 97, "resets_at": "b"},
+        {"kind": "weekly_scoped", "percent": 1, "resets_at": "c", "scope": {"model": {"display_name": "Fable"}}},
+    ]})
+    assert [w["label"] for w in windows] == ["5-hour", "Weekly", "Weekly · Fable"]

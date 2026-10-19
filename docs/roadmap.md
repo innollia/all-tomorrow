@@ -76,3 +76,5 @@ All Tomorrow는 범용 인프라를 다시 구현하는 프로젝트가 아니�
 | 작업 | 상태 | 기록 |
 |---|---|---|
 | 네 로컬 worker 연결 | 개발완료 | [실행 방법과 검증 기록](worker-adapters.md) |
+| 웹 대시보드 구독 사용량 패널 (2026-10-19 요청) | 개발중 | [구조와 남은 일](usage-panel.md) |
+| Claude→All Tomorrow MCP 연결, 다른 프로젝트 통솔 (2026-10-19 Stage 0 예외 승인) | 개발중 | [구조·검증·남은 일](mcp-control.md) |
