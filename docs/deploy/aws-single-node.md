@@ -178,3 +178,15 @@ operator to apply them on the live account.
 - `ALL_TOMORROW_EDGE_TOKEN` gates `/internal/edge/discord/decide` (bearer). Without it the request gets 401.
 - eve-scene-runtime sets the same value in its `ALL_TOMORROW_EDGE_TOKEN`, plus `ALL_TOMORROW_EDGE_URL=http://<node>:8080`.
 - On the live node the token is generated and kept on the node only (via SSM). It is never printed locally.
+
+## 콘솔 기능과 tailnet 기기 로그인 (2026-10-19, 배포 전)
+
+`feat/port-console-features`의 콘솔(사용량·프로젝트 패널·아이디어 공장)과 로그인 변경을 이 노드에 올릴 때 필요한 것. 아직 배포하지 않았다(작업한 PC에 AWS 자격 증명이 없어 SSM 접근 불가).
+
+- **tailnet 기기 자동 로그인**: 요청 출발지가 tailnet 주소(100.64.0.0/10, fd7a:115c:a1e0::/48)이면 앱이 호스트 tailscaled LocalAPI `whois`로 그 주소의 Tailscale 로그인을 확인하고, `ALL_TOMORROW_TAILNET_LOGINS`(쉼표 목록)에 있으면 비밀번호 없이 세션을 준다. 헤더는 믿지 않는다. Caddy(공개 HTTPS)를 거친 요청은 출발지가 Caddy라서 항상 비밀번호 로그인이다.
+  - compose: 호스트 `/var/run/tailscale/tailscaled.sock`을 앱 컨테이너에 마운트(위 compose에 반영).
+  - 노드 env: `ALL_TOMORROW_TAILNET_LOGINS=<소유자 Tailscale 로그인>`.
+  - tailnet에서 평문 HTTP(`http://100.97.113.3:8080`)로 쓰면 `ALL_TOMORROW_COOKIE_SECURE=false`여야 한다. `true`이면 HTTP에서는 자동 로그인을 하지 않는다(쿠키가 버려져 로그인 화면으로 계속 돌아오는 것을 막기 위함). tailnet 구간은 WireGuard로 암호화된다.
+  - 배포 후 확인: 앱 로그에 `tailnet login: <login> from 100.x.y.z`가 찍히는지(도커 포트 공개가 출발지 주소를 보존하는지)를 실제 기기로 확인한다. 출발지가 도커 브리지 주소로 바뀌어 보이면 자동 로그인은 동작하지 않고 비밀번호 로그인만 된다.
+- **세션 30일**: `ALL_TOMORROW_SESSION_TTL_DAYS`(기본 30).
+- **비밀번호 변경 유지**: 계정 화면에서 바꾼 비밀번호(PBKDF2 해시)와 "모든 기기 로그아웃" 세대값을 `ALL_TOMORROW_AUTH_STATE`(기본 `<콘솔 데이터>/auth-state.json`, 600)에 저장한다. 이후에는 env의 `ALL_TOMORROW_ADMIN_PASSWORD`가 아니라 저장된 해시가 쓰인다. 초기화하려면 그 파일을 지운다. `at_console` 볼륨이 이 파일과 콘솔 데이터를 보존한다.

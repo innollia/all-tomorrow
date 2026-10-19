@@ -67,10 +67,17 @@ services:
       AT_SYSTEM_DATABASE_URL: postgresql://at_app@postgres:5432/all_tomorrow_dbos
       AT_MODEL_GATEWAY_URL: http://litellm-proxy:4000
       PGPASSWORD_FILE: /run/secrets/pg_password
+      # Console (2026-10-19): feature data + stored auth state live on a volume;
+      # owner's Tailscale devices log in without a password (login names from the node env).
+      ALL_TOMORROW_CONSOLE_DATA: /app/data/console
+      ALL_TOMORROW_TAILNET_LOGINS: ${ALL_TOMORROW_TAILNET_LOGINS:-}
     secrets:
       - pg_password
     volumes:
       - at_artifacts:/app/data/artifacts   # Feature 7: file attachments
+      - at_console:/app/data/console       # console features + auth-state.json (changed password, revocations)
+      # host tailscaled LocalAPI, for "who owns this tailnet address" (whois) on login
+      - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
     ports:
       - "8080:8080"                  # the ONLY public surface (behind TLS ingress)
     healthcheck:
@@ -80,6 +87,7 @@ services:
       retries: 5
 
 volumes:
+  at_console:
   at_pgdata:
   at_artifacts:
 
