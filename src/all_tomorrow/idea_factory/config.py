@@ -10,7 +10,8 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ROSTER_PATH = Path(os.environ.get("IDEA_FACTORY_ROSTER", REPO_ROOT / "config" / "idea-factory.yaml"))
-KEY_POOL_PATH = Path(os.environ.get("IDEA_FACTORY_KEY_POOL", REPO_ROOT / "config" / "key-pool.local.env"))
+# Outside the repo: config/ must hold no credentials (architecture fitness check).
+KEY_POOL_PATH = Path(os.environ.get("IDEA_FACTORY_KEY_POOL", Path.home() / ".all-tomorrow" / "key-pool.env"))
 
 PROVIDERS = {
     "openrouter": {"prefix": "OPENROUTER__", "model": "openrouter/{model}"},

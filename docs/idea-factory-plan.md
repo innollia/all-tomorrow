@@ -160,7 +160,7 @@
 - 그 스냅숏(과 의뢰인 정보가 섞일 수 있는 회의 발언)은 DBOS 시스템 DB(`.artifacts/idea-factory-dbos.sqlite`, Git 제외)에 주제마다 남는다. 웹으로 노출되지는 않지만 이 PC의 파일 접근으로는 읽힌다. AWS로 옮길 때 DB 접근 범위를 다시 본다.
 - 감사 로그 `profile_access`: 주제 ID, 직원별로 받은 **출처 이름**(내용 없음), 실패한 출처의 오류 이름. 이벤트 로그에는 직원별 받은 출처 수.
 - 콘솔 직원 화면에 직원별 권한(`L{level} · scopes`) 열.
-- 비밀값: `NOTION_TOKEN`은 `config/key-pool.local.env`(Git 제외), 이름만 `config/key-pool.example.env`. 현재 코드는 `NOTION_TOKEN`만 읽고, 출처 ID는 `config/idea-factory.yaml`에 있다. `NOTION_TOKEN`이 없으면 아무도 의뢰인 정보를 받지 않는다.
+- 비밀값: `NOTION_TOKEN`은 `~/.all-tomorrow/key-pool.env`(저장소 밖), 이름만 `config/key-pool.example.env`. 현재 코드는 `NOTION_TOKEN`만 읽고, 출처 ID는 `config/idea-factory.yaml`에 있다. `NOTION_TOKEN`이 없으면 아무도 의뢰인 정보를 받지 않는다.
 
 ### 검증 상태
 
@@ -184,7 +184,7 @@
 - 직원 슬롯은 "특정 키"가 아니라 "모델 그룹"을 가리키고, 키 선택은 router가 한다.
 - 키 값은 서버 환경/비밀 저장소에만 두고, 로그·이벤트·화면에는 키 ID(끝 4자리)만 남긴다(README의 credential 불변식).
 - **계정 정책 (2026-10-19 사용자 결정)**: 같은 프로바이더의 여러 계정 키를 모두 풀에 넣는다. 모두 사용자 소유 계정이고, 약관 위반(아래 확인표)에 대한 책임은 사용자가 진다. 키는 재발급하지 않고 그대로 쓴다.
-- 키 원본: `config/key-pool.local.env`(Git 제외). 이름 템플릿: `config/key-pool.example.env`. 점검: `scripts/check_key_pool.py`.
+- 키 원본: `~/.all-tomorrow/key-pool.env`(저장소 밖). 이름 템플릿: `config/key-pool.example.env`. 점검: `scripts/check_key_pool.py`.
 - **유료 키 보호**: OpenRouter `/api/v1/key`에서 `is_free_tier=false`인 키(DUCKPYO_LEE 계열, 특히 한도 없는 DDD)는 `:free` 모델에만 연결한다. 유료 모델 deployment에는 넣지 않는다.
 
 ## 5. 웹사이트 구조 개편
@@ -257,7 +257,7 @@
 
 해석: 순환, 429 키 자동 제외, 쿨다운 후 복귀, 실패 호출의 다른 키 재시도까지 router 기본 기능으로 성립한다. 직접 구현할 필요가 없다. (RPG_project의 Gemini 키는 `API key not valid`)
 
-**2차 probe (실제 키)**: 같은 script를 `config/key-pool.local.env`로 실행. deployment: OpenRouter 무료 계정 3개(`nvidia/nemotron-3-super-120b-a12b:free`), Groq(`openai/gpt-oss-20b`), Hugging Face router(`openai/gpt-oss-20b`), 로컬 always-429 1개.
+**2차 probe (실제 키)**: 같은 script를 `~/.all-tomorrow/key-pool.env`로 실행. deployment: OpenRouter 무료 계정 3개(`nvidia/nemotron-3-super-120b-a12b:free`), Groq(`openai/gpt-oss-20b`), Hugging Face router(`openai/gpt-oss-20b`), 로컬 always-429 1개.
 
 | 구간 | 처리한 실제 키 | 429 키 호출 | 사용자에게 보인 실패 |
 |---|---|---:|---:|
@@ -303,7 +303,7 @@
 | 부분 | 위치 | 비고 |
 |---|---|---|
 | 직원·모델 그룹·정책 | `config/idea-factory.yaml` | 키 값 없음. OpenRouter는 `:free` 모델만 허용(로드 시 검사) |
-| 키 원본 | `config/key-pool.local.env` (Git 제외) | gateway master key(`IDEA_FACTORY_GATEWAY_KEY`)도 여기 |
+| 키 원본 | `~/.all-tomorrow/key-pool.env` (저장소 밖) | gateway master key(`IDEA_FACTORY_GATEWAY_KEY`)도 여기 |
 | gateway | LiteLLM proxy 1.101.0, `.artifacts/gateway-venv` | 설정은 `idea_factory gateway`가 생성(키는 `os.environ/이름` 참조만). 54 deployment, 실패 시 `g-fast` fallback |
 | 파이프라인 | `src/all_tomorrow/idea_factory/pipeline.py` | DBOS workflow. LLM·검색 호출 하나가 step 하나. 로컬은 SQLite, AWS는 `IDEA_FACTORY_DBOS_URL`로 Postgres |
 | 앱 상태 | `.artifacts/idea-factory.sqlite` (`IDEA_FACTORY_STORE`) | 주제·아이디어·회의·기획안·직원·이벤트·감사 로그 |
@@ -352,6 +352,6 @@ DBOS를 띄우는 프로세스는 한 번에 하나만 둔다(CLI와 웹을 동�
 ### 남은 일
 
 1. **KIPRIS Plus 키 발급(사용자)** → `KIPRIS_API_KEY` 설정 → 실제 폐기 경로 검증, P0·P1 완결.
-2. **AWS 배포**: 서버 접속 정보가 없어 하지 않았다. 필요한 것: gateway-venv(또는 `pip install -r deploy/gateway/requirements.txt`), `config/key-pool.local.env` 복사, Postgres `IDEA_FACTORY_DBOS_URL`, `IDEA_FACTORY_ENABLED=1`, gateway와 웹 두 프로세스 상시 실행.
+2. **AWS 배포**: 서버 접속 정보가 없어 하지 않았다. 필요한 것: gateway-venv(또는 `pip install -r deploy/gateway/requirements.txt`), `~/.all-tomorrow/key-pool.env` 복사, Postgres `IDEA_FACTORY_DBOS_URL`, `IDEA_FACTORY_ENABLED=1`, gateway와 웹 두 프로세스 상시 실행.
 3. 실제 기획안 판정(사용자) → P3 실제 증거.
 4. P4 폐기 표본 검토 20건.

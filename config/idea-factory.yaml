@@ -1,5 +1,5 @@
 # Idea factory roster and model groups. No key values here: keys come from
-# config/key-pool.local.env, matched by provider prefix (OPENROUTER__*, GROQ__*, HUGGINGFACE__*).
+# ~/.all-tomorrow/key-pool.env (IDEA_FACTORY_KEY_POOL), matched by provider prefix (OPENROUTER__*, GROQ__*, HUGGINGFACE__*).
 
 ideas_per_topic: 5
 council_rounds: 2

@@ -1,7 +1,7 @@
 """P0 key-pool probe: LiteLLM Router rotation + 429 cooldown + recovery.
 
 Run in the separate gateway runtime (deploy/gateway/requirements.txt), not the agent venv:
-  <gateway-python> scripts/probe_key_pool.py [config/key-pool.local.env]
+  <gateway-python> scripts/probe_key_pool.py [~/.all-tomorrow/key-pool.env]
 Real free deployments from the key-pool file plus one local always-429 key to observe
 cooldown. Key values are loaded into the process environment only and never printed.
 """
@@ -12,7 +12,7 @@ import litellm
 litellm.suppress_debug_info = True
 import sys
 from pathlib import Path
-POOL = Path(sys.argv[1] if len(sys.argv) > 1 else "config/key-pool.local.env")
+POOL = Path(sys.argv[1] if len(sys.argv) > 1 else Path.home() / ".all-tomorrow" / "key-pool.env")
 for line in POOL.read_text(encoding="utf-8").splitlines():
     if line.strip() and not line.startswith("#") and "=" in line:
         name, value = line.split("=", 1); os.environ[name.strip()] = value.strip()

@@ -1,6 +1,6 @@
 """Validate key-pool entries without printing key values.
 
-  python scripts/check_key_pool.py [config/key-pool.local.env]
+  python scripts/check_key_pool.py [~/.all-tomorrow/key-pool.env]
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def check(provider: str, key: str) -> str:
 
 
 def main() -> None:
-    path = Path(sys.argv[1] if len(sys.argv) > 1 else "config/key-pool.local.env")
+    path = Path(sys.argv[1] if len(sys.argv) > 1 else Path.home() / ".all-tomorrow" / "key-pool.env")
     for name, key in load_env(path).items():
         provider = name.split("__", 1)[0]
         status = check(provider, key) if provider in CHECKS and key else "skipped (no text-LLM check)"
