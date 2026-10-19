@@ -18,3 +18,4 @@ config/workers.local.json
 .ssm/
 device_agent_state.json
 .ssm_params.json
+.venv/

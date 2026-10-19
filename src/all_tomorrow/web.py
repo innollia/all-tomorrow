@@ -8,12 +8,15 @@ import os
 import time
 from dataclasses import asdict, dataclass, field
 from html import escape
+from pathlib import Path
 from typing import Any
 
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from all_tomorrow.console import ConsoleContext, include_features
 from all_tomorrow.contracts import Project
 from all_tomorrow.edge import EdgeAction, EdgeAnalysis, load_edge_policy
 from all_tomorrow.storage.semantic_store import InMemoryGoalWorkRunStore
@@ -25,6 +28,7 @@ MAX_ATTACHMENTS = 5
 
 
 SESSION_COOKIE = "all_tomorrow_session"
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 @dataclass(slots=True)
@@ -242,7 +246,7 @@ ul{{list-style:none;padding:0;margin:0}}li{{padding:10px 0;border-bottom:1px sol
 .title{{word-break:break-word}}.meta{{font-size:13px;color:#999;margin-top:4px}}
 .qa{{display:flex;gap:8px;margin-top:8px}}.qa input{{flex:1}}
 </style></head><body><main>
-<header><h1>All Tomorrow</h1><span>{safe_user} <button onclick="location='/devices'">기기</button> <button onclick="location='/account'">계정</button> <button onclick="logout()">로그아웃</button></span></header>
+<header><h1>All Tomorrow</h1><span>{safe_user} <button onclick="location='/'">콘솔</button> <button onclick="location='/devices'">기기</button> <button onclick="location='/account'">계정</button> <button onclick="logout()">로그아웃</button></span></header>
 <form class="ask" id="ask"><label for="text" class="muted">할 일을 요청하세요 (Ctrl+Enter로 보내기)</label>
 <textarea id="text" autofocus></textarea>
 <div class="row"><span id="askmsg" class="muted"></span><button class="primary" id="send">보내기</button></div></form>
@@ -365,6 +369,8 @@ def create_app(
     lifespan: Any = None,
     upload_dir: str | None = None,
     device_service: Any = None,
+    collector_token: str | None = None,
+    console_data_dir: str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="All Tomorrow Control Plane", version="0.1.0", lifespan=lifespan)
     state_store = web_state or WebState()
@@ -393,6 +399,13 @@ def create_app(
 
     def current_user(all_tomorrow_session: str | None = Cookie(default=None, alias=SESSION_COOKIE)) -> str:
         return auth.verify(all_tomorrow_session)
+
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    include_features(app, ConsoleContext(
+        current_user=current_user,
+        data_dir=Path(console_data_dir or os.environ.get("ALL_TOMORROW_CONSOLE_DATA", ".artifacts/console")),
+        collector_token=collector_token,
+    ))
 
     @app.get("/healthz")
     async def health() -> dict[str, Any]:
@@ -447,6 +460,18 @@ def create_app(
         response.delete_cookie(SESSION_COOKIE)
 
     @app.get("/", response_class=HTMLResponse)
+    async def console(
+        all_tomorrow_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+    ) -> Response:
+        # The sectioned console shell; feature pages register themselves from static/console/pages.
+        try:
+            user = auth.verify(all_tomorrow_session)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+        shell = (STATIC_DIR / "console" / "console.html").read_text(encoding="utf-8")
+        return HTMLResponse(shell.replace("__USER__", escape(user)))
+
+    @app.get("/requests", response_class=HTMLResponse)
     async def dashboard(
         all_tomorrow_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
     ) -> Response:
@@ -746,10 +771,13 @@ def app_from_environment() -> FastAPI:
     # Secure cookies need HTTPS; allow opting out for a plain-HTTP deployment.
     cookie_secure = os.environ.get("ALL_TOMORROW_COOKIE_SECURE", "true").lower() not in {"0", "false", "no"}
     auth = Auth(username, password, secret, edge_token=edge_token)
+    # PC-side collectors (usage, projects snapshot) push with this token.
+    collector_token = os.environ.get("ALL_TOMORROW_COLLECTOR_TOKEN") or os.environ.get("ALL_TOMORROW_USAGE_TOKEN")
     database_url = os.environ.get("ALL_TOMORROW_DATABASE_URL", "")
     upload_dir = os.environ.get("ALL_TOMORROW_UPLOAD_DIR")
     if not database_url:
-        return create_app(auth=auth, cookie_secure=cookie_secure, upload_dir=upload_dir)
+        return create_app(auth=auth, cookie_secure=cookie_secure, upload_dir=upload_dir,
+                          collector_token=collector_token)
 
     # Durable mode: the web reads and writes the canonical PostgreSQL store.
     from contextlib import asynccontextmanager
@@ -782,7 +810,7 @@ def app_from_environment() -> FastAPI:
     return create_app(
         auth=auth, cookie_secure=cookie_secure,
         control=WebControl(semantic, request_store), lifespan=lifespan,
-        upload_dir=upload_dir, device_service=device_service,
+        upload_dir=upload_dir, device_service=device_service, collector_token=collector_token,
     )
 
 
