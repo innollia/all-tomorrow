@@ -28,6 +28,7 @@ MAX_ATTACHMENTS = 5
 
 
 SESSION_COOKIE = "all_tomorrow_session"
+NO_AUTO_COOKIE = "all_tomorrow_no_auto_login"
 STATIC_DIR = Path(__file__).parent / "static"
 
 
@@ -115,6 +116,7 @@ class Auth:
         secret: str,
         ttl_seconds: int = 86_400,
         edge_token: str | None = None,
+        state_path: str | Path | None = None,
     ) -> None:
         if not username or not password or len(secret) < 32:
             raise ValueError("web auth requires username, password, and a session secret of at least 32 characters")
@@ -128,6 +130,38 @@ class Auth:
         self._engine = AuthEngine(max_failed=5, lockout_seconds=15 * 60)
         self._engine.register(username, password, Role.OWNER)
         self._generation = 0  # bumped by revoke_all_sessions; invalidates prior tokens
+        # A changed password and the revoke generation must survive a restart: otherwise
+        # the env password comes back and tokens revoked before the restart work again.
+        self._state_path = Path(state_path) if state_path else None
+        self._load_state()
+
+    def _load_state(self) -> None:
+        if not self._state_path or not self._state_path.exists():
+            return
+        from all_tomorrow.auth import PasswordHash
+
+        state = json.loads(self._state_path.read_text(encoding="utf-8"))
+        if state.get("username") != self.username:
+            return  # admin user renamed in env: the stored hash belonged to someone else
+        if state.get("password"):
+            self._engine._accounts[self.username].password = PasswordHash(**state["password"])
+        self._generation = int(state.get("generation", 0))
+
+    def _save_state(self) -> None:
+        if not self._state_path:
+            return
+        acct = self._engine._accounts[self.username]
+        state = {"username": self.username, "generation": self._generation,
+                 "password": {"salt": acct.password.salt, "digest": acct.password.digest,
+                              "rounds": acct.password.rounds}}
+        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._state_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state), encoding="utf-8")
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError:
+            pass
+        os.replace(tmp, self._state_path)
 
     def verify_password(self, username: str, password: str) -> bool:
         """Login check only (does not mint a token) -- used by tests and by the
@@ -163,6 +197,7 @@ class Auth:
 
     def revoke_all_sessions(self) -> None:
         self._generation += 1
+        self._save_state()
 
     def issue(self) -> str:
         payload = json.dumps(
@@ -211,7 +246,9 @@ _BASE_CSS = (
 )
 
 
-def _login_page() -> str:
+def _login_page(tailnet_enabled: bool = False) -> str:
+    tailnet_button = ("<button type=\"button\" onclick=\"location='/login/tailnet'\">Tailscale 기기로 들어가기</button>"
+                      if tailnet_enabled else "")
     return f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>All Tomorrow</title><style>{_BASE_CSS}
@@ -220,8 +257,9 @@ h1{{font-size:18px;font-weight:600;margin:0 0 8px}}#error{{font-size:13px;min-he
 </style></head><body><form id="login"><h1>All Tomorrow</h1>
 <input id="username" autocomplete="username" placeholder="사용자명" autofocus>
 <input id="password" type="password" autocomplete="current-password" placeholder="비밀번호">
-<button class="primary">로그인</button><div id="error" class="err"></div></form>
-<script>login.onsubmit=async(e)=>{{e.preventDefault();const r=await fetch('/api/login',{{method:'POST',headers:{{'content-type':'application/json'}},body:JSON.stringify({{username:username.value,password:password.value}})}});if(r.ok)location='/';else error.textContent='로그인 실패';}}</script></body></html>"""
+<button class="primary">로그인</button>{tailnet_button}<div id="error" class="err"></div></form>
+<script>if(location.search.includes('tailnet=unavailable'))error.textContent='Tailscale 기기로 확인되지 않았습니다. 비밀번호로 로그인하세요.';
+login.onsubmit=async(e)=>{{e.preventDefault();const r=await fetch('/api/login',{{method:'POST',headers:{{'content-type':'application/json'}},body:JSON.stringify({{username:username.value,password:password.value}})}});if(r.ok)location='/';else error.textContent='로그인 실패';}}</script></body></html>"""
 
 
 _STATUS_KO = {
@@ -371,6 +409,7 @@ def create_app(
     device_service: Any = None,
     collector_token: str | None = None,
     console_data_dir: str | None = None,
+    tailnet: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="All Tomorrow Control Plane", version="0.1.0", lifespan=lifespan)
     state_store = web_state or WebState()
@@ -411,9 +450,44 @@ def create_app(
     async def health() -> dict[str, Any]:
         return {"ok": True, "service": "all-tomorrow", "version": app.version}
 
+    def _session_cookie(response: Response) -> None:
+        response.set_cookie(SESSION_COOKIE, auth.issue(), httponly=True, secure=cookie_secure,
+                            samesite="strict", max_age=auth.ttl_seconds)
+
+    def _tailnet_login(request: Request) -> Response | None:
+        """Log in a request from one of the owner's tailnet devices (see tailnet_auth)."""
+        if tailnet is None:
+            return None
+        # A Secure cookie over plain HTTP would be dropped, looping back to /login.
+        if cookie_secure and request.url.scheme != "https":
+            return None
+        host = request.client.host if request.client else None
+        login = tailnet.login_for(host)
+        if not login:
+            return None
+        import logging
+
+        logging.getLogger(__name__).info("tailnet login: %s from %s", login, host)
+        response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+        _session_cookie(response)
+        response.delete_cookie(NO_AUTO_COOKIE)
+        return response
+
     @app.get("/login", response_class=HTMLResponse)
-    async def login_page() -> str:
-        return _login_page()
+    async def login_page(request: Request) -> Response:
+        # After an explicit logout, stay on the form until the user asks for tailnet login.
+        if not request.cookies.get(NO_AUTO_COOKIE):
+            auto = _tailnet_login(request)
+            if auto:
+                return auto
+        return HTMLResponse(_login_page(tailnet_enabled=tailnet is not None))
+
+    @app.get("/login/tailnet")
+    async def login_tailnet(request: Request) -> Response:
+        auto = _tailnet_login(request)
+        if auto:
+            return auto
+        return RedirectResponse("/login?tailnet=unavailable", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.post("/api/login", status_code=204)
     async def login(payload: LoginRequest, response: Response) -> None:
@@ -435,6 +509,8 @@ def create_app(
     @app.post("/api/logout", status_code=204)
     async def logout(response: Response) -> None:
         response.delete_cookie(SESSION_COOKIE)
+        # Browser-session marker: without it, tailnet login would sign the user straight back in.
+        response.set_cookie(NO_AUTO_COOKIE, "1", httponly=True, secure=cookie_secure, samesite="strict")
 
     @app.post("/api/account/change-password", status_code=204)
     async def change_password(
@@ -770,18 +846,25 @@ def app_from_environment() -> FastAPI:
     edge_token = os.environ.get("ALL_TOMORROW_EDGE_TOKEN")
     # Secure cookies need HTTPS; allow opting out for a plain-HTTP deployment.
     cookie_secure = os.environ.get("ALL_TOMORROW_COOKIE_SECURE", "true").lower() not in {"0", "false", "no"}
-    auth = Auth(username, password, secret, edge_token=edge_token)
+    # Owner-only console reached from the user's own devices: a month-long session by default.
+    ttl_days = float(os.environ.get("ALL_TOMORROW_SESSION_TTL_DAYS", "30"))
+    console_data = os.environ.get("ALL_TOMORROW_CONSOLE_DATA", ".artifacts/console")
+    auth_state = os.environ.get("ALL_TOMORROW_AUTH_STATE") or str(Path(console_data) / "auth-state.json")
+    auth = Auth(username, password, secret, edge_token=edge_token, ttl_seconds=int(ttl_days * 86_400),
+                state_path=auth_state)
+    from all_tomorrow.tailnet_auth import TailnetIdentity
+
+    tailnet = TailnetIdentity.from_environment()
     # PC-side collectors (usage, projects snapshot) push with this token.
     collector_token = os.environ.get("ALL_TOMORROW_COLLECTOR_TOKEN") or os.environ.get("ALL_TOMORROW_USAGE_TOKEN")
     database_url = os.environ.get("ALL_TOMORROW_DATABASE_URL", "")
     upload_dir = os.environ.get("ALL_TOMORROW_UPLOAD_DIR")
     if not database_url:
         return create_app(auth=auth, cookie_secure=cookie_secure, upload_dir=upload_dir,
-                          collector_token=collector_token)
+                          collector_token=collector_token, tailnet=tailnet)
 
     # Durable mode: the web reads and writes the canonical PostgreSQL store.
     from contextlib import asynccontextmanager
-    from pathlib import Path
 
     from all_tomorrow.requests import PostgresRequestStore
     from all_tomorrow.storage.postgres import PostgresStore
@@ -811,6 +894,7 @@ def app_from_environment() -> FastAPI:
         auth=auth, cookie_secure=cookie_secure,
         control=WebControl(semantic, request_store), lifespan=lifespan,
         upload_dir=upload_dir, device_service=device_service, collector_token=collector_token,
+        tailnet=tailnet,
     )
 
 
