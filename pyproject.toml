@@ -21,7 +21,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-  "pytest>=8.3,<9",
+  "pytest>=8.3,<10",
   "pytest-asyncio>=0.24,<1",
 ]
 
@@ -33,7 +33,7 @@ all-tomorrow-usage = "all_tomorrow.usage:main"
 all-tomorrow-mcp = "all_tomorrow.mcp_server:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3,<9", "pytest-asyncio>=0.24,<1"]
+dev = ["pytest>=8.3,<10", "pytest-asyncio>=0.24,<1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
