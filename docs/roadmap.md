@@ -13,6 +13,8 @@
 
 ## 지금 바로 작업 가능한 것
 
+- 2026-10-22 Claude 로그인 오보·파일 보고 답장 보정: **개발완료**(코드·회귀시험). 명시적 User-Agent, 인증 만료와 통신 오류 분리, 파일 답장 보존·메타인지 전달을 구현했다. 실계정·Discord 운영 확인은 별도이며 Stage 1은 개발중을 유지한다. [진행 기록](overseer-plan.md).
+
 Stage 0는 [종료 검증 기록](roadmap/stage-00-assembly/00-close-live-verification.md)에 따라 개발완료다. 지금은 **Stage 1의 메타인지 → Work → 작업자 → 시험 → 반영/되돌림 → 디스코드 보고 고리**를 DP7에서 연결한다. 부품 테스트 통과를 Stage 전체의 운영 완료로 보지 않는다.
 
 - 현재: [DP7 자기개선 고리](dp7-loop.md)의 코드·InMemory 검증과 Eve 양방향 창구 연결, 실제 DB/Discord/재부팅 검증 준비

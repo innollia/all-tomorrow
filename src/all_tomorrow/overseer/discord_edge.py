@@ -62,7 +62,10 @@ def include_discord_edge(app, auth, store):
                 events = await tx.list_events()
                 original = next((e for e in events if str(e.event_id) == parent), None)
                 if original is None:
-                    raise HTTPException(404, "원래 Event 없음")
+                    if not reports.record_reply(default_dir(), payload.reply_to_message_id, payload.model_dump()):
+                        return {"linked": False}
+                    return {"linked": True, "event_id": parent, "approval_granted": False,
+                            "message": "답변을 보고에 기록했습니다. 다음 메타인지에 전달합니다."}
                 duplicate = any(e.type == "discord.question_reply" and
                                 e.payload.get("discord_message_id") == payload.discord_message_id for e in events)
                 if not duplicate:

@@ -106,3 +106,28 @@ def event_for_message(base: Path, message_id: str) -> str | None:
         if message_id in data.get("discord_messages", []):
             return data["id"]
     return None
+
+
+def record_reply(base: Path, message_id: str, reply: dict) -> bool:
+    from datetime import datetime, timezone
+    for path in (base / "reports").glob("*.json"):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if message_id not in data.get("discord_messages", []):
+            continue
+        replies = data.setdefault("replies", [])
+        if not any(r["discord_message_id"] == reply["discord_message_id"] for r in replies):
+            replies.append({**reply, "at": datetime.now(timezone.utc).isoformat(), "approval_granted": False})
+            temp = path.with_suffix(".tmp")
+            temp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            temp.replace(path)
+        return True
+    return False
+
+
+def recent_replies(base: Path, since: str | None) -> list[dict]:
+    result = []
+    for path in (base / "reports").glob("*.json"):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        result.extend({**reply, "report_id": data["id"], "report": data["content"]}
+                      for reply in data.get("replies", []) if not since or reply["at"] > since)
+    return sorted(result, key=lambda r: r["at"], reverse=True)[:60]

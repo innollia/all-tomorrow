@@ -146,6 +146,7 @@ def _cards(con, since: str | None) -> list[dict]:
 def build_snapshot(con, base: Path, *, since: str | None, projects: dict | None, notion: dict | None,
                    peers: dict | None = None) -> dict:
     """``peers`` maps another PC's name to a read-only connection on its published store."""
+    from all_tomorrow.overseer.reports import recent_replies
     sessions = [dict(s, host=host_name()) for s in _changed_sessions(con, since)]
     cards = [dict(c, host=host_name()) for c in _cards(con, since)]
     peer_hosts = {}
@@ -176,6 +177,7 @@ def build_snapshot(con, base: Path, *, since: str | None, projects: dict | None,
         "projects_git": git,
         "notion": {k: v.get("text", "") for k, v in (notion or {}).items()},
         "own_previous_wakes": history,
+        "report_replies": recent_replies(base, since),
     }
 
 
@@ -187,7 +189,7 @@ def nothing_new(snapshot: dict) -> bool:
     # Applying the previous wake is bookkeeping, not fresh evidence for another wake.
     if any(e["at"] > since and e["type"] != "metacog.wake_applied" for e in central.get("events", [])):
         return False
-    return not (snapshot["changed_sessions"] or snapshot["new_cards"] or snapshot["oracle_questions"]
+    return not (snapshot.get("report_replies") or snapshot["changed_sessions"] or snapshot["new_cards"] or snapshot["oracle_questions"]
                 or snapshot["system"]["own_log_errors"])
 
 
@@ -258,6 +260,7 @@ def wake(con, base: Path, *, redact, projects: dict | None, notion: dict | None,
     refs = [s["session"] for s in snapshot["changed_sessions"]]
     refs += [e["ref"] for e in snapshot.get("central", {}).get("events", [])]
     refs += [f"project:{p}" for p in (registry or {})]
+    refs += ["discord:" + r["discord_message_id"] for r in snapshot.get("report_replies", [])]
     snapshot["evidence_refs"] = refs
 
     def record(status: str, reason: str = "", obs=None, acts=None, raw: str = "", chars: int = 0) -> dict:

@@ -17,11 +17,13 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+CLAUDE_USER_AGENT = "claude-cli/2.0 (external, cli)"
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 _CLAUDE_TIERS = {"default_claude_max_20x": "Max 20x", "default_claude_max_5x": "Max 5x"}
 _CLAUDE_LIMIT_LABELS = {"session": "5-hour", "weekly_all": "Weekly"}
@@ -57,31 +59,58 @@ def claude_windows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return windows
 
 
+class ClaudeLoginRequired(ValueError):
+    pass
+
+
+def _claude_failure(entry: dict, error: Exception, phase: str) -> dict:
+    # Never retain response text, URLs, exception messages, or credential values.
+    reason = type(error).__name__
+    if isinstance(error, ClaudeLoginRequired):
+        entry["status"] = "needs_login"
+        reason = "missing_refresh_token"
+    elif isinstance(error, urllib.error.HTTPError):
+        reason = f"http_{error.code}"
+        try:
+            payload = json.loads(error.read(8192))
+            code = payload.get("error")
+            if isinstance(code, dict):
+                code = code.get("type")
+        except (ValueError, OSError, AttributeError):
+            code = None
+        if 400 <= error.code < 500 and code in ("invalid_grant", "invalid_token", "token_expired"):
+            entry["status"] = "needs_login"
+            reason += ":" + code
+    entry["error"] = phase + ":" + reason
+    return entry
+
+
 def collect_claude(home: Path) -> dict[str, Any]:
     entry: dict[str, Any] = {"id": "claude", "name": "Claude", "plan": None, "status": "error", "observed_at": _now(), "windows": []}
     try:
         oauth = json.loads((home / ".claude" / ".credentials.json").read_text(encoding="utf-8"))["claudeAiOauth"]
-    except (OSError, KeyError, ValueError):
+    except FileNotFoundError:
         entry["status"] = "not_logged_in"
         return entry
+    except (OSError, KeyError, ValueError) as error:
+        return _claude_failure(entry, error, "credentials")
     entry["plan"] = _CLAUDE_TIERS.get(oauth.get("rateLimitTier"), oauth.get("subscriptionType"))
     if int(oauth.get("expiresAt", 0)) <= int(time.time() * 1000):
         # CLI가 새로 저장한 토큰과 경쟁하지 않도록 파일 교체 직전에 다시 확인한다.
         try:
             oauth = refresh_claude(home, oauth)
-        except Exception:
-            entry["status"] = "needs_login"
-            return entry
+        except Exception as error:
+            return _claude_failure(entry, error, "refresh")
     request = urllib.request.Request(
         CLAUDE_USAGE_URL,
-        headers={"Authorization": f"Bearer {oauth['accessToken']}", "anthropic-beta": "oauth-2025-04-20"},
+        headers={"Authorization": f"Bearer {oauth['accessToken']}", "anthropic-beta": "oauth-2025-04-20",
+                 "User-Agent": CLAUDE_USER_AGENT},
     )
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
             payload = json.loads(response.read().decode())
     except Exception as error:  # noqa: BLE001 - surfaced as status, never raised to the pusher
-        entry["error"] = type(error).__name__
-        return entry
+        return _claude_failure(entry, error, "usage")
     entry["windows"] = claude_windows(payload)
     entry["status"] = "connected"
     return entry
@@ -94,11 +123,11 @@ def refresh_claude(home: Path, oauth: dict) -> dict:
     if current != oauth:
         return current
     if not oauth.get("refreshToken"):
-        raise ValueError("Claude 재로그인 필요")
+        raise ClaudeLoginRequired("Claude 재로그인 필요")
     request = urllib.request.Request("https://platform.claude.com/v1/oauth/token",
         data=json.dumps({"grant_type": "refresh_token", "refresh_token": oauth["refreshToken"],
                          "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e"}).encode(),
-        headers={"content-type": "application/json"}, method="POST")
+        headers={"content-type": "application/json", "User-Agent": CLAUDE_USER_AGENT}, method="POST")
     with urllib.request.urlopen(request, timeout=15) as response:
         fresh = json.loads(response.read().decode())
     updated = {**oauth, "accessToken": fresh["access_token"],

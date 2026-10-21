@@ -249,6 +249,8 @@
 
 ### DP7 자기개선 고리 연결 (2026-10-21)
 
+- 2026-10-22 로그인 오보·답장 보정: **개발완료**(코드·회귀시험). Claude 갱신·사용량 요청에 명시적 User-Agent를 넣고 실제 인증 거부와 차단·통신·파일 오류를 분리해 비밀값 없는 이유를 중앙에도 보존했다. 파일 보고를 Event로만 찾던 404 경로를 확인·수정했으며 답장을 중복 없이 원자 저장하고 다음 메타인지 스냅샷·깨움·근거 참조에 연결했다. 모르는 메시지는 200/linked=false다. 최종 관련 **33 passed**, 전체 **763 passed / 69 skipped / 1 failed**(기존 `test_opencode_cli_help_smoke`: npx 60초 timeout). 기본 tmp/cache 권한 오류로 지정 DP7 Python에 `--basetemp`·`-o cache_dir`만 추가했으며 시험 제거·skip 변경은 없다. Jev 설치가 없어 diff·회귀시험으로 검토했고 공백 검사도 통과했다. Eve 수정·커밋·운영 재시작은 하지 않았으며 실계정·Discord 운영 확인은 남았다.
+
 - 2026-10-21 Eve 창구 연결: 기존 edge 토큰으로 보고 파일 재전송·Event 답장·LLM 선판단 후 중앙 Goal 요청을 연결하고 `scripts/dp7-eve-{up,run}.ps1`을 추가했다(미실행). 관련 Python 24 passed, Eve 연결 4 passed; 전체 Python 723 passed / 69 skipped / 기존 OpenCode CLI smoke 1 failed. 실제 Discord·Postgres·재부팅은 확인 전이며 운영 명령과 변경 파일은 [DP7 문서](dp7-loop.md)에 기록했다.
 
 - 메타인지가 운영 문제를 판단해 기존 validate_decision → DecisionMaterializer → lineage/BudgetLedger로 Goal/Work를 만든다. 문제 키 중복·하루 생성 예산·영속 provenance는 기존 semantic store의 Event와 PostgreSQL advisory transaction으로 묶었다.

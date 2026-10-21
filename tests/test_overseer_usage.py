@@ -104,3 +104,70 @@ def test_blank_pool_value_can_be_filled_without_restarting_reporter(tmp_path, mo
     import os
     assert os.environ[name] == "test-only-value"
     monkeypatch.delenv(name)
+
+
+@pytest.mark.parametrize("phase", ["refresh", "usage"])
+@pytest.mark.parametrize("code,body,status,reason", [
+    (403, b"error code: 1010 secret", "error", "http_403"),
+    (400, b'{"error":"invalid_grant","description":"secret"}', "needs_login", "http_400:invalid_grant"),
+    (401, b'{"error":{"type":"invalid_token"}}', "needs_login", "http_401:invalid_token"),
+    (429, b"secret", "error", "http_429"),
+    (500, b'{"error":"invalid_grant"}', "error", "http_500"),
+    (None, b"", "error", "URLError"),
+])
+def test_claude_failures_only_request_login_for_auth_rejection(tmp_path, monkeypatch, phase, code, body, status, reason):
+    import io
+    import urllib.error
+    path = tmp_path / ".claude/.credentials.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"claudeAiOauth": {"accessToken": "secret", "refreshToken": "secret",
+                                               "expiresAt": 1 if phase == "refresh" else 9999999999999}}))
+    def fail(request, **kwargs):
+        assert request.get_header("User-agent") == usage.CLAUDE_USER_AGENT
+        if code is None:
+            raise urllib.error.URLError("secret")
+        raise urllib.error.HTTPError(request.full_url, code, "secret", {}, io.BytesIO(body))
+    monkeypatch.setattr(usage.urllib.request, "urlopen", fail)
+    result = usage.collect_claude(tmp_path)
+    assert result["status"] == status
+    assert result["error"] == phase + ":" + reason
+    assert "secret" not in json.dumps(result)
+
+
+def test_claude_refresh_and_usage_send_user_agent(tmp_path, monkeypatch):
+    path = tmp_path / ".claude/.credentials.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"claudeAiOauth": {"accessToken": "old", "refreshToken": "refresh", "expiresAt": 1}}))
+    requests = []
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self):
+            return (b'{"access_token":"fresh","expires_in":3600}' if len(requests) == 1
+                    else b'{"five_hour":{"utilization":7}}')
+    def open_request(request, **kwargs):
+        requests.append(request)
+        assert request.get_header("User-agent") == usage.CLAUDE_USER_AGENT
+        return Response()
+    monkeypatch.setattr(usage.urllib.request, "urlopen", open_request)
+    result = usage.collect_claude(tmp_path)
+    assert result["status"] == "connected" and result["windows"][0]["percent"] == 7
+    assert len(requests) == 2
+
+
+def test_claude_missing_refresh_token_requires_login(tmp_path):
+    path = tmp_path / ".claude/.credentials.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"claudeAiOauth": {"accessToken": "secret", "expiresAt": 1}}))
+    result = usage.collect_claude(tmp_path)
+    assert result["status"] == "needs_login"
+    assert result["error"] == "refresh:missing_refresh_token"
+
+
+def test_unreadable_claude_credentials_do_not_request_login(tmp_path, monkeypatch):
+    def fail(*args, **kwargs):
+        raise PermissionError("secret")
+    monkeypatch.setattr(Path, "read_text", fail)
+    result = usage.collect_claude(tmp_path)
+    assert result["status"] == "error"
+    assert result["error"] == "credentials:PermissionError"

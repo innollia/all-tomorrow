@@ -30,6 +30,7 @@ class UsageProvider(BaseModel):
     name: str = Field(max_length=64)
     plan: str | None = Field(default=None, max_length=64)
     status: str = Field(max_length=32)
+    error: str | None = Field(default=None, max_length=128)
     observed_at: str | None = Field(default=None, max_length=64)
     windows: list[UsageWindow] = Field(default_factory=list, max_length=10)
 

@@ -28,6 +28,10 @@ def test_usage_ingest_requires_collector_token_and_is_shown_after_login(tmp_path
         assert client.get("/api/usage").status_code == 401
         client.post("/api/login", json={"username": "owner", "password": "correct horse"})
         assert client.get("/api/usage").json()["providers"][0]["windows"][0]["percent"] == 3
+        failed = {**SNAPSHOT, "providers": [{**SNAPSHOT["providers"][0], "status": "error", "error": "refresh:http_403"}]}
+        assert client.post("/internal/usage", json=failed,
+                           headers={"authorization": "Bearer collector-secret"}).status_code == 204
+        assert client.get("/api/usage").json()["providers"][0]["error"] == "refresh:http_403"
         assert "/static/console/pages/usage.js" in client.get("/").text
         assert 'AT.pages["/usage"]' in client.get("/static/console/pages/usage.js").text
     assert UsageStore(tmp_path / "usage" / "usage.json").snapshot["providers"][0]["plan"] == "Max 20x"

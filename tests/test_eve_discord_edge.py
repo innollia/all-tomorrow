@@ -76,3 +76,42 @@ def test_eve_default_never_uses_webhook(tmp_path, monkeypatch):
     reports.enqueue(tmp_path, "evt", "보고")
     assert reports.flush(tmp_path, post=lambda *a, **k: (_ for _ in ()).throw(AssertionError())) == 0
     assert reports.pending(tmp_path)[0]["event_id"] == "evt"
+
+
+def test_file_report_reply_is_durable_idempotent_and_visible_to_metacog(tmp_path, monkeypatch):
+    import json
+    from all_tomorrow.overseer import metacog
+    from all_tomorrow.overseer.store import SessionStore
+    monkeypatch.setenv("ALL_TOMORROW_OVERSEER_DIR", str(tmp_path))
+    monkeypatch.setenv("DISCORD_OWNER_USER_ID", "123")
+    store = InMemoryGoalWorkRunStore()
+    reports.enqueue(tmp_path, "login-claude-2026-10-22", "[질문] 다시 로그인 필요")
+    assert reports.acknowledge(tmp_path, "login-claude-2026-10-22", 0, "900")
+    app = create_app(auth=Auth("owner", "password", "s" * 32, edge_token="secret"), control=WebControl(store))
+    headers = {"Authorization": "Bearer secret"}
+    body = {"discord_user_id": "123", "discord_message_id": "901", "reply_to_message_id": "900", "text": "이미 로그인했어"}
+    with TestClient(app) as client:
+        assert client.post("/internal/edge/discord/reply", headers=headers,
+                           json={**body, "discord_user_id": "other"}).status_code == 403
+        for _ in range(2):
+            response = client.post("/internal/edge/discord/reply", headers=headers, json=body)
+            assert response.status_code == 200
+            assert response.json()["linked"] is True
+            assert response.json()["approval_granted"] is False
+            assert response.json()["message"]
+        unknown = client.post("/internal/edge/discord/reply", headers=headers,
+                              json={**body, "reply_to_message_id": "999"})
+        assert unknown.status_code == 200 and unknown.json() == {"linked": False}
+    data = json.loads((tmp_path / "reports/login-claude-2026-10-22.json").read_text(encoding="utf-8"))
+    assert len(data["replies"]) == 1 and data["replies"][0]["text"] == body["text"]
+    assert reports.pending(tmp_path) == []
+    sessions = SessionStore(tmp_path / "sessions.sqlite")
+    try:
+        snap = metacog.build_snapshot(sessions.con, tmp_path, since=None, projects=None, notion=None)
+        assert snap["report_replies"][0]["report_id"] == data["id"]
+        assert not metacog.nothing_new(snap)
+        next_snap = metacog.build_snapshot(sessions.con, tmp_path, since=data["replies"][0]["at"], projects=None, notion=None)
+        assert next_snap["report_replies"] == [] and metacog.nothing_new(next_snap)
+    finally:
+        sessions.close()
+    assert asyncio.run(store.list_events()) == []
