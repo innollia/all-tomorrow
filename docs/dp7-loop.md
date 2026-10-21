@@ -2,6 +2,32 @@
 
 상태: **개발중**. 코드와 InMemory 고리 시험이 있으며, 실제 Postgres·Discord·재부팅 뒤 운영은 확인 전이다. 예약 작업 등록 스크립트는 이번 작업에서 실행하지 않았다. 사용자가 아무 요청을 하지 않았는데 발견·수정 보고가 디스코드에 도착해야 실제 운영 완료다.
 
+## 2026-10-21 Work 실패·무변경 깨어남 보정
+
+상태: **개발중**. 코드 수정·로컬 회귀 검증 후, 관제의 재등록과 실제 Work 성공·재기동 검증을 기다린다. 운영 예약 작업과 기존 실패 Work는 변경하지 않았다.
+
+- **확인:** runtime의 `force=True`가 무변경 검사를 무시했다. 이를 제거하고 직전 판단의 `metacog.wake_applied`도 새 근거에서 제외했다. 열린 PENDING/RUNNING Work와 새 실패·세션·카드·질문·중앙 이벤트는 계속 판단한다. 사용량 스케줄은 간격만 정한다.
+- **확인:** CLI 실패 결과가 버려졌고 adapter 예외·편집안 파싱 오류는 다음 작업자 시도를 중단했다. 작업자별 실패를 기록하고 fallback을 이어가며, 성공 응답만 있고 변경 파일이 없어도 실패로 처리한다. 무료 모델의 JSON 예시도 올바른 문법으로 고쳤다. 부분 편집은 다음 작업자에게 넘기지 않는다.
+- **실제 재현/한계:** Codex adapter는 현재 sandbox에서 exit 1 / `Could not find home directory`로 종료했다. 운영 중 두 Work의 Codex 실패와 같은 원인인지는 미확정이다. agy는 PATH에서 발견되지 않았으며 기존 탐색에 없던 `Microsoft/WinGet/Links/agy.exe`를 추가했다. PowerShell은 설치 경로를 보지만 sandbox의 Python lstat은 WinError 5로 거부돼 실제 agy 실행은 미확인이다. 임시 WinGet 경로 탐색 시험은 통과했다. CLI 권한 경계는 유지했다([OpenAI CLI 옵션 문서](https://learn.chatgpt.com/docs/cli/reference)).
+- **추론/미확정:** 기존 executor.log의 gateway HTTP 200과 최종 LLMError는 `apply_edits → parse_json`의 JSON 파싱 실패 경로에 부합한다. 응답과 앞 CLI 오류가 유실돼 구체적 원인을 소급 확정할 수 없다. 운영 `execute_pending` 호출자는 runtime executor 분기 하나이고 두 요청이 executor.log에 있으므로 executor 경로 실행이 근거에 맞는다. 당시 예약 작업 인스턴스/PID·보고된 `0xC000013A`의 종료 원인은 미확정이다. 예약 작업·프로세스 명령줄·TaskScheduler 이력 조회가 sandbox에서 제한됐다.
+- **진단:** 종료 코드·가린 stderr/오류 요약·시간 초과·작업/심사/시험/반영 단계는 executor.log, 사본 옆 `worker-attempts.json`, `metacog.execution_attempt` 및 run_finished/rolled_back/applied payload에 남긴다. 보고에도 요약하며 재시작 복구는 보관된 진단을 Event/보고로 옮긴다. 시험 출력은 임시 파일에서 가린 끝부분만 보관한다. runtime 시작과 run_started에 PID/부모 PID도 기록한다.
+- **등록/언어:** executor·overseer는 Interactive/Limited와 1분 반복 재기동 트리거를 사용한다. 기존 무제한 실행·실패 재시작·IgnoreNew·파일 singleton은 유지하며 API·collect는 S4U다. 한국어 지시는 기존에도 있었으며 모든 자연어 필드와 중국어 표현의 번역을 더 명시했다. 실제 언어 준수·로그인/재부팅 뒤 유지 여부는 다음 운영 검증 대상이다.
+
+최종 시험: 신규 회귀 **19건**, 관련 **64 passed**. 전체 DP7 Python 실행 **747 passed, 69 skipped, 1 failed**(79.47초). 실패는 기존 `test_opencode_cli_help_smoke` 외부 npx 실행이며 Antigravity smoke는 PATH에서 찾지 못해 skip됐다. 원본은 `.artifacts/pytest-hands-full.txt`다. 지정 `.venv/Scripts/python.exe`는 `Unable to create process using`으로 시작조차 못 해 기존 DP7 Python으로 실행했다. venv 설정과 테스트 skip 조건은 변경하지 않았다. Jev 외부 검토 checkout이 없어 diff·회귀시험으로 검토했다. 커밋하지 않았다.
+
+관제 명령(관리자 PowerShell, 진행 중 Work가 있으면 종료 후 실행):
+
+```powershell
+Set-Location C:\projects\all-tomorrow
+'executor','overseer' | ForEach-Object { Stop-ScheduledTask -TaskName "AllTomorrow-DP7-$_" }
+.\scripts\dp7-up.ps1
+Get-ScheduledTask -TaskName 'AllTomorrow-DP7-executor','AllTomorrow-DP7-overseer' |
+    Select-Object TaskName,State,@{n='LogonType';e={$_.Principal.LogonType}}
+Get-Content "$env:USERPROFILE\.all-tomorrow\overseer\executor.log" -Tail 30
+```
+
+이전 프로세스를 재시작해야 코드가 적용된다. 다음 Work의 진단, 중단 뒤 1분 트리거의 재기동, 무변경 때 Codex 미호출을 확인한다. 기존 실패 Work를 자동 재실행하지 않는다.
+
 메타인지는 Codex로 판단하고 기존 `validate_decision`과 `DecisionMaterializer`로 Goal/Work를 만든다. 별도 실행기가 기존 CLI adapter를 Codex → Antigravity → 무료 gateway(`g-fast`) 순으로 사용한다. Kiro·OpenCode·노트북은 이 고리의 작업자가 아니다. 사용자 개별 세션의 직접 요청은 새 Work로 복제하지 않는다.
 
 ## 저장과 경계

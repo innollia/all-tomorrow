@@ -93,7 +93,7 @@ async def serve(component: str, base: Path):
                     delay, reason = wake_delay(snapshot, idle)
                     if delay is not None and time.monotonic() >= next_wake:
                         log.info("메타인지: %s", reason)
-                        await with_store(lambda store: observe_once(store, sessions, base, force=True, usage=snapshot))
+                        await with_store(lambda store: observe_once(store, sessions, base, usage=snapshot))
                         next_wake = time.monotonic() + delay
             except Exception as error:
                 log.warning("%s 실행 실패: %s", component, type(error).__name__)
@@ -114,6 +114,7 @@ def main(argv=None):
     logging.basicConfig(filename=base / (args.component + ".log"), encoding="utf-8", level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     with singleton(base / (args.component + ".lock")):
+        log.info("runtime started component=%s pid=%s parent_pid=%s", args.component, os.getpid(), os.getppid())
         if args.component == "api":
             if not os.environ.get("ALL_TOMORROW_DATABASE_URL"):
                 raise ValueError("DP7 백엔드는 PostgreSQL 설정이 필요합니다")

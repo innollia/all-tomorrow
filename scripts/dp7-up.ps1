@@ -26,6 +26,7 @@ foreach ($name in @('ALL_TOMORROW_DATABASE_URL', 'ALL_TOMORROW_ADMIN_USER', 'ALL
 if ($LASTEXITCODE -ne 0) { throw '이 PC 전용 Python 환경에 프로젝트 의존성을 설치해야 합니다.' }
 $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType S4U -RunLevel Limited
+$interactive = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
 $triggers = @((New-ScheduledTaskTrigger -AtStartup), (New-ScheduledTaskTrigger -AtLogOn -User $user))
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew `
     -RestartCount 99 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) `
@@ -35,17 +36,24 @@ foreach ($component in @('api', 'executor', 'overseer', 'collect')) {
     $arguments = '-m all_tomorrow.overseer.runtime ' + $component
     $action = New-ScheduledTaskAction -Execute $Python -Argument $arguments -WorkingDirectory $Repo
     $taskTriggers = $triggers
+    $taskPrincipal = $principal
+    if ($component -in @('executor', 'overseer')) {
+        # CLI login and the Windows sandbox runner need the logged-in user session.
+        $taskPrincipal = $interactive
+        # Also recover from explicit console termination (0xC000013A), which may not trigger RestartCount.
+        $taskTriggers += New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+            -RepetitionInterval (New-TimeSpan -Minutes 1)
+    }
     if ($component -eq 'collect') {
         $taskTriggers += New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
             -RepetitionInterval (New-TimeSpan -Hours 1)
     }
     Register-ScheduledTask -TaskName "$TaskPrefix-$component" -Action $action -Trigger $taskTriggers `
-        -Principal $principal -Settings $settings -Force | Out-Null
+        -Principal $taskPrincipal -Settings $settings -Force | Out-Null
     Start-ScheduledTask -TaskName "$TaskPrefix-$component"
 }
 Write-Host '웹 API(127.0.0.1:5476), 작업 실행기, 메타인지, 기록 수집을 등록·시작했습니다.'
 $activityAction = New-ScheduledTaskAction -Execute $Python -Argument '-m all_tomorrow.overseer.runtime activity' -WorkingDirectory $Repo
-$interactive = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
 Register-ScheduledTask -TaskName "$TaskPrefix-activity" -Action $activityAction `
     -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $user) -Principal $interactive -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName "$TaskPrefix-activity"

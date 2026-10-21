@@ -1,5 +1,7 @@
 # Stage 1.4 — Runtime Placement and Tool Surface
 
+2026-10-21 DP7 실행기 보정: **개발중**(관제 재등록·운영 검증 대기). Interactive 등록·1분 재기동, WinGet agy 탐색, 작업자별 실패 진단·fallback을 수정했다. 관련 64 passed, 전체 747 passed / 69 skipped / 기존 OpenCode smoke 1 failed. [근거·운영 명령](../../dp7-loop.md#2026-10-21-work-실패무변경-깨어남-보정).
+
 ## Status
 
 - 상태: **개발중**

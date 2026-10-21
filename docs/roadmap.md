@@ -16,6 +16,7 @@
 Stage 0는 [종료 검증 기록](roadmap/stage-00-assembly/00-close-live-verification.md)에 따라 개발완료다. 지금은 **Stage 1의 메타인지 → Work → 작업자 → 시험 → 반영/되돌림 → 디스코드 보고 고리**를 DP7에서 연결한다. 부품 테스트 통과를 Stage 전체의 운영 완료로 보지 않는다.
 
 - 현재: [DP7 자기개선 고리](dp7-loop.md)의 코드·InMemory 검증과 Eve 양방향 창구 연결, 실제 DB/Discord/재부팅 검증 준비
+- 2026-10-21 Work 실패·무변경 깨어남 보정: **개발중**. 작업자 진단·fallback, 무변경 검사, Interactive 등록/재기동 수정. 관련 64 passed, 전체 747 passed / 69 skipped / 기존 OpenCode smoke 1 failed. 관제 재등록·실제 Work 성공 검증은 남았다. [근거와 명령](dp7-loop.md#2026-10-21-work-실패무변경-깨어남-보정).
 - 다음: 사용자가 넣은 비밀값으로 관제가 예약 작업을 등록하고 자발적인 수정 보고를 확인
 
 Stage 0가 끝나기 전에는 새 durable queue, lease/heartbeat, LLM client, agent framework를 직접 구현하지 않는다.

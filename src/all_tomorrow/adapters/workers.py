@@ -77,13 +77,15 @@ def _attach_windows_job(proc) -> None:
         raise OSError("Windows 작업 프로세스 격리 실패") from error
 
 
-async def _read_bounded(proc: asyncio.subprocess.Process, limit: int) -> tuple[bytes, bytes]:
+async def _read_bounded(proc: asyncio.subprocess.Process, limit: int, diagnostics=None) -> tuple[bytes, bytes]:
     size = 0
 
     async def read(stream: asyncio.StreamReader) -> bytes:
         nonlocal size
         chunks = []
         while chunk := await stream.read(65536):
+            if diagnostics is not None and stream is proc.stderr:
+                diagnostics["stderr"] = (diagnostics["stderr"] + chunk)[-8000:]
             size += len(chunk)
             if size > limit:
                 raise OutputLimitError(f"Output exceeds {limit} bytes")
@@ -235,6 +237,19 @@ async def _run_process_safe(
     Returns (stdout_str, duration_ms) on process success (exit code 0 and non-empty output),
     or WorkerResult on any failure.
     """
+    diagnostics = {"stderr": b""}
+    proc = None
+
+    def failure(status, error):
+        stderr = _sanitize_error(diagnostics["stderr"].decode("utf-8", errors="replace"))
+        for key, value in env.items():
+            if value and any(part in key.upper() for part in ("KEY", "TOKEN", "SECRET", "PASSWORD")):
+                stderr = stderr.replace(value, "<REDACTED>")
+        return WorkerResult(request.request_id, request.trace_id, status,
+            payload={"exit_code": proc.returncode if proc else None, "stderr": stderr,
+                     "timed_out": status == WorkerStatus.TIMEOUT},
+            duration_ms=int((time.perf_counter() - start_time) * 1000), error=_sanitize_error(error))
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -246,49 +261,28 @@ async def _run_process_safe(
             **({"start_new_session": True} if os.name != "nt" else {}),
         )
     except FileNotFoundError:
-        duration_ms = int((time.perf_counter() - start_time) * 1000)
-        return WorkerResult(
-            request_id=request.request_id,
-            trace_id=request.trace_id,
-            status=WorkerStatus.EXECUTABLE_NOT_FOUND,
-            duration_ms=duration_ms,
-            error=_sanitize_error(f"Executable not found: {cmd[0]}"),
-        )
+        return failure(WorkerStatus.EXECUTABLE_NOT_FOUND, f"Executable not found: {cmd[0]}")
     except OSError as error:
-        return WorkerResult(
-            request_id=request.request_id, trace_id=request.trace_id,
-            status=WorkerStatus.FAILED,
-            error=_sanitize_error(error),
-        )
+        return failure(WorkerStatus.FAILED, error)
 
     try:
         _attach_windows_job(proc)
         stdout, stderr = await asyncio.wait_for(
-            _read_bounded(proc, output_limit_bytes),
+            _read_bounded(proc, output_limit_bytes, diagnostics),
             timeout=timeout_seconds,
         )
     except asyncio.TimeoutError:
         await _stop_process(proc)
-        duration_ms = int((time.perf_counter() - start_time) * 1000)
-        return WorkerResult(
-            request_id=request.request_id,
-            trace_id=request.trace_id,
-            status=WorkerStatus.TIMEOUT,
-            duration_ms=duration_ms,
-            error=f"{worker_name} process timed out after {timeout_seconds}s",
-        )
+        return failure(WorkerStatus.TIMEOUT, f"{worker_name} process timed out after {timeout_seconds}s")
     except asyncio.CancelledError:
         await _stop_process(proc)
         raise
     except OutputLimitError as error:
         await _stop_process(proc)
-        return WorkerResult(request.request_id, request.trace_id, WorkerStatus.OUTPUT_TOO_LARGE,
-                            duration_ms=int((time.perf_counter() - start_time) * 1000),
-                            error=str(error))
+        return failure(WorkerStatus.OUTPUT_TOO_LARGE, error)
     except OSError as error:
         await _stop_process(proc)
-        return WorkerResult(request.request_id, request.trace_id, WorkerStatus.FAILED,
-                            error=_sanitize_error(error))
+        return failure(WorkerStatus.FAILED, error)
     finally:
         job = getattr(proc, "_windows_job", None)
         if job is not None:
@@ -302,13 +296,7 @@ async def _run_process_safe(
     # Combined output limit accounts for stdout plus stderr
     combined_bytes = len(stdout) + len(stderr)
     if combined_bytes > output_limit_bytes:
-        return WorkerResult(
-            request_id=request.request_id,
-            trace_id=request.trace_id,
-            status=WorkerStatus.OUTPUT_TOO_LARGE,
-            duration_ms=duration_ms,
-            error=f"Output exceeds {output_limit_bytes} bytes",
-        )
+        return failure(WorkerStatus.OUTPUT_TOO_LARGE, f"Output exceeds {output_limit_bytes} bytes")
 
     # Non-zero exit code: redact stderr secrets
     if proc.returncode != 0:
@@ -319,22 +307,10 @@ async def _run_process_safe(
                 if value and any(part in key.upper() for part in ("KEY", "TOKEN", "SECRET", "PASSWORD")):
                     sanitized_stderr = sanitized_stderr.replace(value, "<REDACTED>")
             err_msg = f"{err_msg}: {sanitized_stderr}"
-        return WorkerResult(
-            request_id=request.request_id,
-            trace_id=request.trace_id,
-            status=WorkerStatus.FAILED,
-            duration_ms=duration_ms,
-            error=_sanitize_error(err_msg),
-        )
+        return failure(WorkerStatus.FAILED, err_msg)
 
     if not stdout_str.strip():
-        return WorkerResult(
-            request_id=request.request_id,
-            trace_id=request.trace_id,
-            status=WorkerStatus.EMPTY_OUTPUT,
-            duration_ms=duration_ms,
-            error=f"{worker_name} produced empty output",
-        )
+        return failure(WorkerStatus.EMPTY_OUTPUT, f"{worker_name} produced empty output")
 
     return stdout_str, duration_ms
 
@@ -411,8 +387,9 @@ class CodexWorker:
 
     def parse_output(self, output: str) -> dict[str, Any]:
         events = _json_records(output)
-        if any(e.get("type") in {"error", "turn.failed"} for e in events):
-            raise WorkerError("Codex reported a failed turn")
+        failures = [e for e in events if e.get("type") in {"error", "turn.failed"}]
+        if failures:
+            raise WorkerError("Codex reported a failed turn: " + json.dumps(failures, ensure_ascii=False))
         if events[-1].get("type") != "turn.completed":
             raise ValueError("Codex stream ended without turn.completed")
         messages = [e["item"]["text"] for e in events
@@ -446,6 +423,7 @@ class CodexWorker:
             return WorkerResult(request.request_id, request.trace_id,
                                 WorkerStatus.FAILED if isinstance(error, WorkerError)
                                 else WorkerStatus.INVALID_OUTPUT,
+                                payload={"exit_code": 0, "stderr": "", "timed_out": False},
                                 duration_ms=duration, error=_sanitize_error(error))
         return WorkerResult(request.request_id, request.trace_id, WorkerStatus.SUCCESS,
                             payload=payload, duration_ms=duration)
@@ -579,7 +557,8 @@ class AntigravityWorker:
                 if payload.get("status") not in (None, "SUCCESS"):
                     return WorkerResult(
                         request.request_id, request.trace_id, WorkerStatus.FAILED,
-                        duration_ms=duration_ms, error="Antigravity reported a failed turn")
+                        payload={"exit_code": 0, "stderr": "", "timed_out": False},
+                        duration_ms=duration_ms, error=_sanitize_error("Antigravity reported a failed turn: " + json.dumps(payload)))
                 if payload.get("status") == "SUCCESS" and (
                     not isinstance(payload.get("response"), str) or not payload["response"].strip()
                 ):
@@ -589,6 +568,7 @@ class AntigravityWorker:
                     request_id=request.request_id,
                     trace_id=request.trace_id,
                     status=WorkerStatus.INVALID_OUTPUT,
+                    payload={"exit_code": 0, "stderr": "", "timed_out": False},
                     duration_ms=duration_ms,
                     error=_sanitize_error(e),
                 )

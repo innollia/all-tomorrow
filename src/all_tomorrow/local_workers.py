@@ -39,6 +39,8 @@ def discover_executable(worker_id: str) -> str | None:
         "opencode": "npm-cache/_npx/*/node_modules/opencode-ai/bin/opencode.exe",
     }
     candidates = [p for p in local.glob(patterns[worker_id]) if p.is_file()]
+    if worker_id == "antigravity":
+        candidates += [p for p in local.glob("Microsoft/WinGet/Links/agy.exe") if p.is_file()]
     return str(max(candidates, key=lambda p: p.stat().st_mtime)) if candidates else None
 
 

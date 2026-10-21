@@ -53,6 +53,7 @@ def test_windows_web_uses_selector(monkeypatch, dual):
 def test_worker_subprocess_uses_proactor(monkeypatch, tmp_path):
     from all_tomorrow.overseer.loop import run_worker
     from all_tomorrow import local_workers
+    from all_tomorrow.contracts import WorkerResult, WorkerStatus
     import json
 
     config = tmp_path / 'workers.json'
@@ -73,14 +74,16 @@ def test_worker_subprocess_uses_proactor(monkeypatch, tmp_path):
             )
             stdout, _ = await child.communicate()
             assert child.returncode == 0 and stdout.strip() == b'42'
-            raise RuntimeError('worker loop reached')
+            (tmp_path / 'proof.txt').write_text('42')
+            return WorkerResult('req', 'trace', WorkerStatus.SUCCESS,
+                payload={'response': '{"edits":[{"file":"proof.txt","content":"42"}]}'})
 
     def adapters(config):
         return {'antigravity': Adapter()}
 
     monkeypatch.setattr(local_workers, 'configured_adapters', adapters)
-    with pytest.raises(RuntimeError, match='worker loop reached'):
-        run_async(run_worker({'project_id': 'test', 'objective': 'test'}, tmp_path))
+    result = run_async(run_worker({'project_id': 'test', 'objective': 'test'}, tmp_path))
+    assert result['worker'] == 'antigravity'
     assert len(seen) == 1
     assert isinstance(seen[0], asyncio.ProactorEventLoop)
 

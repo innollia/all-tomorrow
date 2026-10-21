@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -25,6 +26,35 @@ from all_tomorrow.overseer.workspace import ProjectChange, digest, tree
 ACTOR = "metacog"
 PROMPT_VERSION = "dp7-loop-1"
 DAILY_WORK_LIMIT = 96
+log = logging.getLogger("all_tomorrow.overseer")
+
+
+class WorkerExecutionError(RuntimeError):
+    def __init__(self, attempts):
+        self.attempts = attempts
+        super().__init__("모든 작업자가 실패했습니다")
+
+
+def diagnostic(worker, stage, *, status="FAILED", error="", exit_code=None, stderr="", timed_out=False,
+               duration_ms=0, redact=None):
+    from all_tomorrow.adapters.workers import _sanitize_error
+    from all_tomorrow.overseer.redact import Redactor, default_secret_files
+    redact = redact or Redactor.from_files(default_secret_files(Path.home()))
+    clean = lambda value: redact(_sanitize_error(str(value or "")))[-2000:]
+    return {"worker": worker, "stage": stage, "status": status, "error": clean(error),
+            "exit_code": exit_code, "stderr": clean(stderr), "timed_out": timed_out,
+            "duration_ms": duration_ms, "pid": os.getpid()}
+
+
+def exception_diagnostic(worker, stage, error, redact=None):
+    import httpx
+    return diagnostic(worker, stage, error=f"{type(error).__name__}: {error}",
+        exit_code=getattr(error, "returncode", None), stderr=getattr(error, "stderr", ""),
+        timed_out=isinstance(error, (TimeoutError, subprocess.TimeoutExpired, httpx.TimeoutException)), redact=redact)
+
+
+def log_diagnostic(item):
+    log.info("실행 진단 %s", json.dumps(item, ensure_ascii=False))
 
 
 def event(kind: str, **kwargs) -> SemanticEvent:
@@ -163,39 +193,77 @@ async def run_worker(task: dict, candidate: Path) -> dict:
     prompt = ("등록된 프로젝트의 운영 문제를 사본에서 고친다. 한국어로 보고한다. 커밋·삭제·비밀값 접근·"
               "권한/비용 확대·창작 방향 변경은 금지. 시험과 제어 경계는 변경하지 마라. "
               "범위를 벗어나야 하면 변경 없이 질문을 남겨라.\n" + task["objective"])
+    attempts = []
+    baseline = tree(candidate)
+
+    def record(item):
+        from all_tomorrow.overseer.workspace import save
+        attempts.append(item)
+        log_diagnostic(item)
+        # 중간에 프로세스가 종료돼도 앞 작업자의 진단은 사본 옆에 남는다.
+        save(candidate.parent / "worker-attempts.json", {"attempts": attempts})
+
     for name, adapter in sorted(configured_adapters(config).items(), key=lambda p: p[0] != "codex"):
-        if not await adapter.is_available():
-            continue
-        if name == "codex":
-            from all_tomorrow.usage import collect_codex
-            usage = await asyncio.to_thread(collect_codex, Path.home())
-            if any(w["percent"] >= 100 for w in usage.get("windows", [])):
+        result = None
+        try:
+            if not await adapter.is_available():
+                record(diagnostic(name, "작업", status="EXECUTABLE_NOT_FOUND", error="작업자 실행 파일을 찾지 못했습니다"))
                 continue
-        if name == "antigravity":
-            # agy에 OS 쓰기 sandbox가 없어 파일 편집안을 받기만 한다.
-            adapter._mode = "plan"
-            adapter._dangerously_skip_permissions = False
-        request = WorkerRequest(str(uuid4()), str(uuid4()), task["project_id"], adapter.capabilities,
-                                {"cwd": str(candidate), "task": prompt +
-                                 ('\n마지막 답은 {"edits":[{"file":"상대경로","content":"파일 전체"}]} JSON.'
-                                  if name == "antigravity" else "")})
-        result = await adapter.execute(request)
-        if result.status == WorkerStatus.SUCCESS:
+            if name == "codex":
+                from all_tomorrow.usage import collect_codex
+                usage = await asyncio.to_thread(collect_codex, Path.home())
+                if any(w["percent"] >= 100 for w in usage.get("windows", [])):
+                    record(diagnostic(name, "작업", status="QUOTA_EXHAUSTED", error="Codex 잔량 없음"))
+                    continue
             if name == "antigravity":
-                apply_edits(candidate, result.payload.get("response") or result.payload.get("output", ""))
-            return {"worker": name, "usage": result.payload.get("usage"),
-                    "summary": result.payload.get("response") or result.payload.get("output", "")}
+                # agy에 OS 쓰기 sandbox가 없어 파일 편집안을 받기만 한다.
+                adapter._mode = "plan"
+                adapter._dangerously_skip_permissions = False
+            request = WorkerRequest(str(uuid4()), str(uuid4()), task["project_id"], adapter.capabilities,
+                                    {"cwd": str(candidate), "task": prompt +
+                                     ('\n마지막 답은 {"edits":[{"file":"상대경로","content":"파일 전체"}]} JSON.'
+                                      if name == "antigravity" else "")})
+            log.info("작업자 시작 worker=%s work=%s pid=%s", name, candidate.parent.name, os.getpid())
+            result = await adapter.execute(request)
+            payload = result.payload or {}
+            if result.status != WorkerStatus.SUCCESS:
+                record(diagnostic(name, "작업", status=result.status.value, error=result.error,
+                    exit_code=payload.get("exit_code"), stderr=payload.get("stderr", ""),
+                    timed_out=result.status == WorkerStatus.TIMEOUT, duration_ms=result.duration_ms))
+            else:
+                if name == "antigravity":
+                    apply_edits(candidate, payload.get("response") or payload.get("output", ""))
+                if tree(candidate) == baseline:
+                    raise ValueError("작업자는 성공을 반환했으나 바뀐 파일이 없습니다")
+                record(diagnostic(name, "작업", status="SUCCESS", exit_code=0, duration_ms=result.duration_ms))
+                return {"worker": name, "usage": payload.get("usage"), "attempts": attempts,
+                        "summary": payload.get("response") or payload.get("output", "")}
+        except Exception as error:
+            item = exception_diagnostic(name, "작업", error)
+            if result is not None:
+                item["exit_code"] = (result.payload or {}).get("exit_code", 0)
+                item["duration_ms"] = result.duration_ms
+            record(item)
         # 실패한 작업자의 부분 수정을 다음 작업자가 물려받지 않는다.
         reset_candidate(candidate)
     from all_tomorrow.idea_factory.llm import chat
     from all_tomorrow.overseer.redact import Redactor, default_secret_files
     redact = Redactor.from_files(default_secret_files(Path.home()))
-    files = {n: redact((candidate / n).read_text(encoding="utf-8", errors="replace"))
-             for n in tree(candidate) if (candidate / n).stat().st_size < 50000}
-    text, _ = await asyncio.to_thread(chat, "g-fast", "파일 편집만 한다. JSON {edits:[{file,content}]}로 답한다.",
-                                   redact(prompt + "\n" + json.dumps(files, ensure_ascii=False))[:90000])
-    apply_edits(candidate, text)
-    return {"worker": "free", "usage": None, "summary": "무료 모델의 파일 편집안을 시험했습니다."}
+    try:
+        files = {n: redact((candidate / n).read_text(encoding="utf-8", errors="replace"))
+                 for n in tree(candidate) if (candidate / n).stat().st_size < 50000}
+        text, _ = await asyncio.to_thread(chat, "g-fast", '파일 편집만 한다. 한국어로 답하고 JSON {"edits":[{"file":"상대경로","content":"파일 전체"}]}만 출력한다.',
+                                       redact(prompt + "\n" + json.dumps(files, ensure_ascii=False))[:90000])
+        apply_edits(candidate, text)
+        if tree(candidate) == baseline:
+            raise ValueError("무료 모델 편집안에 바뀐 파일이 없습니다")
+        record(diagnostic("free", "작업", status="SUCCESS"))
+        return {"worker": "free", "usage": None, "attempts": attempts,
+                "summary": "무료 모델의 파일 편집안을 시험했습니다."}
+    except Exception as error:
+        record(exception_diagnostic("free", "작업", error, redact))
+        reset_candidate(candidate)
+        raise WorkerExecutionError(attempts) from None
 
 
 def reset_candidate(candidate: Path) -> None:
@@ -220,7 +288,7 @@ def apply_edits(candidate: Path, text: str) -> None:
         target.write_text(edit["content"], encoding="utf-8")
 
 
-def verify(task: dict, candidate: Path) -> bool:
+def verify(task: dict, candidate: Path, *, diagnostics=None, redact=None) -> bool:
     from all_tomorrow.adapters.workers import _worker_environment
     argv = [sys.executable if a == "{python}" else a for a in task["verify_argv"]]
     if argv[:2] == [sys.executable, "-m"]:
@@ -229,11 +297,23 @@ def verify(task: dict, candidate: Path) -> bool:
         bootstrap = ("import os,sys,runpy; sys.path[:0]=[os.path.join(os.getcwd(),'src'),os.getcwd()]; "
                      f"sys.argv={[module, *args]!r}; runpy.run_module({module!r},run_name='__main__')")
         argv = [sys.executable, "-c", bootstrap]
-    # 정본 소스가 아니라 사본에서 import하게 한다. 시험 출력에는 비밀값이 있을 수 있어 저장하지 않는다.
+    # 정본 소스가 아니라 사본에서 import하게 한다. 출력은 임시 파일에서 가린 요약만 남긴다.
     env = _worker_environment({"PYTHONPATH": str(candidate / "src")})
-    completed = subprocess.run(argv, cwd=candidate, env=env, stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL, timeout=600, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    return completed.returncode == 0
+    import tempfile
+    with tempfile.TemporaryFile() as output:
+        try:
+            completed = subprocess.run(argv, cwd=candidate, env=env, stdout=output,
+                stderr=output, timeout=600, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            item = diagnostic("tests", "시험", status="SUCCESS" if completed.returncode == 0 else "FAILED",
+                exit_code=completed.returncode, redact=redact)
+        except Exception as error:
+            item = exception_diagnostic("tests", "시험", error, redact)
+        output.seek(max(0, output.seek(0, 2) - 8000))
+        item["stderr"] = diagnostic("tests", "시험", stderr=output.read().decode("utf-8", errors="replace"), redact=redact)["stderr"]
+    if diagnostics is not None:
+        diagnostics.append(item)
+    log_diagnostic(item)
+    return item["status"] == "SUCCESS"
 
 
 def review_change(task: dict, change: ProjectChange, redact) -> bool:
@@ -292,7 +372,14 @@ async def execute_pending(store, base: Path, *, registry: dict, redact,
                         change.rollback(digest(data["baseline"]))
             except Exception:
                 question, reason = True, "중단 뒤 복구가 다른 변경과 충돌합니다. 원본을 덮어쓰지 않고 보류합니다."
-            await finish_work(store, work, False, reason, change, {}, question=question)
+            info = {}
+            attempts_path = change.artifact / "worker-attempts.json"
+            if attempts_path.is_file():
+                try:
+                    info = json.loads(redact(attempts_path.read_text(encoding="utf-8")))
+                except (OSError, ValueError) as error:
+                    info = {"attempts": [exception_diagnostic(None, "복구", error, redact)]}
+            await finish_work(store, work, False, reason, change, info, question=question)
             count += 1
             continue
         try:
@@ -303,31 +390,54 @@ async def execute_pending(store, base: Path, *, registry: dict, redact,
         run = RunRecord(new_run_id(), work.work_id)
         await store.create_run(run, event("metacog.run", work_id=work.work_id, run_id=run.run_id))
         await store.transition_run_status(run.run_id, RunStatus.RUNNING, 1,
-                                          event("metacog.run_started", work_id=work.work_id, run_id=run.run_id))
+            event("metacog.run_started", work_id=work.work_id, run_id=run.run_id,
+                  payload={"pid": os.getpid(), "parent_pid": os.getppid(), "entrypoint": "execute_pending"}))
+        log.info("Work 시작 work=%s run=%s pid=%s parent_pid=%s", work.work_id, run.run_id, os.getpid(), os.getppid())
         success, question, info, reason = False, False, {}, ""
+        stage = "준비"
         try:
             change.prepare()
+            stage = "작업"
             info = await worker(task, change.candidate)
             info = json.loads(redact(json.dumps(info, ensure_ascii=False)))
             info["changed_files"] = change.changed()
+            stage = "심사"
             protected = project.get("autonomy", {}).get("protected_paths", [])
             if change.frozen_changed(protected) or not await asyncio.to_thread(reviewer, task, change, redact):
                 question, reason = True, "일반 변경으로 확인하지 못했습니다. 후보는 보관하고 반영을 보류합니다."
-            elif not await asyncio.to_thread(verifier, task, change.candidate):
-                reason = "시험 실패. 사본의 수정은 반영하지 않았고 원본은 변경 전 상태입니다."
+                info.setdefault("attempts", []).append(diagnostic(info.get("worker"), stage,
+                    status="HELD", error=reason, redact=redact))
             else:
-                baseline = digest(tree(change.before))
-                result = Promoter(change).promote(candidate_ref=digest(tree(change.candidate)),
-                    accepted_baseline_ref=baseline, protection_class=ProtectionClass.ORDINARY,
-                    monitoring_policy=MonitoringPolicy(1, ("byte_mismatch",)))
-                success = result.promoted
-                reason = "시험 통과 후 반영하고 파일 일치를 확인했습니다." if success else "반영 검증 실패로 되돌렸습니다."
-                if success:
-                    change.finish()
-        except PermissionError:
+                stage = "시험"
+                attempts = info.setdefault("attempts", [])
+                if verifier is verify:
+                    passed = await asyncio.to_thread(verifier, task, change.candidate, diagnostics=attempts, redact=redact)
+                else:
+                    passed = await asyncio.to_thread(verifier, task, change.candidate)
+                    attempts.append(diagnostic("tests", stage, status="SUCCESS" if passed else "FAILED", redact=redact))
+                if not passed:
+                    reason = "시험 실패. 사본의 수정은 반영하지 않았고 원본은 변경 전 상태입니다."
+                else:
+                    stage = "반영"
+                    baseline = digest(tree(change.before))
+                    result = Promoter(change).promote(candidate_ref=digest(tree(change.candidate)),
+                        accepted_baseline_ref=baseline, protection_class=ProtectionClass.ORDINARY,
+                        monitoring_policy=MonitoringPolicy(1, ("byte_mismatch",)))
+                    success = result.promoted
+                    reason = "시험 통과 후 반영하고 파일 일치를 확인했습니다." if success else "반영 검증 실패로 되돌렸습니다."
+                    attempts.append(diagnostic(info.get("worker"), stage, status="SUCCESS" if success else "FAILED",
+                        error=result.reason, redact=redact))
+                    if success:
+                        change.finish()
+        except PermissionError as error:
             question, reason = True, "삭제·보호 경계 변경이 필요합니다. 반영을 보류합니다."
+            info.setdefault("attempts", []).append(exception_diagnostic(info.get("worker"), stage, error, redact))
         except Exception as error:
-            reason = f"{type(error).__name__}: 작업/시험/반영 실패. 변경 사본과 복구 기록을 보관합니다."
+            if isinstance(error, WorkerExecutionError):
+                info["attempts"] = error.attempts
+            else:
+                info.setdefault("attempts", []).append(exception_diagnostic(info.get("worker"), stage, error, redact))
+            reason = f"{stage} 실패 ({type(error).__name__}). 변경 사본과 복구 기록을 보관합니다."
             if change.manifest.exists():
                 data = json.loads(change.manifest.read_text(encoding="utf-8"))
                 if data["state"] == "applying":
@@ -337,6 +447,8 @@ async def execute_pending(store, base: Path, *, registry: dict, redact,
                     except Exception:
                         question = True
                         reason += " 다른 세션의 변경과 충돌해 자동 복구를 보류했습니다. 복구 기록을 확인해야 합니다."
+        info = json.loads(redact(json.dumps(info, ensure_ascii=False)))
+        reason = redact(reason)
         await finish_work(store, work, success, reason, change, info, question=question)
         count += 1
     await reports.sync_events(store, base)
@@ -345,6 +457,13 @@ async def execute_pending(store, base: Path, *, registry: dict, redact,
 
 
 async def finish_work(store, work, success, reason, change, info, *, question=False):
+    failures = [a for a in info.get("attempts", []) if a["status"] != "SUCCESS"]
+    if failures:
+        reason += "\n" + "\n".join(
+            f"{a['worker']}/{a['stage']}: {a['status']} exit={a['exit_code']} timeout={a['timed_out']} "
+            + (a["error"] or a["stderr"])[:400] for a in failures)
+    for item in info.get("attempts", []):
+        log_diagnostic(item)
     evidence = CompletionEvidence("registered-project-tests", "overseer", PROMPT_VERSION,
         observed_values={"tests_passed": True, "files_match": True}, artifact_refs=(str(change.artifact),)) if success else None
     status = WorkStatus.SUCCEEDED if success else WorkStatus.WAITING if question else WorkStatus.FAILED
@@ -352,16 +471,21 @@ async def finish_work(store, work, success, reason, change, info, *, question=Fa
             + str(info.get("summary", ""))[:2000] + "\n바뀐 파일: " + ", ".join(info.get("changed_files", []))
             + f"\nWork: {work.work_id}")
     async with store.autonomous_batch() as tx:
+        for item in info.get("attempts", []):
+            await tx.append_event(event("metacog.execution_attempt", work_id=work.work_id,
+                                        goal_id=work.goal_id, payload=item))
         for run in await tx.list_runs(work.work_id):
             if run.is_active():
                 await tx.transition_run_status(run.run_id, RunStatus.SUCCEEDED if success else RunStatus.FAILED,
                     await tx.current_run_revision(run.run_id), event("metacog.run_finished",
-                        work_id=work.work_id, run_id=run.run_id, payload={"success": success}))
+                        work_id=work.work_id, run_id=run.run_id,
+                        payload={"success": success, "reason": reason, "attempts": info.get("attempts", [])}))
         await tx.transition_work_status(work.work_id, status, work.revision,
             event("metacog.applied" if success else "metacog.held" if question else "metacog.rolled_back",
                   work_id=work.work_id, goal_id=work.goal_id,
                   payload={"reason": reason, "report": text, "worker": info.get("worker"),
                            "usage": info.get("usage"), "artifact": str(change.artifact),
+                           "attempts": info.get("attempts", []),
                            "changed_files": info.get("changed_files", [])}), evidence=evidence)
         goal = await tx.get_goal(work.goal_id)
         await tx.transition_goal_status(goal.goal_id,

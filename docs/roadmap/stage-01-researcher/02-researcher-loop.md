@@ -1,5 +1,7 @@
 # Stage 1.2 — Researcher Loop
 
+2026-10-21 무변경 깨어남 보정: **개발중**(운영 검증 대기). runtime의 force 우회와 wake_applied 자기 재관측을 제거하고, 열린 Work·새 근거만 판단하도록 수정했다. 한국어 자연어 출력 지시를 보강했다. 관련 64 passed, 전체 747 passed / 69 skipped / 기존 OpenCode smoke 1 failed. [근거·운영 명령](../../dp7-loop.md#2026-10-21-work-실패무변경-깨어남-보정).
+
 ## Status
 
 - 상태: **개발중**

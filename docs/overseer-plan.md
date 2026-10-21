@@ -1,5 +1,9 @@
 # 교차 세션 관제 계획서
 
+### 2026-10-21 Work 실행·헛도는 깨어남 수정
+
+상태: **개발중**(관제 재등록·실제 Work 성공 검증 대기). 강제 깨어남과 자기 wake_applied 이벤트 재관측을 막고, 작업자별 실패·시간 초과·시험/반영 단계 진단을 Event·executor.log·복구 기록·보고에 연결했다. 예외·무변경 성공 뒤 fallback, WinGet agy 탐색, Interactive/Limited 등록·1분 재기동, 한국어 프롬프트를 보완했다. 관련 64 passed, 전체 747 passed / 69 skipped / 기존 OpenCode smoke 1 failed. 실제 Codex 재현은 sandbox 홈 오류이며 운영 두 Work의 앞 CLI 원인은 미확정이다. 확인/추론 구분과 관제 명령은 [DP7 진행 기록](dp7-loop.md#2026-10-21-work-실패무변경-깨어남-보정)을 따른다.
+
 - 상태: **개발중**. 모으기·정리·신탁과 메타인지 판단→Work→작업자→시험→반영/되돌림→보고 적재를 연결했다. 실제 DP7 DB·Discord·재부팅 운영은 확인 전이다. 현재 실행 방법은 [DP7 자기개선 고리](dp7-loop.md), 과거 기록은 아래 진행 기록을 본다.
 - README 목표와의 연결:
   - 목표 4 "프로젝트 노하우 재사용"

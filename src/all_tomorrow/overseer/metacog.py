@@ -57,6 +57,7 @@ PROMPT = """{mark}
 너는 All Tomorrow의 메타인지 계층이다. 사용자의 원문 요구는 C:\\projects\\all-tomorrow\\README.md 앞부분에 있다. 처음이거나 헷갈리면 읽어라.
 
 너의 역할은 작업 계층과 나란히 시스템 전체를 관찰하는 것이다.
+- 관찰·행동·제목·근거 설명·메모 등 자연어 출력은 모두 한국어로 쓴다. 중국어 표현(예: 新增)은 한국어로 옮긴다. 코드·경로·식별자는 원문을 유지한다.
 - 사용자는 두 PC에서 Claude·Codex·OpenCode·Kiro·Antigravity 세션에 직접 일을 시킨다. 세션마다 host가 어느 PC인지 표시돼 있다.
 - 너는 아래 스냅샷(지난 깨어남 이후 바뀐 것)과 필요하면 직접 연 파일을 근거로 판단한다.
 - 무엇이 문제인지부터 스스로 판단한다. 정해진 점검 목록은 없다.
@@ -180,7 +181,11 @@ def build_snapshot(con, base: Path, *, since: str | None, projects: dict | None,
 
 def nothing_new(snapshot: dict) -> bool:
     since = snapshot.get("since") or ""
-    if any(e["at"] > since for e in snapshot.get("central", {}).get("events", [])):
+    central = snapshot.get("central", {})
+    if any(w.get("status") in {"PENDING", "RUNNING"} for w in central.get("work", [])):
+        return False
+    # Applying the previous wake is bookkeeping, not fresh evidence for another wake.
+    if any(e["at"] > since and e["type"] != "metacog.wake_applied" for e in central.get("events", [])):
         return False
     return not (snapshot["changed_sessions"] or snapshot["new_cards"] or snapshot["oracle_questions"]
                 or snapshot["system"]["own_log_errors"])
