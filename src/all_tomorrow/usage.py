@@ -11,6 +11,7 @@ except as the Authorization header of Anthropic's own usage endpoint.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import base64
 import json
 import os
@@ -65,9 +66,12 @@ def collect_claude(home: Path) -> dict[str, Any]:
         return entry
     entry["plan"] = _CLAUDE_TIERS.get(oauth.get("rateLimitTier"), oauth.get("subscriptionType"))
     if int(oauth.get("expiresAt", 0)) <= int(time.time() * 1000):
-        # Refreshing would rotate Claude Code's own credentials; leave that to Claude Code.
-        entry["status"] = "token_expired"
-        return entry
+        # CLI가 새로 저장한 토큰과 경쟁하지 않도록 파일 교체 직전에 다시 확인한다.
+        try:
+            oauth = refresh_claude(home, oauth)
+        except Exception:
+            entry["status"] = "needs_login"
+            return entry
     request = urllib.request.Request(
         CLAUDE_USAGE_URL,
         headers={"Authorization": f"Bearer {oauth['accessToken']}", "anthropic-beta": "oauth-2025-04-20"},
@@ -83,6 +87,39 @@ def collect_claude(home: Path) -> dict[str, Any]:
     return entry
 
 
+def refresh_claude(home: Path, oauth: dict) -> dict:
+    path = home / ".claude" / ".credentials.json"
+    original = path.read_bytes()
+    current = json.loads(original)["claudeAiOauth"]
+    if current != oauth:
+        return current
+    if not oauth.get("refreshToken"):
+        raise ValueError("Claude 재로그인 필요")
+    request = urllib.request.Request("https://platform.claude.com/v1/oauth/token",
+        data=json.dumps({"grant_type": "refresh_token", "refresh_token": oauth["refreshToken"],
+                         "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e"}).encode(),
+        headers={"content-type": "application/json"}, method="POST")
+    with urllib.request.urlopen(request, timeout=15) as response:
+        fresh = json.loads(response.read().decode())
+    updated = {**oauth, "accessToken": fresh["access_token"],
+               "refreshToken": fresh.get("refresh_token", oauth["refreshToken"]),
+               "expiresAt": int(time.time() * 1000) + int(fresh["expires_in"]) * 1000}
+    if path.read_bytes() != original:
+        return json.loads(path.read_bytes())["claudeAiOauth"]
+    data = json.loads(original)
+    data["claudeAiOauth"] = updated
+    # tempfile는 원본과 같은 디렉터리여서 같은 볼륨에서 원자 교체된다.
+    import tempfile
+    fd, temporary = tempfile.mkstemp(prefix=".usage-refresh-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            json.dump(data, file)
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    return updated
+
+
 def _jwt_claims(token: str) -> dict[str, Any]:
     part = token.split(".")[1]
     return json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
@@ -90,7 +127,8 @@ def _jwt_claims(token: str) -> dict[str, Any]:
 
 def latest_codex_rate_limits(sessions: Path) -> tuple[dict[str, Any], str] | None:
     files = sorted(sessions.rglob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
-    for path in files[:20]:
+    found = []
+    for path in files[:40]:
         for line in reversed(path.read_text(encoding="utf-8", errors="replace").splitlines()):
             if '"rate_limits"' not in line:
                 continue
@@ -100,12 +138,53 @@ def latest_codex_rate_limits(sessions: Path) -> tuple[dict[str, Any], str] | Non
                 continue
             limits = (event.get("payload") or {}).get("rate_limits")
             if limits and limits.get("primary"):
-                return limits, event.get("timestamp") or datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat()
-    return None
+                found.append((limits, event.get("timestamp") or datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat()))
+                break
+    return max(found, key=lambda item: item[1]) if found else None
 
 
-def collect_codex(home: Path) -> dict[str, Any]:
-    codex = home / ".codex"
+async def codex_live_limits() -> dict[str, Any]:
+    """공식 app-server RPC. 모델을 호출하지 않고 로그인 계정의 현재 할당량을 읽는다."""
+    from all_tomorrow.local_workers import discover_executable
+    from all_tomorrow.adapters.workers import _worker_environment
+    executable = discover_executable("codex")
+    if not executable:
+        raise FileNotFoundError("Codex CLI 없음")
+    process = await asyncio.create_subprocess_exec(executable, "app-server",
+        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        env=_worker_environment({}), creationflags=getattr(__import__("subprocess"), "CREATE_NO_WINDOW", 0))
+
+    async def send(message):
+        process.stdin.write((json.dumps(message) + "\n").encode())
+        await process.stdin.drain()
+
+    async def receive(ident):
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                raise ValueError("Codex RPC 조기 종료")
+            data = json.loads(line)
+            if data.get("id") == ident:
+                if "error" in data:
+                    raise ValueError("Codex 사용량 조회 실패")
+                return data["result"]
+    try:
+        async with asyncio.timeout(20):
+            await send({"method": "initialize", "id": 0,
+                        "params": {"clientInfo": {"name": "all_tomorrow", "version": "0.1.0"}}})
+            await receive(0)
+            await send({"method": "initialized", "params": {}})
+            await send({"method": "account/rateLimits/read", "id": 1})
+            result = await receive(1)
+            return result.get("rateLimitsByLimitId", {}).get("codex") or result["rateLimits"]
+    finally:
+        if process.returncode is None:
+            process.kill()
+        await process.wait()
+
+
+def collect_codex(home: Path, *, live: bool = True) -> dict[str, Any]:
+    codex = Path(os.environ.get("CODEX_HOME", home / ".codex")) if home == Path.home() else home / ".codex"
     entry: dict[str, Any] = {"id": "codex", "name": "Codex", "plan": None, "status": "error", "observed_at": _now(), "windows": []}
     try:
         tokens = json.loads((codex / "auth.json").read_text(encoding="utf-8"))["tokens"]
@@ -114,7 +193,18 @@ def collect_codex(home: Path) -> dict[str, Any]:
     except (OSError, KeyError, ValueError, IndexError):
         entry["status"] = "not_logged_in"
         return entry
-    found = latest_codex_rate_limits(codex / "sessions")
+    found = None
+    if live and home == Path.home():
+        try:
+            raw = asyncio.run(codex_live_limits())
+            limits = {key: {"used_percent": raw[key]["usedPercent"],
+                            "window_minutes": raw[key]["windowDurationMins"], "resets_at": raw[key]["resetsAt"]}
+                      for key in ("primary", "secondary") if raw.get(key)}
+            if limits:
+                found = limits, _now()
+        except Exception:
+            pass  # 오류 본문을 남기지 않고 관측 시각이 있는 로그로 돌아간다.
+    found = found or latest_codex_rate_limits(codex / "sessions")
     if not found:
         entry["status"] = "no_data"
         return entry

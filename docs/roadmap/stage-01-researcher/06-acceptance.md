@@ -2,7 +2,7 @@
 
 ## Status
 
-- 상태: **개발완료**
+- 상태: **개발중**
 - 지금 시작 가능: **아니오**
 - 선행조건: 01~05 완료
 - contract: ../plan-verification-contract.md
@@ -18,6 +18,8 @@
 | laptop Approval Authority security boundary | L3 |
 
 낮은 level mock으로 높은 level requirement를 대체하지 않는다.
+
+2026-10-21 현재 InMemory 자기개선 고리를 연결했지만, DP7의 실제 PostgreSQL·Discord·재부팅 확인은 아직 없다. [현재 운영 준비](../../dp7-loop.md)를 따르며 Stage 1 전체 완료로 표시하지 않는다.
 
 ## Required axes
 

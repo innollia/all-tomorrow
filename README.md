@@ -113,7 +113,7 @@ Pipeline은 작업 계층에서 하나의 WorkItem을 실행하는 versioned rec
 사용자가 체감할 제품 순서는 **Researcher → Reliable assistant → Personal manager**다. 그 앞에 제품 기능이 아닌 **Stage 0 — OSS Assembly & Architecture Proof**를 둔다. 여기서 durable execution, agent/tool plumbing, model gateway, telemetry/eval처럼 이미 잘 풀린 문제를 직접 재구현하지 않고 실제 OSS 조합으로 failure skeleton을 먼저 통과시킨다.
 
 - **[Stage 0 — OSS Assembly & Architecture Proof](docs/roadmap/stage-00-assembly/index.md)**  
-  PydanticAI를 공통 agent 층으로 두고, 비교 검증을 거쳐 DBOS와 LiteLLM model/tool gateway를 선택했다. 현재 OpenTelemetry/eval/GitHub Actions를 연결하는 00D가 개발중이다. 이 단계가 끝나기 전에는 새 queue/lease/LLM client/MCP aggregator를 직접 구현하지 않는다.
+  PydanticAI를 공통 agent 층으로 두고 DBOS와 LiteLLM model/tool gateway를 선택했다. Stage 0는 종료 검증 기록에 따라 개발완료다. 새 queue/lease/LLM client를 직접 만들지 않고 기존 부품을 연결한다.
 
 - **[1차 완성 — Durable Self-Improving Researcher](docs/roadmap-01-foundation.md)**  
   Goal/Work/Event의 최소 durable kernel 위에 실제 researcher loop를 올린다. 시스템이 스스로 문제와 기회를 발견하고 새 Goal을 만들며 자기 prompt·policy·code까지 평가·개선하는 폐쇄 루프를 먼저 완성한다. AWS를 항상 켜진 중앙 runtime으로 사용하고, repo mutation은 우선 노트북 단일 executor에 제한한다.
@@ -128,7 +128,7 @@ Pipeline은 작업 계층에서 하나의 WorkItem을 실행하는 versioned rec
 
 ## Current Implementation Snapshot
 
-현재 진행 상태는 [로드맵](docs/roadmap.md)과 [Stage 0 상태판](docs/roadmap/stage-00-assembly/index.md)을 따른다. 00A~00C는 개발완료, 00D는 개발중이며 Stage 1은 선행작업 대기다. 00D의 CI 증거와 미충족 조건은 [00D 기록](docs/roadmap/stage-00-assembly/00d-observability-eval-ci.md)에 있다.
+현재 진행 상태는 [로드맵](docs/roadmap.md)을 따른다. Stage 0는 개발완료, Stage 1은 개발중이다. 2026-10-21 사용자 결정에 따라 서버와 작업 실행기는 DP7에 두며 노트북은 기록만 보낸다. [자기개선 고리](docs/dp7-loop.md)는 판단→Work→사본 실행→시험→반영/되돌림→Event→다음 관측→보고 적재를 연결했다. 실제 PostgreSQL·Discord·재부팅 뒤 운영은 확인 전이다.
 
 아래 목록은 **2026-09-19 당시 초기 실행 엔진의 기록**이다. 이후 Stage 0의 실제 PostgreSQL·crash/restart 검증 결과는 각 packet 기록을 따른다.
 

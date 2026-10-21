@@ -76,6 +76,16 @@ async def test_02c_replay_idempotent() -> None:
     assert len(await store.list_goals(user_id="u1")) == 1
 
 
+async def test_durable_materialization_idempotency_is_owner_scoped() -> None:
+    store = InMemoryGoalWorkRunStore()
+    d = _decide("CREATE_GOAL", {"title": "Ship", "objective": "obj"}, did="shared-id")
+    first = await DecisionMaterializer(store, user_id="u1").materialize(d)
+    replay = await DecisionMaterializer(store, user_id="u1").materialize(d)
+    other = await DecisionMaterializer(store, user_id="u2").materialize(d)
+    assert replay.already_applied and replay.goal_id == first.goal_id
+    assert other.goal_id != first.goal_id
+
+
 # 02C-02: CREATE_WORK against a live goal.
 async def test_02c_create_work() -> None:
     store = InMemoryGoalWorkRunStore()

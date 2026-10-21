@@ -1,5 +1,7 @@
 # 06C — Stage 1 Close Checklist
 
+현재 상태(2026-10-21): **개발중**. 아래 DONE은 당시 부품/시험 기록이다. 실제 DP7 자기개선 운영 완료를 뜻하지 않는다. 현재 정본은 [Stage 1 index](../index.md)와 [DP7 운영 준비](../../../dp7-loop.md)다. 실제 DB·Discord·재부팅 검증은 남아 있다.
+
 Stage 1 (Researcher) packet build. Evidence recorded against required levels.
 
 ## Packet status (all merged to main)

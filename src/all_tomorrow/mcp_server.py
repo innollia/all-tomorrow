@@ -75,7 +75,7 @@ def _worker_config() -> dict[str, Any]:
     config = json.loads(WORKERS_PATH.read_text(encoding="utf-8"))
     roots = list(config.get("allowed_roots", []))
     for project in load_projects().values():
-        if project["path"] not in roots:
+        if Path(project["path"]).is_absolute() and Path(project["path"]).is_dir() and project["path"] not in roots:
             roots.append(project["path"])
     config["allowed_roots"] = roots
     return config

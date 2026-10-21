@@ -12,6 +12,7 @@ typed proposal candidate + Event — never a production mutation.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 
 from all_tomorrow.domain.errors import DomainError
 from all_tomorrow.domain.ids import (
@@ -55,6 +56,13 @@ class DecisionMaterializer:
         self._proposals: dict[str, dict] = {}
 
     async def materialize(self, decision: Decision) -> MaterializationResult:
+        # 생성 Event가 영속 idempotency 기록이다. 프로세스 재시작 뒤에도 재사용한다.
+        if decision.action in (Action.CREATE_GOAL, Action.CREATE_WORK):
+            for event in await self.store.list_events():
+                if event.actor == self.actor and event.payload.get("decision_id") == decision.decision_id \
+                        and event.payload.get("owner_user_id") == self.user_id:
+                    return MaterializationResult(action=decision.action, goal_id=event.goal_id,
+                                                 work_id=event.work_id, already_applied=True)
         # Idempotency: a replayed decision_id returns the prior result, no new mutation.
         if decision.decision_id in self._applied:
             import dataclasses
@@ -80,17 +88,27 @@ class DecisionMaterializer:
         raise MaterializationError(f"unhandled action {d.action}")
 
     async def _create_goal(self, d: Decision) -> MaterializationResult:
-        goal = GoalRecord(goal_id=new_goal_id(), user_id=self.user_id, title=d.payload["title"])
-        await self.store.create_goal(goal, _evt(self.actor, "researcher.create_goal", d.decision_id, goal_id=goal.goal_id))
+        identity = f"{self.user_id}:{self.actor}:{d.decision_id}"
+        goal = GoalRecord(goal_id=GoalId("goal_" + sha256(identity.encode()).hexdigest()[:32]),
+                          user_id=self.user_id, title=d.payload["title"])
+        await self.store.create_goal(goal, _evt(self.actor, "researcher.create_goal", d.decision_id,
+            goal_id=goal.goal_id, payload={"decision": d.payload, "evidence_refs": list(d.evidence_refs),
+                                         "owner_user_id": self.user_id}))
         return MaterializationResult(action=Action.CREATE_GOAL, goal_id=goal.goal_id)
 
     async def _create_work(self, d: Decision) -> MaterializationResult:
         goal_id = GoalId(d.payload["target_goal_id"])
         goal = await self.store.get_goal(goal_id)
-        if goal is None or goal.is_terminal():
+        if goal is None or goal.is_terminal() or goal.user_id != self.user_id:
             raise MaterializationError(f"target goal invalid/terminal: {goal_id}")
-        work = WorkRecord(work_id=new_work_id(), goal_id=goal_id, title=d.payload["title"])
-        await self.store.create_work(work, _evt(self.actor, "researcher.create_work", d.decision_id, work_id=work.work_id, goal_id=goal_id))
+        identity = f"{self.user_id}:{self.actor}:{d.decision_id}"
+        work = WorkRecord(work_id=WorkId("work_" + sha256(identity.encode()).hexdigest()[:32]),
+                          goal_id=goal_id, title=d.payload["title"])
+        await self.store.create_work(work, _evt(self.actor, "researcher.create_work", d.decision_id,
+            work_id=work.work_id, goal_id=goal_id,
+            payload={"decision": d.payload, "evidence_refs": list(d.evidence_refs),
+                     "owner_user_id": self.user_id,
+                     "executor": d.payload.get("executor"), "fingerprint": d.payload.get("fingerprint")}))
         return MaterializationResult(action=Action.CREATE_WORK, work_id=work.work_id, goal_id=goal_id)
 
     async def _revise_work(self, d: Decision) -> MaterializationResult:

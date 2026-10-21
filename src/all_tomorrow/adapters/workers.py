@@ -28,17 +28,23 @@ class OutputLimitError(WorkerError):
 
 
 async def _stop_process(proc: asyncio.subprocess.Process) -> None:
+    job = getattr(proc, "_windows_job", None)
+    if job is not None:
+        # 이 실행의 Job handle만 닫는다. taskkill의 전체 프로세스 열거 권한이 없어도 자식까지 종료된다.
+        job.Close()
+        proc._windows_job = None
     if getattr(proc, "pid", None) and proc.returncode is None:
-        if os.name == "nt":
+        if os.name == "nt" and job is None:
             # This PID belongs to this invocation, never an app-wide process name.
             try:
                 await asyncio.to_thread(subprocess.run,
-                    ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                    [str(Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32/taskkill.exe"),
+                     "/PID", str(proc.pid), "/T", "/F"],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10,
                     creationflags=subprocess.CREATE_NO_WINDOW)
             except (OSError, subprocess.TimeoutExpired):
                 pass
-        else:
+        elif os.name != "nt":
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -48,6 +54,27 @@ async def _stop_process(proc: asyncio.subprocess.Process) -> None:
         await proc.wait()
     except (ProcessLookupError, OSError):
         pass
+
+
+def _attach_windows_job(proc) -> None:
+    if os.name != "nt" or not getattr(proc, "pid", None):
+        return
+    import win32api
+    import win32job
+    job = win32job.CreateJobObject(None, "")
+    try:
+        info = win32job.QueryInformationJobObject(job, win32job.JobObjectExtendedLimitInformation)
+        info["BasicLimitInformation"]["LimitFlags"] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        win32job.SetInformationJobObject(job, win32job.JobObjectExtendedLimitInformation, info)
+        handle = win32api.OpenProcess(0x0101, False, proc.pid)  # SET_QUOTA | TERMINATE
+        try:
+            win32job.AssignProcessToJobObject(job, handle)
+        finally:
+            handle.Close()
+        proc._windows_job = job
+    except Exception as error:
+        job.Close()
+        raise OSError("Windows 작업 프로세스 격리 실패") from error
 
 
 async def _read_bounded(proc: asyncio.subprocess.Process, limit: int) -> tuple[bytes, bytes]:
@@ -235,6 +262,7 @@ async def _run_process_safe(
         )
 
     try:
+        _attach_windows_job(proc)
         stdout, stderr = await asyncio.wait_for(
             _read_bounded(proc, output_limit_bytes),
             timeout=timeout_seconds,
@@ -257,6 +285,15 @@ async def _run_process_safe(
         return WorkerResult(request.request_id, request.trace_id, WorkerStatus.OUTPUT_TOO_LARGE,
                             duration_ms=int((time.perf_counter() - start_time) * 1000),
                             error=str(error))
+    except OSError as error:
+        await _stop_process(proc)
+        return WorkerResult(request.request_id, request.trace_id, WorkerStatus.FAILED,
+                            error=_sanitize_error(error))
+    finally:
+        job = getattr(proc, "_windows_job", None)
+        if job is not None:
+            job.Close()
+            proc._windows_job = None
 
     stdout_str = stdout.decode("utf-8", errors="replace")
     stderr_str = stderr.decode("utf-8", errors="replace")
@@ -313,7 +350,9 @@ def _worker_environment(extra: dict[str, str]) -> dict[str, str]:
         "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "CODEX_HOME", "XDG_CONFIG_HOME",
         "XDG_DATA_HOME", "XDG_CACHE_HOME",
     }
-    return {**{k: v for k, v in os.environ.items() if k.upper() in allowed}, **extra}
+    environment = {**{k: v for k, v in os.environ.items() if k.upper() in allowed}, **extra}
+    environment.setdefault("HOME", str(Path.home()))
+    return environment
 
 
 def _json_records(output: str) -> list[dict[str, Any]]:
@@ -335,6 +374,7 @@ class CodexWorker:
                  model: str | None = None, timeout_seconds: float = 300,
                  output_limit_bytes: int = 1024 * 1024,
                  ignore_user_config: bool = False,
+                 skip_git_repo_check: bool = False,
                  env: dict[str, str] | None = None) -> None:
         self._argv = list(argv or ["codex"])
         self._allowed_roots = allowed_roots
@@ -343,6 +383,7 @@ class CodexWorker:
         self._output_limit_bytes = output_limit_bytes
         self._env = env or {}
         self._ignore_user_config = ignore_user_config
+        self._skip_git_repo_check = skip_git_repo_check
 
     @property
     def worker_id(self) -> str:
@@ -362,6 +403,8 @@ class CodexWorker:
             cmd.extend(["-c", 'windows.sandbox="unelevated"'])
         if self._ignore_user_config:
             cmd.append("--ignore-user-config")
+        if self._skip_git_repo_check:
+            cmd.append("--skip-git-repo-check")
         if self._model:
             cmd.extend(["--model", self._model])
         return [*cmd, prompt]

@@ -63,7 +63,7 @@ services:
       litellm-proxy:
         condition: service_healthy
     environment:
-      AT_DOMAIN_DATABASE_URL: postgresql://at_app@postgres:5432/all_tomorrow
+      ALL_TOMORROW_DATABASE_URL: postgresql://at_app@postgres:5432/all_tomorrow
       AT_SYSTEM_DATABASE_URL: postgresql://at_app@postgres:5432/all_tomorrow_dbos
       AT_MODEL_GATEWAY_URL: http://litellm-proxy:4000
       PGPASSWORD_FILE: /run/secrets/pg_password

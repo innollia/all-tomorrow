@@ -7,16 +7,16 @@
 | Stage | 상태 | 지금 시작 가능 | 선행조건 | 상세 |
 |---|---|---:|---|---|
 | 0. OSS Assembly & Architecture Proof | 개발완료 | 예 | 없음 | [status/index](roadmap/stage-00-assembly/index.md) |
-| 1. Durable Self-Improving Researcher | 개발완료 | 아니오 | Stage 0 완료 | [status/index](roadmap/stage-01-researcher/index.md) |
-| 2. Reliable Assistant & Remote Control | 개발완료 | 아니오 | Stage 1 완료 | [status/index](roadmap/stage-02-assistant/index.md) |
-| 3. Personal Manager & Generalized Autonomy | 개발완료 | 아니오 | Stage 2 완료 | [status/index](roadmap/stage-03-manager/index.md) |
+| 1. Durable Self-Improving Researcher | 개발중 | 예 | Stage 0 완료 | [status/index](roadmap/stage-01-researcher/index.md) |
+| 2. Reliable Assistant & Remote Control | 선행작업 대기 | 아니오 | Stage 1 완료 | [status/index](roadmap/stage-02-assistant/index.md) |
+| 3. Personal Manager & Generalized Autonomy | 선행작업 대기 | 아니오 | Stage 2 완료 | [status/index](roadmap/stage-03-manager/index.md) |
 
 ## 지금 바로 작업 가능한 것
 
-Stage 0만 진행한다. 00A(기반 선택), 00B(소유권 및 어댑터 계약), 00C(Failure Walking Skeleton)는 개발완료이며, 현재 **00D(Observability / Eval / CI Seam)가 개발중**이다. 00D 기록에는 CI 6개 lane 성공, deployed-smoke skipped, 실제 dependency update PR artifact 부재(D-UP-01 미충족)가 남아 있다. 세부 증거와 완료 판정은 [00D](roadmap/stage-00-assembly/00d-observability-eval-ci.md)를 따른다. 00E와 Stage 1은 선행작업 대기다.
+Stage 0는 [종료 검증 기록](roadmap/stage-00-assembly/00-close-live-verification.md)에 따라 개발완료다. 지금은 **Stage 1의 메타인지 → Work → 작업자 → 시험 → 반영/되돌림 → 디스코드 보고 고리**를 DP7에서 연결한다. 부품 테스트 통과를 Stage 전체의 운영 완료로 보지 않는다.
 
-- 현재: 00D의 남은 evidence와 완료조건 충족
-- 00D 완료 후: 00E에서 architecture lock과 Stage 1 schema/packet 재작성
+- 현재: [DP7 자기개선 고리](dp7-loop.md)의 코드·InMemory 검증과 Eve 양방향 창구 연결, 실제 DB/Discord/재부팅 검증 준비
+- 다음: 사용자가 넣은 비밀값으로 관제가 예약 작업을 등록하고 자발적인 수정 보고를 확인
 
 Stage 0가 끝나기 전에는 새 durable queue, lease/heartbeat, LLM client, agent framework를 직접 구현하지 않는다.
 
@@ -65,7 +65,7 @@ All Tomorrow는 범용 인프라를 다시 구현하는 프로젝트가 아니�
 - **개발중**: 현재 구현/수정 중
 - **개발완료**: 해당 파일 Done When 실제 충족
 - **시작안했음**: 선행조건은 충족됐지만 미착수
-- **개발완료**: 다른 작업 완료 전 착수하지 않음
+- **선행작업 대기**: 다른 작업 완료 전 착수하지 않음
 
 파일이나 prototype이 존재한다는 이유만으로 개발완료로 표시하지 않는다.
 
@@ -87,3 +87,17 @@ All Tomorrow는 범용 인프라를 다시 구현하는 프로젝트가 아니�
 | Claude→All Tomorrow MCP 연결 | 개발중 | [구조·검증·남은 일](mcp-control.md) |
 | 사업 아이디어 공장 + 통제 콘솔 | 개발중 | [계획서·검증 기록](idea-factory-plan.md) |
 | 중앙 콘솔 프로젝트 패널 | 개발중 | [구조·결정·보안 사항](project-panels.md) |
+
+## 교차 세션 관제
+
+2026-10-20 사용자 요청이다. 다섯 도구(Claude Code·Codex·OpenCode·Kiro·Antigravity)의 세션 기록을 모아 문제·해결 카드로 정리한다. 다른 곳에서 해결된 문제는 막힌 세션에 건넨다. 사용자는 계속 개별 세션에 직접 일을 시킨다. Stage 표의 상태와는 별개다.
+
+| 작업 | 상태 | 기록 |
+|---|---|---|
+| 교차 세션 관제 | 개발중 | [계획서·진행 기록](overseer-plan.md) |
+
+## 2026-10-21 DP7 Windows Selector 수정
+
+이벤트 루프 수정 상태: **개발완료**. Stage 1 전체는 **개발중**을 유지한다. API·executor·overseer 및 수동 metacog는 Windows Selector를 사용하고, 작업자 subprocess는 별도 스레드 Proactor에서 실행한다. collect --no-metacog는 PostgreSQL을 사용하지 않는다.
+
+검증: 관련 **26 passed**, 전체 **728 passed, 69 skipped, 1 failed**. 실패는 기존 외부 npx/OpenCode help 실행이다. 실제 DB SELECT 1과 임시 API /healthz HTTP 200을 확인했다. 기존 5476 예약 작업은 재시작하지 않았다. 상세 기록은 docs/dp7-loop.md에 있다.

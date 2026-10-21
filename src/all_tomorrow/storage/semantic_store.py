@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
@@ -135,6 +136,8 @@ _QUESTION_ACTIVE = "PENDING"
 # ---------------------------------------------------------------------------
 @runtime_checkable
 class GoalWorkRunStore(Protocol):
+    def autonomous_batch(self): ...
+    async def append_event(self, event: SemanticEvent) -> None: ...
     # Goal
     async def create_goal(self, goal: GoalRecord, event: SemanticEvent) -> GoalRecord: ...
     async def get_goal(self, goal_id: GoalId) -> GoalRecord | None: ...
@@ -222,6 +225,7 @@ class InMemoryGoalWorkRunStore:
 
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
+        self._autonomy_lock = asyncio.Lock()
         self._goals: dict[GoalId, GoalRecord] = {}
         self._work: dict[WorkId, WorkRecord] = {}
         self._runs: dict[RunId, RunRecord] = {}
@@ -231,6 +235,24 @@ class InMemoryGoalWorkRunStore:
         self._questions: dict[QuestionId, QuestionRecordSemantic] = {}
         self._delivery_signals: list[dict[str, Any]] = []
         self._outcomes: dict[WorkId, OutcomeRecord] = {}
+
+    @asynccontextmanager
+    async def autonomous_batch(self):
+        # 한 판단의 예산 확인, 중복 확인, Goal/Work/Event를 함께 확정한다.
+        async with self._autonomy_lock:
+            names = ("_goals", "_work", "_runs", "_events", "_questions", "_outcomes", "_run_revisions", "_delivery_signals")
+            before = {n: copy.deepcopy(getattr(self, n)) for n in names}
+            try:
+                yield self
+            except BaseException:
+                for n, value in before.items():
+                    setattr(self, n, value)
+                raise
+
+    async def append_event(self, event: SemanticEvent) -> None:
+        async with self._lock:
+            if not any(e.event_id == event.event_id for e in self._events):
+                self._events.append(event)
 
     def run_revision(self, run_id: RunId) -> int:
         """Current stored revision for a Run (1 at creation)."""
@@ -408,7 +430,9 @@ class InMemoryGoalWorkRunStore:
         """
         async with self._lock:
             candidates = sorted(
-                (w for w in self._work.values() if w.status == WorkStatus.PENDING),
+                (w for w in self._work.values() if w.status == WorkStatus.PENDING
+                 and not any(e.work_id == w.work_id and e.payload.get("executor") == "overseer"
+                             for e in self._events)),
                 key=lambda w: (-w.priority, w.created_at),
             )[:limit]
             claimed: list[WorkRecord] = []
@@ -526,6 +550,23 @@ class PostgresGoalWorkRunStore:
 
     async def close(self) -> None:
         await self.pool.close()
+
+    @asynccontextmanager
+    async def autonomous_batch(self):
+        async with self.pool.connection() as conn:
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext('all-tomorrow-autonomy'))")
+
+                class BoundPool:
+                    @asynccontextmanager
+                    async def connection(self):
+                        yield conn
+
+                yield PostgresGoalWorkRunStore("", pool=BoundPool())
+
+    async def append_event(self, event: SemanticEvent) -> None:
+        async with self.pool.connection() as conn:
+            await self._append_event_conn(conn, event)
 
     # -- Goal ---------------------------------------------------------------
     async def create_goal(self, goal: GoalRecord, event: SemanticEvent) -> GoalRecord:
@@ -920,6 +961,8 @@ class PostgresGoalWorkRunStore:
                            revision, created_at, updated_at, terminal_at
                     FROM work_items
                     WHERE semantic_status = 'PENDING'
+                        AND NOT EXISTS (SELECT 1 FROM semantic_events e
+                          WHERE e.work_id = work_items.work_id AND e.payload->>'executor' = 'overseer')
                     ORDER BY priority DESC, created_at
                     FOR UPDATE SKIP LOCKED
                     LIMIT %s

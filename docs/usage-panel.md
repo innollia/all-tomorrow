@@ -21,7 +21,7 @@ main의 이전 대시보드는 `/requests`로 옮겨졌다. 상태 줄의 "렌�
 
 로그인 정보는 이 PC에만 있으므로 중앙 서버가 직접 조회하지 않는다. 이 PC의 collector가 credential 없는 snapshot만 서버로 보낸다.
 
-- 수집: `all_tomorrow.usage` — Claude는 `~/.claude/.credentials.json`의 OAuth token으로 Anthropic usage endpoint 조회(만료 시 갱신하지 않고 `token_expired` 표시). Codex는 `~/.codex/sessions`의 최신 `rate_limits` 기록을 읽는다. Codex 값은 마지막 Codex 실행 시점 기준이며, 관측 시점이 30분보다 오래되면 콘솔에 "N시간 전 관측값"처럼 표시된다.
+- 수집: `all_tomorrow.usage` — Claude는 OAuth usage 조회 전에 만료 토큰을 갱신한다. 갱신 불가는 `needs_login`이며 비밀값을 출력하지 않는다. Codex는 공식 app-server 현재 사용량을 먼저 조회하고, 실패하면 세션 로그 중 실제 관측 시각이 가장 최근인 `rate_limits`를 쓴다. 30분보다 오래된 값은 메타인지 기상 판단에 쓰지 않는다.
 - 서버: `POST /internal/usage` (Bearer 수집기 토큰, edge token과 별개), `GET /api/usage` (로그인 필요). 최신 snapshot은 파일로 저장되어 재시작 후에도 유지된다.
 - 중앙 서버: tailnet의 `all-tomorrow-central` (Linux, `http://100.97.113.3:8080`). 기기 연결은 [worker-adapters](worker-adapters.md)의 "Device agent (Tailscale)" 절, 배포 구성은 [deploy](deploy/aws-single-node.md).
 - 같은 수집 결과를 MCP 도구 `subscription_usage`로도 볼 수 있다([MCP 연결](mcp-control.md)).
@@ -33,6 +33,8 @@ $env:ALL_TOMORROW_URL="http://100.97.113.3:8080"; $env:ALL_TOMORROW_COLLECTOR_TO
 ```
 
 ## 남은 일
+
+2026-10-21 사용자 결정으로 중앙 백엔드는 DP7로 옮긴다. [DP7 실행 스크립트](dp7-loop.md)가 사용량 수집과 `127.0.0.1:5476` 패널 push도 준비한다. 아래 AWS 배포 항목은 이전 계획이며, 현재 남은 확인은 DP7 등록·실계정 토큰 갱신·패널 표시다. 현재 Codex sandbox 안에서는 하위 app-server가 홈 디렉터리에 접근하지 못해 live 조회는 확인하지 못했다.
 
 - 중앙 서버에 `ALL_TOMORROW_COLLECTOR_TOKEN` 설정 후 이 브랜치 배포
 - 이 PC에서 push 주기 실행(예: 작업 스케줄러 5분 간격) 등록

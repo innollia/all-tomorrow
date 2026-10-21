@@ -88,8 +88,14 @@ class PostgresStore:
     async def migrate(self, migration_dir: str | Path) -> None:
         paths = sorted(Path(migration_dir).glob("*.sql"))
         async with self.pool.connection() as connection:
-            for path in paths:
-                await connection.execute(path.read_text(encoding="utf-8"))
+            # DP7의 API/실행기/메타인지가 동시에 부팅해도 schema 생성은 직렬로 한다.
+            await connection.execute("SELECT pg_advisory_lock(hashtext('all-tomorrow-migrations'))")
+            try:
+                for path in paths:
+                    await connection.execute(path.read_text(encoding="utf-8"))
+            finally:
+                await connection.rollback()
+                await connection.execute("SELECT pg_advisory_unlock(hashtext('all-tomorrow-migrations'))")
 
     async def register_project(self, project: Project) -> None:
         async with self.pool.connection() as connection:

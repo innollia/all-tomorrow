@@ -415,6 +415,8 @@ def create_app(
     state_store = web_state or WebState()
     policy = load_edge_policy(policy_path)
     ctl = control or WebControl(InMemoryGoalWorkRunStore())
+    from all_tomorrow.overseer.discord_edge import include_discord_edge
+    include_discord_edge(app, auth, ctl.store)
     from all_tomorrow.storage.artifact_store import LocalArtifactStore
 
     uploads = LocalArtifactStore(upload_dir or "data/artifacts")
@@ -811,6 +813,9 @@ def create_app(
     @app.post("/internal/edge/discord/decide")
     async def internal_decide(payload: EdgeDecisionRequest, request: Request) -> dict[str, Any]:
         auth.verify_edge_token(request.headers.get("authorization"))
+        owner = os.environ.get("DISCORD_OWNER_USER_ID")
+        if owner and payload.discord_user_id != owner:
+            raise HTTPException(status_code=403, detail="owner only")
         analysis_fields = {
             k: v for k, v in payload.model_dump().items()
             if k not in {"discord_user_id", "discord_message_id", "text"}
@@ -823,13 +828,13 @@ def create_app(
             "matched_rule": decision.matched_rule,
         }
         if (
-            decision.action == EdgeAction.CENTRAL_TASK
+            decision.action in {EdgeAction.CENTRAL_TASK, EdgeAction.CENTRAL_QUERY, EdgeAction.PROJECT_ACTION}
             and payload.discord_user_id
             and payload.discord_message_id
             and payload.text
         ):
             stored = await ctl.submit_from_discord(
-                payload.discord_user_id, payload.text, payload.discord_message_id,
+                auth.username if owner else payload.discord_user_id, payload.text, payload.discord_message_id,
             )
             result["goal_id"] = stored["goal_id"]
             result["is_new"] = stored["is_new"]
@@ -872,7 +877,7 @@ def app_from_environment() -> FastAPI:
     semantic = PostgresGoalWorkRunStore(database_url)
     # Feature 11: idempotency keys survive a restart too (same pool, same DB).
     request_store = PostgresRequestStore(database_url, pool=semantic.pool)
-    migration_dir = os.environ.get("ALL_TOMORROW_MIGRATIONS", "migrations")
+    migration_dir = os.environ.get("ALL_TOMORROW_MIGRATIONS", str(Path(__file__).resolve().parents[2] / "migrations"))
 
     from all_tomorrow.device_agent import PostgresDeviceAgentService
 
@@ -899,6 +904,9 @@ def app_from_environment() -> FastAPI:
 
 def run() -> None:
     import asyncio
+    import sys
+
+    from all_tomorrow.async_runtime import run_async
 
     import uvicorn
 
@@ -907,7 +915,11 @@ def run() -> None:
     port = int(os.environ.get("ALL_TOMORROW_PORT", "8080"))
     serve_port = os.environ.get("ALL_TOMORROW_TAILSCALE_SERVE_PORT")
     if not serve_port:
-        uvicorn.run(app, host=host, port=port)
+        if sys.platform == "win32":
+            # Server.serve() uses our running loop; Server.run() creates its own.
+            run_async(uvicorn.Server(uvicorn.Config(app, host=host, port=port)).serve())
+        else:
+            uvicorn.run(app, host=host, port=port)
         return
 
     # Second listener for `tailscale serve` only (see tailnet_auth); same app, lifespan
@@ -923,4 +935,4 @@ def run() -> None:
             trusted.should_exit = True
             await second
 
-    asyncio.run(serve_both())
+    run_async(serve_both())
