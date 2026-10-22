@@ -1,5 +1,10 @@
 # 교차 세션 관제 계획서
 
+### 2026-10-22 메타인지 Antigravity 판단 전환
+
+- **개발완료**(코드·회귀시험): 기본 Antigravity plan 판단, 환경변수 선택·모델 지정, 깨어남별 Codex 대체와 SQLite/Event/일지 기록, 가역적 가설 시험 프롬프트를 연결했다. 작업자·diff 심사는 기존 Codex 순서를 유지한다. 관련 24 passed. 실제 호출은 agy CLI 미발견으로 Gemini 응답 미확인. 전체 시험과 설정은 [DP7 기록](dp7-loop.md)에 남긴다.
+- 전체 **768 passed / 69 skipped / 1 failed**: 기존 OpenCode help smoke가 npx/npm ECOMPROMISED로 실패했다. 시험은 변경하지 않았고 전체 통과는 미확인이다.
+
 ### 2026-10-21 Work 실행·헛도는 깨어남 수정
 
 상태: **개발중**(관제 재등록·실제 Work 성공 검증 대기). 강제 깨어남과 자기 wake_applied 이벤트 재관측을 막고, 작업자별 실패·시간 초과·시험/반영 단계 진단을 Event·executor.log·복구 기록·보고에 연결했다. 예외·무변경 성공 뒤 fallback, WinGet agy 탐색, Interactive/Limited 등록·1분 재기동, 한국어 프롬프트를 보완했다. 관련 64 passed, 전체 747 passed / 69 skipped / 기존 OpenCode smoke 1 failed. 실제 Codex 재현은 sandbox 홈 오류이며 운영 두 Work의 앞 CLI 원인은 미확정이다. 확인/추론 구분과 관제 명령은 [DP7 진행 기록](dp7-loop.md#2026-10-21-work-실패무변경-깨어남-보정)을 따른다.

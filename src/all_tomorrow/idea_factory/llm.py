@@ -17,14 +17,15 @@ class LLMError(RuntimeError):
     pass
 
 
-def chat(model_group: str, system: str, user: str, *, max_tokens: int = 6000, temperature: float = 0.8) -> tuple[str, str]:
+def chat(model_group: str, system: str, user: str, *, max_tokens: int = 6000, temperature: float = 0.8,
+         timeout: float = 300) -> tuple[str, str]:
     """Returns (content, deployment id that served it)."""
     response = httpx.post(
         f"{gateway_url()}/v1/chat/completions",
         headers={"Authorization": f"Bearer {os.environ.get('IDEA_FACTORY_GATEWAY_KEY', '')}"},
         json={"model": model_group, "max_tokens": max_tokens, "temperature": temperature,
               "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]},
-        timeout=300,
+        timeout=timeout,
     )
     if response.status_code != 200:
         raise LLMError(f"gateway {response.status_code}: {response.text[:300]}")

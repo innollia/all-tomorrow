@@ -133,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
     m.add_argument("--force", action="store_true", help="wake even if nothing changed")
     sub.add_parser("cards")
     sub.add_parser("brief", help="write brief.md: projects, activity, oracle stats, Notion profile")
+    sub.add_parser("control-brief", help="write control-brief.md: direction, Notion, Discord, metacognition, activity")
     parser.add_argument("--dir", type=Path, default=None)
     args = parser.parse_args(argv)
 
@@ -181,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
             if not scheduled:
                 return 0
             log.info("published %s for the other PC", store.publish(base))
+            _refresh_control_brief(store, base)
             if no_metacog or not _metacog_due(store):
                 return 0
             args.cmd, args.force = "metacog", False
@@ -199,6 +201,10 @@ def main(argv: list[str] | None = None) -> int:
                 log.warning("PostgreSQL 미설정: 관찰만 했으며 Work 실행 고리는 켜지지 않았습니다")
             log.info("metacog wake %s %s: %d observations, %d actions", result["status"], result["reason"],
                      len(result["observations"]), len(result["actions"]))
+            return 0
+        if args.cmd == "control-brief":
+            from all_tomorrow.overseer.control_brief import refresh
+            print(refresh(store.con, base))
             return 0
         if args.cmd == "brief":
             from all_tomorrow.overseer import brief
@@ -220,6 +226,14 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         store.close()
     return 0
+
+
+def _refresh_control_brief(store, base):
+    from all_tomorrow.overseer.control_brief import refresh
+    try:
+        log.info("control briefing updated: %s", refresh(store.con, base))
+    except Exception as error:
+        log.warning("control briefing failed (previous file kept): %s", type(error).__name__)
 
 
 if __name__ == "__main__":

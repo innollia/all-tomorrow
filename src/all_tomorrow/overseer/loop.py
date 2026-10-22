@@ -164,13 +164,13 @@ async def observe(store, session_store, base: Path, *, registry: dict, redact, p
                          central=central, registry=registry, usage=usage, force=force, **options)
     applied = {e.payload.get("wake_id") for e in await store.list_events() if e.type == "metacog.wake_applied"}
     # 일지 저장과 중앙 저장 사이의 중단도 복구한다. 완료 marker는 모든 행동 저장 뒤에만 쓴다.
-    for wid, actions, refs in session_store.con.execute(
-            "select wake_id,actions,evidence_refs from metacog_wakes where status='done' order by at"):
+    for wid, actions, refs, judge, model, fallback in session_store.con.execute(
+            "select wake_id,actions,evidence_refs,reasoner,model,fallback_reason from metacog_wakes where status='done' order by at"):
         if wid in applied:
             continue
         await materialize_actions(store, json.loads(actions), wake_id=wid,
                                   known_refs=set(json.loads(refs)), registry=registry, redact=redact)
-        await store.append_event(event("metacog.wake_applied", payload={"wake_id": wid}))
+        await store.append_event(event("metacog.wake_applied", payload={"wake_id": wid, "reasoner": judge, "model": model, "fallback_reason": fallback}))
     await reports.sync_events(store, base)
     reports.flush(base)
     return result

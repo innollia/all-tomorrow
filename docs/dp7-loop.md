@@ -1,5 +1,13 @@
 # DP7 자기개선 고리
 
+## 2026-10-22 메타인지 판단 모델 전환
+
+판단 전환 코드·회귀시험은 **개발완료**. 기존 AntigravityWorker와 WinGet 포함 discover_executable을 재사용하며 plan 모드·무인 실행, 기본 모델을 사용한다. `ALL_TOMORROW_METACOG_REASONER=antigravity|codex`(기본 antigravity), `ALL_TOMORROW_METACOG_MODEL`(Antigravity 모델 지정)을 지원한다. 실행·JSON 파싱 실패 시 그 깨어남에서만 Codex로 대체하고 SQLite·wake_applied Event·일지에 판단자/모델/대체 사유를 남긴다. 실패 예외의 프롬프트·비밀값은 기록하지 않는다. 가역적 변경의 가설 시험을 만드는 한국어 프롬프트로 보완했으며 작업자 순서와 Codex diff 심사는 유지했다.
+
+관련 시험 **24 passed**. 실제 작은 JSON 요청은 reasoner 진입점에서 **CLI not found**로 종료되어 Gemini 응답은 미확인이다. Stage 1 전체는 개발중이다. 기본 pytest 임시 폴더 접근 거부 때문에 `--basetemp=C:/Users/fixme/.all-tomorrow/gemini-judge-full-1 -o cache_dir=C:/Users/fixme/.all-tomorrow/gemini-judge-cache`로 실행하며 전체 결과는 `C:/Users/fixme/.all-tomorrow/gemini-judge-pytest.txt`에 둔다. 외부 Jev checkout은 없어 diff·회귀시험으로 검토했다. 커밋하지 않았다.
+
+전체 결과: **768 passed / 69 skipped / 1 failed**. 실패는 변경하지 않은 `test_workers.py::TestRealCliSmoke::test_opencode_cli_help_smoke`의 외부 npx 실행(returncode 1)이다. `npm_config_cache=C:/Users/fixme/.all-tomorrow/gemini-judge-npm-cache`로 해당 시험을 재실행해도 npm **ECOMPROMISED**로 실패했다. 전체 통과는 확인하지 못했다. 최종 Windows Proactor 명시 수정 뒤 관련 24개 시험을 다시 통과했고 `git diff --check`도 통과했다.
+
 상태: **개발중**. 코드와 InMemory 고리 시험이 있으며, 실제 Postgres·Discord·재부팅 뒤 운영은 확인 전이다. 예약 작업 등록 스크립트는 이번 작업에서 실행하지 않았다. 사용자가 아무 요청을 하지 않았는데 발견·수정 보고가 디스코드에 도착해야 실제 운영 완료다.
 
 ## 2026-10-21 Work 실패·무변경 깨어남 보정

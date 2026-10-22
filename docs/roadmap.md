@@ -13,6 +13,10 @@
 
 ## 지금 바로 작업 가능한 것
 
+- 2026-10-22 관제 브리핑 강화: **개발완료**(중앙 구현·회귀시험·실제 노션 브리핑). Discord 멱등 수신·무료 모델 증분 요약·매시간/수동 브리핑을 연결했다. 관련 18 passed, 전체 781 passed / 69 skipped / 기존 외부 OpenCode smoke 1 failed. 실제 Discord 송신 연결은 미확인이다. [검증·실행 기록](control-brief.md).
+
+- 2026-10-22 메타인지 Antigravity 판단 전환: **개발완료**(코드·가짜 실행기 회귀시험). 기본 Antigravity, 깨어남별 Codex 대체와 모델·실패 사유 기록을 연결했다. 이 환경에는 agy CLI가 없어 실제 Gemini 응답은 미확인이다. Stage 1은 개발중을 유지한다. [진행 기록](dp7-loop.md).
+
 - 2026-10-22 Claude 로그인 오보·파일 보고 답장 보정: **개발완료**(코드·회귀시험). 명시적 User-Agent, 인증 만료와 통신 오류 분리, 파일 답장 보존·메타인지 전달을 구현했다. 실계정·Discord 운영 확인은 별도이며 Stage 1은 개발중을 유지한다. [진행 기록](overseer-plan.md).
 
 Stage 0는 [종료 검증 기록](roadmap/stage-00-assembly/00-close-live-verification.md)에 따라 개발완료다. 지금은 **Stage 1의 메타인지 → Work → 작업자 → 시험 → 반영/되돌림 → 디스코드 보고 고리**를 DP7에서 연결한다. 부품 테스트 통과를 Stage 전체의 운영 완료로 보지 않는다.

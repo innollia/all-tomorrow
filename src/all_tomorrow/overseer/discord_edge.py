@@ -1,9 +1,11 @@
 """Eve의 보고 수신과 답장 연결. 기존 edge 토큰만 사용한다."""
 import asyncio
 import os
+from pathlib import Path
+from typing import Annotated, Literal
 
 from fastapi import HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, ValidationError
 
 from all_tomorrow.domain.ids import new_event_id
 from all_tomorrow.storage.semantic_store import SemanticEvent
@@ -24,8 +26,49 @@ class Reply(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
+Snowflake = Annotated[str, Field(pattern=r"^[0-9]{1,32}$")]
+
+
+class DiscordMessage(BaseModel):
+    message_id: Snowflake
+    guild_id: Snowflake
+    guild_name: str
+    channel_id: Snowflake
+    channel_name: str
+    thread_id: Snowflake | None = None
+    author_id: Snowflake
+    author_name: str
+    author_is_bot: bool = Field(strict=True)
+    created_at: AwareDatetime
+    content: str
+    reply_to: Snowflake | None = None
+
+
+class MessageBatch(BaseModel):
+    source: Literal["eve"]
+    batch_id: str = Field(min_length=1, max_length=256)
+    messages: list[DiscordMessage] = Field(max_length=500)
+
+
 def include_discord_edge(app, auth, store):
     lock = asyncio.Lock()
+
+    @app.post("/internal/edge/discord/messages")
+    async def messages(request: Request):
+        auth.verify_edge_token(request.headers.get("authorization"))
+        body = bytearray()
+        async for chunk in request.stream():
+            if len(body) + len(chunk) > 2 * 1024 * 1024:
+                raise HTTPException(413, "본문 최대 2MB")
+            body.extend(chunk)
+        try:
+            batch = MessageBatch.model_validate_json(body)
+        except ValidationError:
+            raise HTTPException(422, "디스코드 메시지 배치 형식 오류") from None
+        from all_tomorrow.overseer.discord_digest import receive
+        from all_tomorrow.overseer.redact import Redactor, default_secret_files
+        redact = Redactor.from_files(default_secret_files(Path.home()))
+        return await asyncio.to_thread(receive, default_dir(), batch, redact)
 
     def check(request):
         auth.verify_edge_token(request.headers.get("authorization"))
