@@ -448,6 +448,9 @@ def create_app(
         collector_token=collector_token,
     ))
 
+    from all_tomorrow.api_logging import FailureLogMiddleware
+    app.add_middleware(FailureLogMiddleware)
+
     @app.get("/healthz")
     async def health() -> dict[str, Any]:
         return {"ok": True, "service": "all-tomorrow", "version": app.version}
@@ -917,15 +920,15 @@ def run() -> None:
     if not serve_port:
         if sys.platform == "win32":
             # Server.serve() uses our running loop; Server.run() creates its own.
-            run_async(uvicorn.Server(uvicorn.Config(app, host=host, port=port)).serve())
+            run_async(uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_config=None, access_log=False)).serve())
         else:
-            uvicorn.run(app, host=host, port=port)
+            uvicorn.run(app, host=host, port=port, log_config=None, access_log=False)
         return
 
     # Second listener for `tailscale serve` only (see tailnet_auth); same app, lifespan
     # runs once on the main listener so DBOS/Postgres start a single time.
-    main = uvicorn.Server(uvicorn.Config(app, host=host, port=port))
-    trusted = uvicorn.Server(uvicorn.Config(app, host=host, port=int(serve_port), lifespan="off"))
+    main = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_config=None, access_log=False))
+    trusted = uvicorn.Server(uvicorn.Config(app, host=host, port=int(serve_port), lifespan="off", log_config=None, access_log=False))
 
     async def serve_both() -> None:
         second = asyncio.create_task(trusted.serve())

@@ -53,6 +53,16 @@ foreach ($component in @('api', 'executor', 'overseer', 'collect')) {
     Start-ScheduledTask -TaskName "$TaskPrefix-$component"
 }
 Write-Host '웹 API(127.0.0.1:5476), 작업 실행기, 메타인지, 기록 수집을 등록·시작했습니다.'
+# API 자체가 멈춰도 검사할 수 있도록 별도 S4U 작업으로 분당 실행한다.
+$watchAction = New-ScheduledTaskAction -Execute $Python `
+    -Argument ('-m all_tomorrow.overseer.runtime api-watchdog --api-task "' + $TaskPrefix + '-api"') -WorkingDirectory $Repo
+$watchTriggers = @($triggers) + (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+    -RepetitionInterval (New-TimeSpan -Minutes 1))
+$watchSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName "$TaskPrefix-api-watchdog" -Action $watchAction -Trigger $watchTriggers `
+    -Principal $principal -Settings $watchSettings -Force | Out-Null
+Start-ScheduledTask -TaskName "$TaskPrefix-api-watchdog"
 $activityAction = New-ScheduledTaskAction -Execute $Python -Argument '-m all_tomorrow.overseer.runtime activity' -WorkingDirectory $Repo
 Register-ScheduledTask -TaskName "$TaskPrefix-activity" -Action $activityAction `
     -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $user) -Principal $interactive -Settings $settings -Force | Out-Null

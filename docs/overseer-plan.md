@@ -1,5 +1,14 @@
 # 교차 세션 관제 계획서
 
+### 2026-10-23 중앙 API 무응답 감시
+
+- **개발완료**(코드·회귀시험): API와 독립된 1분 S4U 작업에서 새 연결로 `/healthz`를 3초 타임아웃 검사한다. 3회 연속 실패하면 연결 상태별 수·리스너 PID·핸들 수·스레드 상태를 기록하고 API 예약 작업만 종료/정지 확인/시작한다. 재시작 시도(명령 실패 포함)를 영속 저장하고 최근 1시간 3회를 넘기려 하면 자동 복구를 중단하고 `reports.enqueue`에 `[보고] 중앙 API …`를 적재한다. `api.log`와 `api-watchdog.jsonl`에 시도·결과를 남기며 실제 회복은 다음 health 검사로 판정한다.
+- 원인 구분: **확정**은 Uvicorn 기본 로깅이 stderr/stdout 전용·propagate=false여서 runtime의 `api.log`에 연결되지 않았다는 점이다(설치 Uvicorn 0.54.0 설정·별도 프로세스 파일 기록 시험으로 확인). `log_config=None, access_log=False`로 root 파일 로그에 연결하고, HTTP 4xx/5xx·처리 예외만 URL/헤더/본문/예외 메시지 없이 기록한다. asyncio accept 오류도 같은 파일에 남는다. **장애 원인은 미확정**이다. CPython 3.14.6의 `_accept_connection`은 자원 부족 시 reader를 제거하고 지연 재등록하며, 다른 OSError는 루프 오류 처리기로 전달한다. 해당 경로가 당시 실패했다는 증거는 없다. Windows 513 소켓 `select()`의 `ValueError: too many file descriptors in select()`는 재현했지만 루프 유휴 증상과의 인과·누수는 증명하지 못했다([Python 공식 제약](https://docs.python.org/3.13/library/asyncio-platforms.html)). 따라서 루프 구현은 바꾸지 않았다.
+- 운영 관측: 현재 5476 health는 정상. 기존 api.log 32줄에서 accept 오류/Uvicorn 기동 로그는 없었다. 이 세션의 `Get-NetTCPConnection`은 `PermissionDenied / HRESULT 0x80041003`이라 운영 연결·스레드 진단은 미확인이다. 진단 명령의 UTF-8을 명시하고, 권한/시간 초과 등 진단 실패는 오류 종류만 기록한 뒤 재시작한다.
+- 관제 배포: 관리자 PowerShell에서 `scripts/dp7-up.ps1` 재실행으로 `AllTomorrow-DP7-api-watchdog`를 새로 등록한다(사용자 TaskPrefix도 지원). 기존 API 프로세스는 별도로 `Stop-ScheduledTask -TaskName AllTomorrow-DP7-api` 후 `Start-ScheduledTask -TaskName AllTomorrow-DP7-api`로 재시작해야 새 로그 설정이 적용된다. 등록 스크립트의 Start만으로 실행 중 API가 교체되지는 않는다. 실작업에서 분당 실행·정지/시작 권한·장애 복구·진단 파일을 확인한다. 자동 복구 중단은 시간이 지나도 유지하며, 수동 점검·복구 후 overseer 디렉터리의 `api-watchdog.json`을 제거하면 해제된다. 기본 Eve 전송은 중앙 API가 살아야 적재된 보고를 가져갈 수 있으므로, API가 계속 멈춘 동안에는 Discord 즉시 전달을 보장하지 않는다. 커밋·운영 작업 등록/재시작은 수행하지 않았다.
+- 검증: 관련 **44 passed**, 최종 전체 **802 passed / 69 skipped / 1 failed**(80.21초). 실패는 기존 `tests/test_workers.py::TestRealCliSmoke::test_opencode_cli_help_smoke`의 외부 npx 실행(returncode=1)이며, 쓰기 가능한 npm 캐시를 지정한 별도 실행도 실패했다. 지정 DP7 Python에 `--basetemp`·`-o cache_dir`만 추가해 기존 tmp/cache 접근 제한을 피했으며 시험 제외·skip 변경은 없다. 원본 결과는 `.artifacts/api-watch-full-final.txt`, 관련 결과는 `.artifacts/api-watch-related.txt`에 있다. 실제 PowerShell 등록 스크립트는 가짜 scheduler cmdlet으로 실행해 6개 작업과 watchdog의 S4U/분당/IgnoreNew/60초 실행 제한을 확인했다. PowerShell 구문·diff 공백 검사 통과. Jev 실행기 미설치로 diff·회귀시험을 직접 검토했다.
+- 변경 파일: `src/all_tomorrow/overseer/api_watchdog.py`, `src/all_tomorrow/api_logging.py`, `src/all_tomorrow/overseer/runtime.py`, `src/all_tomorrow/web.py`, `scripts/dp7-up.ps1`, `tests/test_api_watchdog.py`, `tests/test_overseer_hands.py`, 이 문서, `docs/roadmap.md`, `docs/roadmap/stage-01-researcher/index.md`, `docs/roadmap/stage-01-researcher/04-runtime-and-tools.md`. 시작 전에 있던 Syncthing 관련 변경은 보존했다.
+
 ### 2026-10-22 메타인지 Antigravity 판단 전환
 
 - **개발완료**(코드·회귀시험): 기본 Antigravity plan 판단, 환경변수 선택·모델 지정, 깨어남별 Codex 대체와 SQLite/Event/일지 기록, 가역적 가설 시험 프롬프트를 연결했다. 작업자·diff 심사는 기존 Codex 순서를 유지한다. 관련 24 passed. 실제 호출은 agy CLI 미발견으로 Gemini 응답 미확인. 전체 시험과 설정은 [DP7 기록](dp7-loop.md)에 남긴다.
@@ -253,6 +262,10 @@
 - 변경(2026-10-20 23:15, 사용자: "오픈코드는 버려"): OpenCode를 수집 대상에서 뺐다(`Roots.listings`, 어댑터 코드는 남김). aaaa 저장소의 opencode 세션 529개와 카드 5개를 지웠다. DP7에도 같은 정리를 요청했다. 사용자는 "요약은 사용량이 든다"고 생각했지만, 모으기(요약본 만들기)는 모델을 쓰지 않는다고 설명했다. 사용량이 드는 것은 DP7의 정리(무료 모델)와 메타인지(Codex)뿐이다.
 
 ### DP7 자기개선 고리 연결 (2026-10-21)
+
+- Syncthing 감시 전체 시험(2026-10-23): **787 passed / 69 skipped / 1 failed**, 기존 `test_opencode_cli_help_smoke`의 외부 npx 실행 실패다. 기본 임시/캐시 폴더 접근 거부 때문에 지정 DP7 Python에 쓰기 가능한 `--basetemp`·`cache_dir`를 사용했다. npm 캐시를 작업 폴더로 옮겨도 외부 smoke 실패가 남았으며 시험 제거·skip 변경은 없다. 원본은 `.artifacts/sync-watch-pytest-final.log`, 최종 관련 시험은 20 passed다. 프로세스/포트 실운영 확인과 Discord 실제 수신은 남았다.
+
+- 2026-10-23 Syncthing 자동 감시: **개발완료**(코드·회귀시험). `python -m all_tomorrow.overseer sync-health`와 `run --no-metacog`/`run --collect-only`의 수집 직전 점검을 연결했다. 설정 키 ping, 부모 트리, Syncthing 소유 TCP 포트, 원격 연결·lastSeen 및 2시간 초과/Tailscale 응답을 관측한다. 키/연결 거부·중복·포트 누락만 재기동하며 같은 원인은 1시간 간격, 로컬 날짜 하루 3회로 제한한다. 조회 권한 오류는 고장으로 단정하거나 재시작하지 않는다. JSON·SQLite에 결과와 최근 7일 이상 이력을 보존하고 peers 사본을 DP7이 읽어 기존 reports.enqueue로 날짜/호스트/원인별 한 번 보고한다. 동기화가 끊긴 동안 노트북 새 결과는 DP7에 도착할 수 없으며 재연결 뒤 전달된다. 설정·.stignore·다른 홈 데이터는 수정하지 않았다. 00:41 실제 DP7 API pong, AAAA-laptop connected=true, lastSeen=2026-10-23T00:41:05+09:00. 최초 구현의 PowerShell 비종료 오류를 빈 프로세스 목록으로 오인해 복구 1회 시도·실패 기록이 생겼다. CIM 접근 거부를 명시적 점검 불가로 처리하도록 수정하고 재시도 방지 시험을 추가했다. 최종 프로세스 트리/포트 소유 검증은 sandbox 권한 제한으로 미확인이다. 관련 20 passed, 전체 결과는 아래 기록을 따른다. Jev 설치/키가 없어 diff·시험으로 검토했으며 커밋하지 않았다.
 
 - 2026-10-22 로그인 오보·답장 보정: **개발완료**(코드·회귀시험). Claude 갱신·사용량 요청에 명시적 User-Agent를 넣고 실제 인증 거부와 차단·통신·파일 오류를 분리해 비밀값 없는 이유를 중앙에도 보존했다. 파일 보고를 Event로만 찾던 404 경로를 확인·수정했으며 답장을 중복 없이 원자 저장하고 다음 메타인지 스냅샷·깨움·근거 참조에 연결했다. 모르는 메시지는 200/linked=false다. 최종 관련 **33 passed**, 전체 **763 passed / 69 skipped / 1 failed**(기존 `test_opencode_cli_help_smoke`: npx 60초 timeout). 기본 tmp/cache 권한 오류로 지정 DP7 Python에 `--basetemp`·`-o cache_dir`만 추가했으며 시험 제거·skip 변경은 없다. Jev 설치가 없어 diff·회귀시험으로 검토했고 공백 검사도 통과했다. Eve 수정·커밋·운영 재시작은 하지 않았으며 실계정·Discord 운영 확인은 남았다.
 

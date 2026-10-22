@@ -105,7 +105,8 @@ async def serve(component: str, base: Path):
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("component", choices=("api", "executor", "overseer", "collect", "activity"))
+    parser.add_argument("component", choices=("api", "executor", "overseer", "collect", "activity", "api-watchdog"))
+    parser.add_argument("--api-task", default="AllTomorrow-DP7-api")
     args = parser.parse_args(argv)
     load_key_pool()
     os.chdir(REPO)
@@ -122,6 +123,9 @@ def main(argv=None):
             os.environ.setdefault("ALL_TOMORROW_MIGRATIONS", str(REPO / "migrations"))
             from all_tomorrow.web import run
             run()
+        elif args.component == "api-watchdog":
+            from all_tomorrow.overseer.api_watchdog import check_once
+            check_once(base, task=args.api_task)
         elif args.component == "activity":
             from all_tomorrow.overseer.schedule import local_idle_seconds
             from all_tomorrow.overseer.workspace import save

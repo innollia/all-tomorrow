@@ -281,7 +281,7 @@ $source = $source -replace '(?m)^#Requires -RunAsAdministrator\r?\n', ''
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout.strip().splitlines()[-1])
     tasks = {t["name"].removeprefix("Fake-DP7-"): t for t in data["tasks"]}
-    assert len(data["starts"]) == len(tasks) == 5
+    assert len(data["starts"]) == len(tasks) == 6
     for component in ("executor", "overseer"):
         task = tasks[component]
         assert task["principal"]["LogonType"] == "Interactive"
@@ -292,6 +292,13 @@ $source = $source -replace '(?m)^#Requires -RunAsAdministrator\r?\n', ''
         assert task["settings"]["RestartCount"] == 99
         assert task["action"]["Argument"].endswith("runtime " + component)
     assert tasks["api"]["principal"]["LogonType"] == tasks["collect"]["principal"]["LogonType"] == "S4U"
+    watchdog = tasks["api-watchdog"]
+    assert watchdog["principal"]["LogonType"] == "S4U"
+    assert watchdog["settings"]["MultipleInstances"] == "IgnoreNew"
+    assert watchdog["settings"]["ExecutionTimeLimit"]["TotalSeconds"] == 60
+    assert "RestartCount" not in watchdog["settings"]
+    assert any(t.get("RepetitionInterval", {}).get("TotalSeconds") == 60 for t in watchdog["triggers"])
+    assert watchdog["action"]["Argument"] == '-m all_tomorrow.overseer.runtime api-watchdog --api-task "Fake-DP7-api"'
 
 
 async def test_restart_keeps_previous_worker_failure_diagnostic(tmp_path):

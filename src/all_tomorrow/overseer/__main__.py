@@ -120,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     c = sub.add_parser("collect")
     c.add_argument("--source", action="append", choices=list(Roots.default().listings()))
     sub.add_parser("stats")
+    sub.add_parser("sync-health", help="Syncthing 점검 및 제한된 자동 복구")
     d = sub.add_parser("distill")
     d.add_argument("--pilot", type=int, default=0, help="sessions per source for a sample run")
     d.add_argument("--session", action="append", default=[], help="source:session_id")
@@ -146,6 +147,13 @@ def main(argv: list[str] | None = None) -> int:
 
     store = SessionStore(base / "overseer.sqlite")
     try:
+        if args.cmd in ("run", "sync-health"):
+            import json
+            from all_tomorrow.overseer import sync_health
+            result = sync_health.run(base, store, collect_only=getattr(args, "collect_only", False))
+            if args.cmd == "sync-health":
+                print(json.dumps(result, ensure_ascii=False))
+                return 0
         if args.cmd in ("collect", "run"):
             redact = Redactor.from_files(default_secret_files(Path.home()))
             log.info("redactor loaded %d secret values", redact.value_count)

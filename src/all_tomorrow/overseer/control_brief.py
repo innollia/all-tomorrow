@@ -185,7 +185,8 @@ def load_work_counts() -> str:
 
 
 def metacognition(base: Path, counts: str) -> str:
-    lines = [counts]
+    from .sync_health import summary
+    lines = [counts, summary(base)]
     paths = sorted((base / "reports").glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not paths:
         lines.append("최근 보고 없음")
