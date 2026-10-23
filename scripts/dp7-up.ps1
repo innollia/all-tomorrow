@@ -3,10 +3,12 @@
 [CmdletBinding()]
 param(
     [string]$Python = "$env:USERPROFILE\.all-tomorrow\dp7-runtime\Scripts\python.exe",
-    [string]$Repo = (Split-Path -Parent $PSScriptRoot),
+    [string]$Repo = '',
     [string]$TaskPrefix = 'AllTomorrow-DP7'
 )
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 leaves $PSScriptRoot empty inside param defaults.
+if (-not $Repo) { $Repo = Split-Path -Parent $PSScriptRoot }
 $Repo = (Resolve-Path -LiteralPath $Repo).Path
 $Python = (Resolve-Path -LiteralPath $Python).Path
 $pool = Join-Path $env:USERPROFILE '.all-tomorrow\key-pool.env'
