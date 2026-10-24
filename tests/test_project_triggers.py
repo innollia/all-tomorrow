@@ -156,3 +156,14 @@ def test_prompt_and_claude_cli_contract(tmp_path):
     assert worker.parse_output('{"type":"result","subtype":"success","result":"OK"}')["output"] == "OK"
     with pytest.raises(RuntimeError):
         worker.parse_output('{"type":"result","subtype":"error_during_execution","is_error":true}')
+
+
+def test_worker_mode_prompt_uses_project_instructions(tmp_path):
+    from all_tomorrow.overseer.project_triggers import prompt_for
+    proc = tmp_path / "CLAUDE.md"
+    proc.write_text("게임 지침", encoding="utf-8")
+    class Call:
+        def model_dump(self):
+            return {"project": "pai-games", "message_id": "9"}
+    text = prompt_for("pai-games", {"procedure": str(proc), "mode": "worker", "channel_id": "1"}, [Call()])
+    assert "게임 지침" in text and "discord_thread.py" not in text
