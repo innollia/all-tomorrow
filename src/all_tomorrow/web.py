@@ -417,6 +417,8 @@ def create_app(
     ctl = control or WebControl(InMemoryGoalWorkRunStore())
     from all_tomorrow.overseer.discord_edge import include_discord_edge
     include_discord_edge(app, auth, ctl.store)
+    from all_tomorrow.overseer.project_triggers import include_project_triggers
+    include_project_triggers(app, auth, ctl.store)
     from all_tomorrow.storage.artifact_store import LocalArtifactStore
 
     uploads = LocalArtifactStore(upload_dir or "data/artifacts")

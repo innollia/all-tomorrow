@@ -429,6 +429,38 @@ class CodexWorker:
                             payload=payload, duration_ms=duration)
 
 
+class ClaudeWorker(CodexWorker):
+    """Headless project manager, restricted to file tools and git/python Bash."""
+
+    def __init__(self, *, argv: list[str] | None = None, **kwargs: Any) -> None:
+        super().__init__(argv=argv or ["claude"], **kwargs)
+
+    @property
+    def worker_id(self) -> str:
+        return "claude"
+
+    def build_argv(self, prompt: str) -> list[str]:
+        return [*self._argv, "-p", "--output-format", "json", "--no-session-persistence",
+                "--setting-sources", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+                "--tools", "Read,Write,Edit,Bash", "--allowedTools",
+                "Read,Write,Edit,Bash(git *),Bash(python *)", "--permission-mode", "dontAsk",
+                "--disable-slash-commands", "--", prompt]
+
+    def parse_output(self, output: str) -> dict[str, Any]:
+        result = json.loads(output)
+        if result.get("type") != "result" or result.get("is_error") \
+                or result.get("subtype") != "success" or result.get("permission_denials"):
+            raise WorkerError("Claude did not complete successfully")
+        return {"output": result.get("result", ""), "session_id": result.get("session_id")}
+
+    async def execute(self, request: WorkerRequest) -> WorkerResult:
+        # DP7's API uses Selector for PostgreSQL; subprocess pipes need Proactor.
+        if os.name == "nt":
+            return await asyncio.to_thread(lambda: asyncio.run(
+                super(ClaudeWorker, self).execute(request), loop_factory=asyncio.ProactorEventLoop))
+        return await super().execute(request)
+
+
 class KiroWorker(CodexWorker):
     """Kiro headless text protocol; JSON event schema is not assumed."""
 

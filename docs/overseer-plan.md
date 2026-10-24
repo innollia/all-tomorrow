@@ -279,3 +279,4 @@
 - 최종 관련 시험: 89 passed. 전체 python -m pytest -q: 720 passed, 69 skipped, 1 failed. 기존 OpenCode 실 CLI help smoke가 이 Windows sandbox에서 바이너리를 실행하지 못했다. 기존 Antigravity smoke는 이번 PATH에서 CLI가 없어 skip됐다. 시험을 제거하거나 skip으로 바꾸지 않았다. 원본 결과: .artifacts/pytest-loop-final.txt.
 - PowerShell 구문·Python 컴파일·diff 공백 검사 통과. 실제 Postgres(AT_TEST_POSTGRES_URL 미설정), Discord 전송, 실계정 사용량 갱신, 재부팅 뒤 운영은 확인 전이다. 이 sandbox의 하위 Codex는 홈 디렉터리 접근 문제로 live 조회를 확인하지 못했다.
 - Stage 0 완료 기록은 유지하고, Stage 1은 개발중, Stage 2·3은 선행작업 대기로 정정했다. 부분 시험 통과를 전체 운영 완료로 표시하지 않는다. git 커밋은 하지 않았다.
+- Discord 스레드 멘션 호출: Eve가 위임 채널의 멘션을 `POST /internal/edge/project-trigger`로 넘기면 `config/project-triggers.json` 등록부에서 프로젝트를 찾아 기존 Work/Run 경로로 Claude CLI(`ClaudeWorker`)를 해당 폴더에서 headless 실행한다. 실행 중이면 후속 1회로 합치고, 프로젝트당 1시간 6회 상한 초과는 거부 후 reports로 보고한다. 단순 질문은 답만, 보고·계획 변경만 기록 절차를 적용한다. 시험은 `tests/test_project_triggers.py`(가짜 실행기). 실제 Claude CLI·Discord 호출은 배포 후 확인 전이다.
