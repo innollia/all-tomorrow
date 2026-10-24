@@ -68,3 +68,6 @@ Stage 1 문서에 남은 custom queue/lease/LLM-client 지시는 Stage 0의 재�
 
 `uv run`은 오프라인에서 의존성을 풀지 못한다. 이미 설치된 런타임으로 돌린다:
 `C:\Users\fixme\.all-tomorrow\dp7-runtime\Scripts\python.exe -m pytest -q --deselect tests/test_opencode_smoke.py`
+
+## 관제
+관제 역할을 맡은 에이전트는 `docs/overseer-role.md`를 먼저 읽고 따른다.
