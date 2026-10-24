@@ -85,3 +85,17 @@ def test_missing_logins_are_reported_not_raised(tmp_path) -> None:
 
     snapshot = collect(tmp_path)
     assert [p["status"] for p in snapshot["providers"]] == ["not_logged_in", "not_logged_in"]
+
+
+def test_exhausted_windows_distinguishes_stale_log_from_confirmed():
+    from datetime import UTC, datetime, timedelta
+    from all_tomorrow.usage import exhausted_windows
+    now = datetime.now(UTC)
+    past = (now - timedelta(hours=1)).isoformat()
+    future = (now + timedelta(hours=1)).isoformat()
+    full = lambda source, reset, pct=100: {"source": source, "windows": [{"percent": pct, "resets_at": reset}]}
+    assert exhausted_windows(full("log", past)) == []          # 초기화 지난 과거 기록: 확인 불가
+    assert exhausted_windows(full("log", future))              # 초기화 전 최신 100%: 차단 유지
+    assert exhausted_windows(full("live", past))               # 실시간 관측: 확정
+    assert exhausted_windows(full("log", future, 40)) == []    # 잔량 있음
+    assert exhausted_windows({"windows": [{"percent": 100}]})  # 출처 불명: 보수적 차단

@@ -223,6 +223,7 @@ def collect_codex(home: Path, *, live: bool = True) -> dict[str, Any]:
         entry["status"] = "not_logged_in"
         return entry
     found = None
+    source = "log"
     if live and home == Path.home():
         try:
             raw = asyncio.run(codex_live_limits())
@@ -231,6 +232,7 @@ def collect_codex(home: Path, *, live: bool = True) -> dict[str, Any]:
                       for key in ("primary", "secondary") if raw.get(key)}
             if limits:
                 found = limits, _now()
+                source = "live"
         except Exception:
             pass  # 오류 본문을 남기지 않고 관측 시각이 있는 로그로 돌아간다.
     found = found or latest_codex_rate_limits(codex / "sessions")
@@ -246,8 +248,35 @@ def collect_codex(home: Path, *, live: bool = True) -> dict[str, Any]:
             entry["windows"].append(_window(label, window.get("used_percent"), window.get("resets_at")))
     # Codex only records limits when a session runs; observed_at says how fresh they are.
     entry["observed_at"] = observed_at
+    entry["source"] = source
     entry["status"] = "connected"
     return entry
+
+
+def _instant(value: Any) -> datetime | None:
+    try:
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value, UTC)
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (ValueError, OverflowError, OSError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def exhausted_windows(entry: dict[str, Any], now: datetime | None = None) -> list[dict[str, Any]]:
+    """확정 소진 창만 돌려준다. 실시간 관측이 아닌 로그 기록은 초기화 시각이 지났으면
+    과거 값이므로 소진으로 단정하지 않는다(확인 불가). 출처·초기화 시각이 불명이면 보수적으로 소진."""
+    now = now or datetime.now(UTC)
+    stale_possible = entry.get("source") == "log"
+    result = []
+    for window in entry.get("windows", []):
+        if window.get("percent", 0) < 100:
+            continue
+        reset = _instant(window.get("resets_at"))
+        if stale_possible and reset is not None and reset <= now:
+            continue
+        result.append(window)
+    return result
 
 
 def collect(home: Path | None = None) -> dict[str, Any]:

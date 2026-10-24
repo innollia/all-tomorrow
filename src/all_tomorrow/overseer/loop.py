@@ -210,9 +210,9 @@ async def run_worker(task: dict, candidate: Path) -> dict:
                 record(diagnostic(name, "작업", status="EXECUTABLE_NOT_FOUND", error="작업자 실행 파일을 찾지 못했습니다"))
                 continue
             if name == "codex":
-                from all_tomorrow.usage import collect_codex
+                from all_tomorrow.usage import collect_codex, exhausted_windows
                 usage = await asyncio.to_thread(collect_codex, Path.home())
-                if any(w["percent"] >= 100 for w in usage.get("windows", [])):
+                if exhausted_windows(usage):
                     record(diagnostic(name, "작업", status="QUOTA_EXHAUSTED", error="Codex 잔량 없음"))
                     continue
             if name == "antigravity":
