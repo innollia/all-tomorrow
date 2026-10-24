@@ -9,6 +9,13 @@
 - 검증: 관련 **44 passed**, 최종 전체 **802 passed / 69 skipped / 1 failed**(80.21초). 실패는 기존 `tests/test_workers.py::TestRealCliSmoke::test_opencode_cli_help_smoke`의 외부 npx 실행(returncode=1)이며, 쓰기 가능한 npm 캐시를 지정한 별도 실행도 실패했다. 지정 DP7 Python에 `--basetemp`·`-o cache_dir`만 추가해 기존 tmp/cache 접근 제한을 피했으며 시험 제외·skip 변경은 없다. 원본 결과는 `.artifacts/api-watch-full-final.txt`, 관련 결과는 `.artifacts/api-watch-related.txt`에 있다. 실제 PowerShell 등록 스크립트는 가짜 scheduler cmdlet으로 실행해 6개 작업과 watchdog의 S4U/분당/IgnoreNew/60초 실행 제한을 확인했다. PowerShell 구문·diff 공백 검사 통과. Jev 실행기 미설치로 diff·회귀시험을 직접 검토했다.
 - 변경 파일: `src/all_tomorrow/overseer/api_watchdog.py`, `src/all_tomorrow/api_logging.py`, `src/all_tomorrow/overseer/runtime.py`, `src/all_tomorrow/web.py`, `scripts/dp7-up.ps1`, `tests/test_api_watchdog.py`, `tests/test_overseer_hands.py`, 이 문서, `docs/roadmap.md`, `docs/roadmap/stage-01-researcher/index.md`, `docs/roadmap/stage-01-researcher/04-runtime-and-tools.md`. 시작 전에 있던 Syncthing 관련 변경은 보존했다.
 
+### 2026-10-24 Claude 최후 수단 대체
+
+사용자 결정: Antigravity와 Codex가 모두 실패·소진일 때만 Claude Sonnet(`claude-sonnet-5-5`), 그것도 안 되면 Haiku(`claude-haiku-5-5`), effort low.
+- 메타인지(`metacog.py`): 선택한 판단자 → codex → `claude_reasoner`(Read만 허용한 헤드리스 `claude -p`). judge 기록의 reasoner/model/fallback_reason에 실제 쓴 판단자와 앞 실패 형식명을 남긴다.
+- Work(`loop.py run_worker`): 기존 순서(codex·antigravity·무료 모델) 뒤에만 `claude-sonnet` → `claude-haiku` 작업자(ClaudeWorker)를 시도한다. 전부 실패하면 기존대로 진단과 함께 롤백 보고. 보고 중복은 기존 event id 단위 멱등 enqueue를 그대로 쓴다.
+- 시험: `tests/test_overseer_metacog.py`, `tests/test_overseer_hands.py`. 상태: 개발완료, 운영 재시작은 관제.
+
 ### 2026-10-22 메타인지 Antigravity 판단 전환
 
 - **개발완료**(코드·회귀시험): 기본 Antigravity plan 판단, 환경변수 선택·모델 지정, 깨어남별 Codex 대체와 SQLite/Event/일지 기록, 가역적 가설 시험 프롬프트를 연결했다. 작업자·diff 심사는 기존 Codex 순서를 유지한다. 관련 24 passed. 실제 호출은 agy CLI 미발견으로 Gemini 응답 미확인. 전체 시험과 설정은 [DP7 기록](dp7-loop.md)에 남긴다.

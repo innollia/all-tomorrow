@@ -263,7 +263,47 @@ async def run_worker(task: dict, candidate: Path) -> dict:
     except Exception as error:
         record(exception_diagnostic("free", "작업", error, redact))
         reset_candidate(candidate)
-        raise WorkerExecutionError(attempts) from None
+    # 기존 작업자(Codex·Antigravity·무료)가 모두 실패·소진된 뒤의 최후 수단: Sonnet → Haiku.
+    for label, model in CLAUDE_LAST_RESORT:
+        result = None
+        try:
+            adapter = claude_worker(model, candidate)
+            if not await adapter.is_available():
+                record(diagnostic(label, "작업", status="EXECUTABLE_NOT_FOUND", error="작업자 실행 파일을 찾지 못했습니다"))
+                continue
+            log.info("작업자 시작 worker=%s work=%s pid=%s", label, candidate.parent.name, os.getpid())
+            result = await adapter.execute(WorkerRequest(str(uuid4()), str(uuid4()), task["project_id"],
+                                                         adapter.capabilities, {"cwd": str(candidate), "task": prompt}))
+            payload = result.payload or {}
+            if result.status != WorkerStatus.SUCCESS:
+                record(diagnostic(label, "작업", status=result.status.value, error=result.error,
+                    exit_code=payload.get("exit_code"), stderr=payload.get("stderr", ""),
+                    timed_out=result.status == WorkerStatus.TIMEOUT, duration_ms=result.duration_ms, redact=redact))
+            else:
+                if tree(candidate) == baseline:
+                    raise ValueError("작업자는 성공을 반환했으나 바뀐 파일이 없습니다")
+                record(diagnostic(label, "작업", status="SUCCESS", exit_code=0, duration_ms=result.duration_ms))
+                return {"worker": label, "usage": payload.get("usage"), "attempts": attempts,
+                        "summary": payload.get("response") or payload.get("output", "")}
+        except Exception as error:
+            item = exception_diagnostic(label, "작업", error, redact)
+            if result is not None:
+                item["exit_code"] = (result.payload or {}).get("exit_code", 0)
+                item["duration_ms"] = result.duration_ms
+            record(item)
+        reset_candidate(candidate)
+    raise WorkerExecutionError(attempts) from None
+
+
+# Antigravity·Codex·무료 모델이 모두 실패했을 때만 쓴다(사용자 결정 2026-10-24).
+CLAUDE_LAST_RESORT = (("claude-sonnet", "claude-sonnet-5-5"), ("claude-haiku", "claude-haiku-5-5"))
+
+
+def claude_worker(model: str, candidate: Path):
+    import shutil
+    from all_tomorrow.adapters.workers import ClaudeWorker
+    return ClaudeWorker(argv=[shutil.which("claude") or "claude", "--model", model, "--effort", "low"],
+                        allowed_roots=(str(candidate),), timeout_seconds=600)
 
 
 def reset_candidate(candidate: Path) -> None:

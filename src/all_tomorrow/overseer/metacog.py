@@ -232,6 +232,31 @@ def codex_reasoner(prompt: str, workdir: Path) -> str:
     return text
 
 
+# Antigravity와 Codex가 모두 실패했을 때만 쓰는 최후 수단: Sonnet → Haiku (사용자 결정 2026-10-24).
+CLAUDE_LAST_RESORT = ("claude-sonnet-5-5", "claude-haiku-5-5")
+
+
+def claude_reasoner(prompt: str, workdir: Path, model: str = CLAUDE_LAST_RESORT[0]) -> str:
+    """판단 전용 헤드리스 Claude. 파일 읽기만 허용하고 쓰기·Bash·MCP는 쓰지 않는다."""
+    import shutil
+    exe = shutil.which("claude")
+    if not exe:
+        raise RuntimeError("claude CLI not found")
+    snapshot_dir = str(workdir.resolve())
+    completed = subprocess.run(
+        [exe, "--model", model, "--effort", "low", "-p", "--output-format", "json", "--no-session-persistence",
+         "--setting-sources", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+         "--tools", "Read", "--allowedTools", "Read", "--permission-mode", "dontAsk",
+         "--add-dir", snapshot_dir, "--add-dir", "C:/projects/all-tomorrow", "--disable-slash-commands", "--", prompt],
+        check=True, timeout=1500, capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=snapshot_dir,
+        env=__import__("all_tomorrow.adapters.workers", fromlist=["_worker_environment"])._worker_environment({}),
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    result = json.loads(completed.stdout)
+    if result.get("type") != "result" or result.get("is_error") or result.get("subtype") != "success"             or not isinstance(result.get("result"), str) or not result["result"].strip():
+        raise RuntimeError("claude reply unusable")
+    return result["result"]
+
+
 class AntigravityReasonerError(RuntimeError):
     """Only locally generated, secret-free diagnostics."""
 
@@ -332,18 +357,31 @@ def wake(con, base: Path, *, redact, projects: dict | None, notion: dict | None,
         judge.update(reasoner="custom" if reasoner else selected,
                      model=(os.environ.get("ALL_TOMORROW_METACOG_MODEL") or "default")
                      if not reasoner and selected == "antigravity" else "default")
-        try:
-            raw = (reasoner or (antigravity_reasoner if selected == "antigravity" else codex_reasoner))(prompt, base)
+        if reasoner is not None:
+            raw = reasoner(prompt, base)
             data = _parse(redact(raw))
-        except Exception as error:
-            if reasoner is not None or selected != "antigravity":
-                raise
-            # Never include exception text: subprocess errors may contain the prompt/secrets.
-            judge.update(reasoner="codex", model="default",
-                         fallback_reason="antigravity: " + (str(error) if isinstance(error, AntigravityReasonerError)
-                                                            else type(error).__name__))
-            raw = codex_reasoner(prompt, base)
-            data = _parse(redact(raw))
+        else:
+            # 순서: 선택한 판단자 → (antigravity 선택 시) codex → claude sonnet → claude haiku.
+            # 앞 판단자의 예외 문구는 비밀이 섞일 수 있어 형식명만 남긴다.
+            chain = [("antigravity", antigravity_reasoner)] if selected == "antigravity" else []
+            chain += [("codex", codex_reasoner)]
+            chain += [("claude", lambda p, w, m=m: claude_reasoner(p, w, m), m) for m in CLAUDE_LAST_RESORT]
+            reasons = []
+            for index, (name, call, *model) in enumerate(chain):
+                judge.update(reasoner=name, model=model[0] if model else
+                             ((os.environ.get("ALL_TOMORROW_METACOG_MODEL") or "default") if name == "antigravity" else "default"))
+                judge["fallback_reason"] = "; ".join(reasons)
+                try:
+                    raw = call(prompt, base)
+                    data = _parse(redact(raw))
+                    break
+                except Exception as error:
+                    label = name + (":" + model[0] if model else "")
+                    reasons.append(label + ": " + (str(error) if isinstance(error, AntigravityReasonerError)
+                                                   else type(error).__name__))
+                    if index == len(chain) - 1:
+                        judge["fallback_reason"] = "; ".join(reasons)
+                        raise
     except Exception as error:
         log.warning("metacog wake failed: %s", type(error).__name__)
         _append_journal(base / "metacog-journal.md", now, [], [], notes_changed=False,

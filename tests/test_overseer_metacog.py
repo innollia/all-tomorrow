@@ -129,6 +129,7 @@ def test_explicit_codex_and_failed_fallback(tmp_path, monkeypatch):
     monkeypatch.setenv("ALL_TOMORROW_METACOG_REASONER", "antigravity")
     monkeypatch.setattr(metacog, "antigravity_reasoner", lambda *a: 'bad json')
     monkeypatch.setattr(metacog, "codex_reasoner", lambda *a: 'bad json')
+    monkeypatch.setattr(metacog, "claude_reasoner", lambda *a: 'bad json')
     result = metacog.wake(sessions.con, tmp_path, redact=lambda t: t, projects=None, notion=None, force=True)
     assert result["status"] == "failed" and result["fallback_reason"]
     assert "판단 실패" in (tmp_path / "metacog-journal.md").read_text(encoding="utf-8")
@@ -150,3 +151,38 @@ def test_antigravity_adapter_is_read_only_noninteractive(tmp_path, monkeypatch):
 
     monkeypatch.setattr(AntigravityWorker, "execute", execute)
     assert metacog._parse(metacog.antigravity_reasoner("test", tmp_path))["actions"] == []
+
+
+@pytest.mark.parametrize("sonnet_fails,codex_ok", [(False, False), (True, False), (False, True)])
+def test_claude_is_last_resort_sonnet_then_haiku(tmp_path, monkeypatch, sonnet_fails, codex_ok):
+    sessions = _store(tmp_path)
+    monkeypatch.delenv("ALL_TOMORROW_METACOG_REASONER", raising=False)
+    calls = []
+
+    def fail(name):
+        def run(*a):
+            calls.append(name)
+            raise subprocess.CalledProcessError(1, "secret-argv")
+        return run
+
+    def claude(prompt, directory, model):
+        calls.append(model)
+        if sonnet_fails and model == "claude-sonnet-5-5":
+            raise subprocess.TimeoutExpired("secret", 1)
+        return '{"observations": [], "actions": []}'
+
+    monkeypatch.setattr(metacog, "antigravity_reasoner", fail("antigravity"))
+    monkeypatch.setattr(metacog, "codex_reasoner", (lambda *a: calls.append("codex") or '{}') if codex_ok else fail("codex"))
+    monkeypatch.setattr(metacog, "claude_reasoner", claude)
+    result = metacog.wake(sessions.con, tmp_path, redact=lambda t: t, projects=None, notion=None, force=True)
+    assert result["status"] == "done"
+    if codex_ok:
+        assert calls == ["antigravity", "codex"] and result["reasoner"] == "codex"
+        return
+    expected = "claude-haiku-5-5" if sonnet_fails else "claude-sonnet-5-5"
+    assert result["reasoner"] == "claude" and result["model"] == expected
+    assert calls == ["antigravity", "codex", "claude-sonnet-5-5"] + (["claude-haiku-5-5"] if sonnet_fails else [])
+    assert "antigravity: CalledProcessError" in result["fallback_reason"] and "codex:" in result["fallback_reason"]
+    assert "secret" not in result["fallback_reason"]
+    row = sessions.con.execute("select reasoner,model,fallback_reason from metacog_wakes").fetchone()
+    assert row == ("claude", expected, result["fallback_reason"])

@@ -29,6 +29,18 @@ def local_only(monkeypatch):
     monkeypatch.setattr("all_tomorrow.usage.collect_codex", lambda home: {"windows": []})
 
 
+class NoClaude:
+    capabilities = frozenset()
+
+    async def is_available(self):
+        return False
+
+
+@pytest.fixture(autouse=True)
+def no_real_claude(monkeypatch):
+    monkeypatch.setattr(loop, "claude_worker", lambda model, candidate: NoClaude())
+
+
 def worker_config(tmp_path, monkeypatch, workers):
     path = tmp_path / "workers.json"
     path.write_text(json.dumps({"workers": workers}), encoding="utf-8")
@@ -58,11 +70,11 @@ async def test_all_workers_fail_preserving_redacted_diagnostics_and_original(tmp
     events = await store.list_events()
     rolled = next(e for e in events if e.type == "metacog.rolled_back")
     attempts = rolled.payload["attempts"]
-    assert [a["worker"] for a in attempts] == ["codex", "antigravity", "free"]
+    assert [a["worker"] for a in attempts] == ["codex", "antigravity", "free", "claude-sonnet", "claude-haiku"]
     assert attempts[0]["exit_code"] == 7 and "runner pipe failed" in attempts[0]["stderr"]
     assert attempts[1]["exit_code"] == 0  # The CLI succeeded; parsing its edit plan failed.
     assert all(a["stage"] == "작업" and not a["timed_out"] for a in attempts)
-    assert len([e for e in events if e.type == "metacog.execution_attempt"]) == 3
+    assert len([e for e in events if e.type == "metacog.execution_attempt"]) == 5
     assert "codex/작업" in rolled.payload["reason"] and "free/작업" in rolled.payload["report"]
     assert (root / "src/demo.py").read_text() == "answer = 1\n"
     artifact = Path(rolled.payload["artifact"])
@@ -317,3 +329,54 @@ async def test_restart_keeps_previous_worker_failure_diagnostic(tmp_path):
     rolled = next(e for e in await store.list_events() if e.type == "metacog.rolled_back")
     assert rolled.payload["attempts"][0]["timed_out"]
     assert "runner pipe timed out" in rolled.payload["report"]
+
+
+@pytest.mark.parametrize("first_ok,codex_ok", [("sonnet", False), ("haiku", False), (None, True)])
+async def test_claude_last_resort_order(tmp_path, monkeypatch, first_ok, codex_ok):
+    from all_tomorrow import local_workers
+    from all_tomorrow.contracts import WorkerResult
+    root, base, _ = project(tmp_path)
+    change = loop.ProjectChange(root, base / "change")
+    change.prepare()
+    worker_config(tmp_path, monkeypatch, {})
+    called = []
+
+    class Codex:
+        capabilities = frozenset()
+
+        async def is_available(self):
+            return True
+
+        async def execute(self, request):
+            called.append("codex")
+            if not codex_ok:
+                return WorkerResult("r", "t", WorkerStatus.FAILED, error="QUOTA", payload={"exit_code": 3})
+            (change.candidate / "src/demo.py").write_text("answer = 3\n")
+            return WorkerResult("r", "t", WorkerStatus.SUCCESS, payload={"output": "완료"})
+
+    class Claude:
+        capabilities = frozenset()
+
+        def __init__(self, model):
+            self.model = model
+
+        async def is_available(self):
+            return True
+
+        async def execute(self, request):
+            called.append(self.model)
+            if first_ok not in self.model:
+                return WorkerResult("r", "t", WorkerStatus.FAILED, error="claude down", payload={"exit_code": 1})
+            (change.candidate / "src/demo.py").write_text("answer = 4\n")
+            return WorkerResult("r", "t", WorkerStatus.SUCCESS, payload={"output": "완료"})
+
+    monkeypatch.setattr(local_workers, "configured_adapters", lambda c: {"codex": Codex()})
+    monkeypatch.setattr(loop, "claude_worker", lambda model, candidate: Claude(model))
+    monkeypatch.setattr("all_tomorrow.idea_factory.llm.chat", lambda *a, **kw: ("no JSON", "fake"))
+    result = await loop.run_worker({"objective": "계산 수정", "project_id": "demo"}, change.candidate)
+    if codex_ok:
+        assert called == ["codex"] and result["worker"] == "codex"
+        return
+    assert result["worker"] == f"claude-{first_ok}"
+    assert called == ["codex", "claude-sonnet-5-5"] + (["claude-haiku-5-5"] if first_ok == "haiku" else [])
+    assert [a["worker"] for a in result["attempts"]][:2] == ["codex", "free"]
