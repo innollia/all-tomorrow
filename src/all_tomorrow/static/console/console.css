@@ -68,3 +68,18 @@ th{color:var(--mute);font-weight:400;font-size:12px;border-top:0}
   .proposal dl{grid-template-columns:1fr}
   .list .k{width:70px}
 }
+/* Infrastructure: quiet host inventory, amber migration candidates, explicit unknowns. */
+.servers{min-width:0;font-variant-numeric:tabular-nums}
+.shell>main:has(.servers){min-width:0}
+.server-notice{border-left:2px solid var(--mute);padding:8px 12px;color:var(--mute);font-size:12px;margin:16px 0}
+.server-host{min-width:0}.server-host .row{justify-content:space-between}
+.server-host .mono{overflow-wrap:anywhere}.server-count{margin:14px 0 10px;font-size:12px}.server-count b{font-size:24px}.server-count span{margin-left:8px}
+.server-host-links{display:grid;gap:4px;margin-top:12px;border-top:1px solid var(--line);padding-top:8px}
+.server-host-links a{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:12px;min-height:44px}
+.server-host-links .dot{white-space:nowrap;color:var(--mute)}
+.server-table{max-width:100%;overflow-x:auto;border:1px solid var(--line);border-radius:8px}.server-table table{min-width:880px}.server-row{cursor:pointer}.server-row:hover{background:var(--panel)}
+.server-link{display:inline-flex;align-items:center;min-height:44px;font-weight:600}.server-table .dot,.server-table .pill{white-space:nowrap}
+.server-movable{border-color:var(--warn);color:var(--warn)}.server-failed{color:var(--bad)}
+.servers a:hover{text-decoration:underline}.servers a:focus-visible,.server-table:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.server-back{display:inline-block;min-height:44px}.server-detail-status{margin-top:12px}.server-detail{display:grid;grid-template-columns:100px minmax(0,1fr);gap:12px 20px;border-top:1px solid var(--line);padding-top:20px}.server-detail dt{color:var(--mute)}.server-detail dd{margin:0;overflow-wrap:anywhere}
+@media(max-width:480px){.servers .grid{grid-template-columns:minmax(0,1fr)}.server-detail{grid-template-columns:1fr;gap:4px}.server-detail dd{margin-bottom:12px}}

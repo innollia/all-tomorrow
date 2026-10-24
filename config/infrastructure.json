@@ -1,0 +1,399 @@
+{
+  "hosts": [
+    {
+      "id": "dp7",
+      "name": "DP7",
+      "kind": "desktop",
+      "location": "?? ????",
+      "tailscale": "dp7 / dp7.tailc5ef02.ts.net",
+      "always_on": true,
+      "notes": "?? API?Postgres??? ???"
+    },
+    {
+      "id": "aaaa",
+      "name": "aaaa",
+      "kind": "laptop",
+      "location": "???",
+      "tailscale": "100.91.14.13",
+      "always_on": false,
+      "notes": "??????"
+    },
+    {
+      "id": "eve-runtime-host",
+      "name": "Eve runtime",
+      "kind": "aws-ec2",
+      "location": "ap-northeast-2 ? t4g.micro",
+      "tailscale": "100.96.171.65",
+      "always_on": true,
+      "notes": "Eve ???"
+    },
+    {
+      "id": "all-tomorrow-node",
+      "name": "All Tomorrow node",
+      "kind": "aws-ec2",
+      "location": "AWS ? EIP 3.37.100.44",
+      "tailscale": "all-tomorrow-central",
+      "always_on": true,
+      "notes": "Snow Day ?? ? ???"
+    }
+  ],
+  "services": [
+    {
+      "id": "api",
+      "name": "All Tomorrow API",
+      "host_id": "dp7",
+      "description": "?? ?? API ? task AllTomorrow-DP7-api",
+      "project": "All Tomorrow",
+      "execution": "scheduled_task",
+      "ports": [
+        5476
+      ],
+      "scope": "tailnet",
+      "health": {
+        "kind": "http",
+        "target": "http://127.0.0.1:5476/healthz"
+      },
+      "placement": "must_local",
+      "placement_reason": "Postgres????? ?? ??"
+    },
+    {
+      "id": "api-watchdog",
+      "name": "api-watchdog",
+      "host_id": "dp7",
+      "description": "?? API ?? ??",
+      "project": "All Tomorrow",
+      "execution": "scheduled_task",
+      "ports": [],
+      "scope": "local",
+      "health": {
+        "kind": "windows_task",
+        "target": "AllTomorrow-DP7-api-watchdog"
+      },
+      "placement": "must_local",
+      "placement_reason": "?? API ??"
+    },
+    {
+      "id": "executor",
+      "name": "executor",
+      "host_id": "dp7",
+      "description": "?? ???",
+      "project": "All Tomorrow",
+      "execution": "scheduled_task",
+      "ports": [],
+      "scope": "local",
+      "health": {
+        "kind": "windows_task",
+        "target": "AllTomorrow-DP7-executor"
+      },
+      "placement": "must_local",
+      "placement_reason": "?? Codex/Claude CLI????"
+    },
+    {
+      "id": "overseer",
+      "name": "overseer / ????",
+      "host_id": "dp7",
+      "description": "?? ???????",
+      "project": "All Tomorrow",
+      "execution": "scheduled_task",
+      "ports": [],
+      "scope": "local",
+      "health": {
+        "kind": "windows_task",
+        "target": "AllTomorrow-DP7-overseer"
+      },
+      "placement": "must_local",
+      "placement_reason": "?? ???CLI"
+    },
+    {
+      "id": "activity",
+      "name": "activity",
+      "host_id": "dp7",
+      "description": "PC ?? ??",
+      "project": "All Tomorrow",
+      "execution": "scheduled_task",
+      "ports": [],
+      "scope": "local",
+      "health": {
+        "kind": "windows_task",
+        "target": "AllTomorrow-DP7-activity"
+      },
+      "placement": "must_local",
+      "placement_reason": "PC ?? ??"
+    },
+    {
+      "id": "collect",
+      "name": "collect",
+      "host_id": "dp7",
+      "description": "?? ?? DB ??",
+      "project": "All Tomorrow",
+      "execution": "scheduled_task",
+      "ports": [],
+      "scope": "local",
+      "health": {
+        "kind": "windows_task",
+        "target": "AllTomorrow-DP7-collect"
+      },
+      "placement": "must_local",
+      "placement_reason": "?? ?? DB"
+    },
+    {
+      "id": "postgres",
+      "name": "Postgres 18",
+      "host_id": "dp7",
+      "description": "?? ??????",
+      "project": "All Tomorrow",
+      "execution": "startup",
+      "ports": [
+        5432
+      ],
+      "scope": "local",
+      "health": {
+        "kind": "tcp",
+        "target": "127.0.0.1"
+      },
+      "placement": "must_local",
+      "placement_reason": "?? API???? ???"
+    },
+    {
+      "id": "litellm",
+      "name": "LiteLLM ?? ?????",
+      "host_id": "all-tomorrow-node",
+      "description": "무료 LLM 키 풀 게이트웨이(Docker litellm v1.101.0, /opt/litellm). DP7은 IDEA_FACTORY_GATEWAY_URL로 사용",
+      "project": "All Tomorrow",
+      "execution": "docker",
+      "ports": [
+        4000
+      ],
+      "scope": "tailnet",
+      "health": {
+        "kind": "http",
+        "target": "http://100.97.113.3:4000/health/liveliness"
+      },
+      "placement": "aws",
+      "placement_reason": "2026-10-24 DP7에서 이전. 설정은 DP7 idea-factory-gateway.yaml을 다시 보내야 갱신됨"
+    },
+    {
+      "id": "syncthing-dp7",
+      "name": "Syncthing",
+      "host_id": "dp7",
+      "description": "?? ???",
+      "project": "Infrastructure",
+      "execution": "startup",
+      "ports": [
+        8384,
+        22000
+      ],
+      "scope": "tailnet",
+      "health": {
+        "kind": "tcp",
+        "target": "127.0.0.1"
+      },
+      "placement": "must_local",
+      "placement_reason": "?? ??? ??"
+    },
+    {
+      "id": "study-post",
+      "name": "StudyGame-DailyPost",
+      "host_id": "eve-runtime-host",
+      "description": "gamedesign-study 매일 21:30 KST 디스코드 '매일 할 일' 게시 (ubuntu crontab 12:30 UTC, GitHub pull 후 실행)",
+      "project": "gamedesign-study",
+      "execution": "cron",
+      "ports": [],
+      "scope": "public",
+      "health": {
+        "kind": "none",
+        "target": ""
+      },
+      "placement": "aws",
+      "placement_reason": "2026-10-24 DP7에서 이전. DP7 예약 작업은 사용 안 함"
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode serve",
+      "host_id": "dp7",
+      "description": "?? CLI ??",
+      "project": "OpenCode",
+      "execution": "manual",
+      "ports": [
+        45278
+      ],
+      "scope": "local",
+      "health": {
+        "kind": "tcp",
+        "target": "127.0.0.1"
+      },
+      "placement": "must_local",
+      "placement_reason": "?? ??? ??"
+    },
+    {
+      "id": "excalidraw",
+      "name": "excalidraw MCP",
+      "host_id": "dp7",
+      "description": "????? MCP",
+      "project": "Excalidraw",
+      "execution": "agent-stdio",
+      "ports": [
+        3000
+      ],
+      "scope": "local",
+      "health": {
+        "kind": "none",
+        "target": null
+      },
+      "placement": "must_local",
+      "placement_reason": "???? stdio ?? ??? ??"
+    },
+    {
+      "id": "syncthing-aaaa",
+      "name": "Syncthing",
+      "host_id": "aaaa",
+      "description": "?? ???",
+      "project": "Infrastructure",
+      "execution": "startup",
+      "ports": [
+        8384,
+        22000
+      ],
+      "scope": "tailnet",
+      "health": {
+        "kind": "none",
+        "target": null
+      },
+      "placement": "must_local",
+      "placement_reason": "?? ??? ??"
+    },
+    {
+      "id": "collect-aaaa",
+      "name": "collect-only",
+      "host_id": "aaaa",
+      "description": "?? ??",
+      "project": "All Tomorrow",
+      "execution": "scheduled_task",
+      "ports": [],
+      "scope": "local",
+      "health": {
+        "kind": "none",
+        "target": null
+      },
+      "placement": "must_local",
+      "placement_reason": "?? ??? ??"
+    },
+    {
+      "id": "eve-discord-bot",
+      "name": "eve-discord-bot",
+      "host_id": "eve-runtime-host",
+      "description": "Eve discord-bot",
+      "project": "Eve",
+      "execution": "systemd",
+      "ports": [],
+      "scope": "local",
+      "health": {
+        "kind": "none",
+        "target": null
+      },
+      "placement": "aws",
+      "placement_reason": "AWS systemd ??? ? scene healthz? ???? loopback ?? ??"
+    },
+    {
+      "id": "eve-discord-cache",
+      "name": "eve-discord-cache",
+      "host_id": "eve-runtime-host",
+      "description": "Eve discord-cache",
+      "project": "Eve",
+      "execution": "systemd",
+      "ports": [],
+      "scope": "local",
+      "health": {
+        "kind": "none",
+        "target": null
+      },
+      "placement": "aws",
+      "placement_reason": "AWS systemd ??? ? scene healthz? ???? loopback ?? ??"
+    },
+    {
+      "id": "eve-manager-antigravity",
+      "name": "eve-manager-antigravity",
+      "host_id": "eve-runtime-host",
+      "description": "Eve manager-antigravity",
+      "project": "Eve",
+      "execution": "systemd",
+      "ports": [],
+      "scope": "local",
+      "health": {
+        "kind": "none",
+        "target": null
+      },
+      "placement": "aws",
+      "placement_reason": "AWS systemd ??? ? scene healthz? ???? loopback ?? ??"
+    },
+    {
+      "id": "eve-scene-runtime",
+      "name": "eve-scene-runtime",
+      "host_id": "eve-runtime-host",
+      "description": "Eve scene-runtime",
+      "project": "Eve",
+      "execution": "systemd",
+      "ports": [
+        3000
+      ],
+      "scope": "local",
+      "health": {
+        "kind": "http",
+        "target": "http://127.0.0.1:3000/healthz"
+      },
+      "placement": "aws",
+      "placement_reason": "AWS systemd ??? ? scene healthz? ???? loopback ?? ??"
+    },
+    {
+      "id": "eve-scene-notion-relay",
+      "name": "eve-scene-notion-relay",
+      "host_id": "eve-runtime-host",
+      "description": "Eve scene-notion-relay",
+      "project": "Eve",
+      "execution": "systemd",
+      "ports": [],
+      "scope": "local",
+      "health": {
+        "kind": "none",
+        "target": null
+      },
+      "placement": "aws",
+      "placement_reason": "AWS systemd ??? ? scene healthz? ???? loopback ?? ??"
+    },
+    {
+      "id": "snowday",
+      "name": "Caddy + Snow Day",
+      "host_id": "all-tomorrow-node",
+      "description": "Snow Day ?? ?",
+      "project": "Snow Day",
+      "execution": "systemd",
+      "ports": [
+        80,
+        443
+      ],
+      "scope": "public",
+      "health": {
+        "kind": "http",
+        "target": "https://snowday.3.37.100.44.sslip.io/"
+      },
+      "placement": "aws",
+      "placement_reason": "?? ? ???"
+    },
+    {
+      "id": "console-copy",
+      "name": "All Tomorrow ?? ?? (?? ???)",
+      "host_id": "all-tomorrow-node",
+      "description": "?? ?? ?? ?? ??",
+      "project": "All Tomorrow",
+      "execution": "manual",
+      "ports": [],
+      "scope": "tailnet",
+      "health": {
+        "kind": "none",
+        "target": null
+      },
+      "placement": "aws",
+      "placement_reason": "?? ?? ???"
+    }
+  ]
+}
