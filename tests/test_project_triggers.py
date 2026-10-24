@@ -150,7 +150,7 @@ def test_prompt_and_claude_cli_contract(tmp_path):
     worker = ClaudeWorker(allowed_roots=(str(tmp_path),))
     argv = worker.build_argv(prompt)
     assert argv[-2:] == ["--", prompt]
-    assert "Read,Write,Edit,Bash(git *),Bash(python *)" in argv
+    assert argv[argv.index("--allowedTools") + 1] == "Read,Write,Edit,Bash"
     assert "dontAsk" in argv and "--strict-mcp-config" in argv
     assert "--dangerously-skip-permissions" not in argv
     assert worker.parse_output('{"type":"result","subtype":"success","result":"OK"}')["output"] == "OK"

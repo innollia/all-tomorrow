@@ -442,8 +442,10 @@ class ClaudeWorker(CodexWorker):
     def build_argv(self, prompt: str) -> list[str]:
         return [*self._argv, "-p", "--output-format", "json", "--no-session-persistence",
                 "--setting-sources", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+                # Prefix rules like Bash(python *) deny chained commands the model writes
+                # (e.g. "python ...; git status"), so the whole run failed; allow Bash.
                 "--tools", "Read,Write,Edit,Bash", "--allowedTools",
-                "Read,Write,Edit,Bash(git *),Bash(python *)", "--permission-mode", "dontAsk",
+                "Read,Write,Edit,Bash", "--permission-mode", "dontAsk",
                 "--disable-slash-commands", "--", prompt]
 
     def parse_output(self, output: str) -> dict[str, Any]:
