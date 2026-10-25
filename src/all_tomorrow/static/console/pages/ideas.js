@@ -29,14 +29,19 @@
     const results = i.results.map(r => `<div style="display:block">
       <div class="row"><b>${esc(r.subtask_id)}</b><span style="flex:1">${esc(r.subtask_title || (r.subtask_id === "?" ? "형식 밖 결과" : ""))}</span>
         <span class="pill"${r.status && r.status !== "완료" ? ' style="color:var(--warn)"' : ""}>${esc(r.status || "상태 없음")}</span>
-        <span class="small mute">주장 ${r.claims.length} · 출처 없음 ${r.claims.filter(c => !c.source).length}</span><span class="small mute">${ago(r.created_at)}</span></div>
+        <span class="small mute">주장 ${r.claims.length} · 출처 없음 ${r.claims.filter(c => !c.source).length}</span><span class="small mute">${ago(r.created_at)}</span><button class="danger" data-idel-result="${r.id}">삭제</button></div>
       ${r.claims.map(claim).join("")}
       <details><summary>본문 ${r.body.length}자</summary><pre class="small" style="white-space:pre-wrap">${esc(r.body)}</pre></details></div>`);
-    return `<h1>${esc(i.title)}</h1><div class="sub mono">${esc(i.id)} · ${ago(i.created_at)} 생성</div>
+    return `<div class="row" style="justify-content:space-between"><h1>${esc(i.title)}</h1><button class="danger" data-idel-idea="1">아이디어 삭제</button></div>
+      <div class="sub mono">${esc(i.id)} · ${ago(i.created_at)} 생성</div>
       <h2>1 · 원문</h2><details><summary>${i.text.length}자</summary><pre class="small" style="white-space:pre-wrap">${esc(i.text)}</pre></details>
       <h2>2 · 자료봉에게 줄 전체 프롬프트</h2>
       <div class="row" style="margin-bottom:8px"><button class="primary" data-icopy="prompt">전체 프롬프트 복사</button><span class="small mute">자료봉이 하위 프롬프트 S1…Sn을 돌려준다 → 각각 새 세션에 붙여 병렬로 돌린다</span></div>
       <details><summary>프롬프트 보기 (${i.prompt.length}자)</summary><pre class="small" style="white-space:pre-wrap">${esc(i.prompt)}</pre></details>
+      <h2>2-1 · 자료봉의 과제 쪼개기 답</h2>
+      ${i.plan ? `<details${i.results.length ? "" : " open"}><summary>저장됨 · ${ago(i.plan_at)} · ${i.plan.length}자</summary><pre class="small" style="white-space:pre-wrap">${esc(i.plan)}</pre></details>` : '<div class="small mute">자료봉이 돌려준 분석·불확실성·과제 표(하위 프롬프트 포함 전체)를 붙여넣어 두면 정리본에 같이 들어간다</div>'}
+      <form id="idea-plan" style="margin-top:8px"><textarea id="idea-plan-text" rows="5" placeholder="자료봉 답 전체 붙여넣기 (저장하면 이전 것을 바꾼다)"></textarea>
+        <div class="row" style="margin-top:8px"><button>${i.plan ? "바꿔 저장" : "저장"}</button></div></form>
       <h2>3 · 결과 붙여넣기</h2>
       <form id="idea-paste"><textarea id="idea-paste-text" rows="8" placeholder="=== 자료봉 결과 === … === 끝 === 블록. 여러 개를 한꺼번에 붙여도 된다"></textarea>
         <div class="row" style="margin-top:8px"><button class="primary">결과 저장</button></div></form>
@@ -54,15 +59,31 @@
     toast("복사함 (" + text.length + "자)");
   }
 
-  view.addEventListener("click", e => {
-    const b = e.target.closest("button[data-icopy]"); if (!b || !current) return;
-    copy(b.dataset.icopy === "prompt" ? current.prompt : current.brief);
+  view.addEventListener("click", async e => {
+    const b = e.target.closest("button"); if (!b || !current || !view.contains(b)) return;
+    const d = b.dataset, base = `/api/ideas/${encodeURIComponent(current.id)}`;
+    try {
+      if (d.icopy) copy(d.icopy === "prompt" ? current.prompt : current.brief);
+      else if (d.idelIdea) {
+        if (!confirm(`아이디어 "${current.title}"와 결과 ${current.results.length}개를 지운다. 되돌릴 수 없다.`)) return;
+        await api(base, undefined, "DELETE"); toast("삭제함"); location.hash = "#/ideas";
+      } else if (d.idelResult) {
+        const r = current.results.find(x => String(x.id) === d.idelResult);
+        if (!confirm(`결과 ${r ? r.subtask_id + " " + r.subtask_title : ""}를 지운다. 되돌릴 수 없다.`)) return;
+        await api(`${base}/results/${d.idelResult}`, undefined, "DELETE"); toast("결과 삭제함"); AT.render();
+      }
+    } catch (err) { toast("실패: " + err.message); }
   });
   view.addEventListener("submit", async e => {
     if (e.target.id === "idea-new") {
       e.preventDefault();
       const text = $("#idea-text").value.trim(); if (!text) return;
       try { const r = await api("/api/ideas", { title: $("#idea-title").value, text }); location.hash = "#/idea/" + encodeURIComponent(r.id); }
+      catch (err) { toast("실패: " + err.message); }
+    } else if (e.target.id === "idea-plan" && current) {
+      e.preventDefault();
+      const text = $("#idea-plan-text").value.trim(); if (!text) return;
+      try { await api(`/api/ideas/${encodeURIComponent(current.id)}/plan`, { text }, "PUT"); toast("과제 쪼개기 저장"); AT.render(); }
       catch (err) { toast("실패: " + err.message); }
     } else if (e.target.id === "idea-paste" && current) {
       e.preventDefault();

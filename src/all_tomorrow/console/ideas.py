@@ -4,6 +4,9 @@
   POST /api/ideas                     {title?, text} → new idea with its full prompt
   GET  /api/ideas/{id}                idea, full prompt, results, brief (markdown)
   POST /api/ideas/{id}/results        {text}: one or more pasted result blocks
+  PUT  /api/ideas/{id}/plan           {text}: 자료봉's decomposition answer (replaces; "" clears)
+  DELETE /api/ideas/{id}              idea, its results, pastes and brief file
+  DELETE /api/ideas/{id}/results/{n}  one result (its raw paste too once nothing else uses it)
 
 Flow (user side): paste an idea → copy the full prompt (universal meta-prompt + idea) to
 자료봉, the user's separate research agent → 자료봉 answers with N self-contained sub-prompts →
@@ -166,6 +169,10 @@ class IdeaStore:
             if "status" not in columns:  # added with the claim/evidence result format
                 db.execute("ALTER TABLE results ADD COLUMN status TEXT NOT NULL DEFAULT ''")
                 db.execute("ALTER TABLE results ADD COLUMN claims TEXT NOT NULL DEFAULT '[]'")
+            if "plan" not in {row["name"] for row in db.execute("PRAGMA table_info(ideas)")}:
+                # 자료봉's decomposition answer (analysis, uncertainties, task table), pasted back as-is.
+                db.execute("ALTER TABLE ideas ADD COLUMN plan TEXT NOT NULL DEFAULT ''")
+                db.execute("ALTER TABLE ideas ADD COLUMN plan_at TEXT NOT NULL DEFAULT ''")
 
     @contextmanager
     def db(self) -> Iterator[sqlite3.Connection]:
@@ -188,7 +195,8 @@ class IdeaStore:
         prompt = re.sub(r"\{(idea_id|title|text)\}", lambda m: values[m.group(1)], self.meta_prompt())
         stamp = now()
         with self.db() as db:
-            db.execute("INSERT INTO ideas VALUES (?,?,?,?,?,?)", (idea_id, title, text.strip(), prompt, stamp, stamp))
+            db.execute("INSERT INTO ideas (id, title, text, prompt, created_at, updated_at) VALUES (?,?,?,?,?,?)",
+                       (idea_id, title, text.strip(), prompt, stamp, stamp))
         self.write_brief(idea_id)
         return idea_id
 
@@ -229,6 +237,32 @@ class IdeaStore:
         self.write_brief(idea_id)
         return parsed
 
+    def set_plan(self, idea_id: str, text: str) -> None:
+        stamp = now()
+        with self.db() as db:
+            db.execute("UPDATE ideas SET plan = ?, plan_at = ?, updated_at = ? WHERE id = ?",
+                       (text.strip(), stamp, stamp, idea_id))
+        self.write_brief(idea_id)
+
+    def delete_idea(self, idea_id: str) -> None:
+        with self.db() as db:
+            for table, column in (("results", "idea_id"), ("pastes", "idea_id"), ("ideas", "id")):
+                db.execute(f"DELETE FROM {table} WHERE {column} = ?", (idea_id,))
+        (self.briefs / f"{idea_id}.md").unlink(missing_ok=True)
+
+    def delete_result(self, idea_id: str, result_id: int) -> bool:
+        """Drop one result; its raw paste goes too once no result from that paste is left."""
+        with self.db() as db:
+            row = db.execute("SELECT paste_id FROM results WHERE id = ? AND idea_id = ?", (result_id, idea_id)).fetchone()
+            if row is None:
+                return False
+            db.execute("DELETE FROM results WHERE id = ?", (result_id,))
+            if not db.execute("SELECT 1 FROM results WHERE paste_id = ?", (row["paste_id"],)).fetchone():
+                db.execute("DELETE FROM pastes WHERE id = ?", (row["paste_id"],))
+            db.execute("UPDATE ideas SET updated_at = ? WHERE id = ?", (now(), idea_id))
+        self.write_brief(idea_id)
+        return True
+
     def brief(self, idea_id: str) -> str:
         idea = self.get(idea_id)
         if idea is None:
@@ -240,7 +274,10 @@ class IdeaStore:
         lines = [f"# {idea['title']} ({idea['id']})", "",
                  f"- 만든 때: {idea['created_at']} · 마지막 변경: {idea['updated_at']}",
                  f"- 결과: 하위과제 {len([s for s in latest if s != '?'])}개 · 붙여넣기 {len(idea['pastes'])}회",
-                 "", "## 원문", "", idea["text"], "", "## 정리본 (하위과제별 최신 결과)", ""]
+                 "", "## 원문", "", idea["text"], "",
+                 "## 자료봉 과제 쪼개기 (분석·불확실성·과제 표)", "",
+                 *([f"_{idea['plan_at']}_", "", idea["plan"]] if idea["plan"] else ["아직 붙여넣지 않음."]), "",
+                 "## 정리본 (하위과제별 최신 결과)", ""]
         if not order:
             lines += ["아직 결과 없음.", ""]
         else:
@@ -274,6 +311,10 @@ class IdeaRequest(BaseModel):
     text: str = Field(min_length=1, max_length=50_000)
 
 
+class PlanRequest(BaseModel):
+    text: str = Field(default="", max_length=200_000)
+
+
 class PasteRequest(BaseModel):
     text: str = Field(min_length=1, max_length=500_000)
 
@@ -301,6 +342,22 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
     @router.get("/{idea_id}")
     async def idea(idea_id: str, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
         return {**found(idea_id), "brief": store.brief(idea_id), "brief_path": str(store.briefs / f"{idea_id}.md")}
+
+    @router.put("/{idea_id}/plan")
+    async def plan(idea_id: str, body: PlanRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        found(idea_id)
+        store.set_plan(idea_id, body.text)
+        return {"ok": True}
+
+    @router.delete("/{idea_id}", status_code=204)
+    async def delete_idea(idea_id: str, _: str = Depends(ctx.current_user)) -> None:
+        found(idea_id)
+        store.delete_idea(idea_id)
+
+    @router.delete("/{idea_id}/results/{result_id}", status_code=204)
+    async def delete_result(idea_id: str, result_id: int, _: str = Depends(ctx.current_user)) -> None:
+        if not store.delete_result(idea_id, result_id):
+            raise HTTPException(404, "no such result")
 
     @router.post("/{idea_id}/results")
     async def results(idea_id: str, body: PasteRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:

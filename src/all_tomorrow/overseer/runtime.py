@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import os
 import time
@@ -18,17 +19,40 @@ log = logging.getLogger("all_tomorrow.overseer")
 
 
 @contextmanager
-def singleton(path: Path):
+def singleton(path: Path, wait: float = 0.0):
     # OS 파일 잠금은 프로세스가 죽으면 해제된다. 새 lease/queue를 만들지 않는다.
+    # wait > 0: 재시작 직후 이전 프로세스가 아직 잠금을 쥐고 있을 수 있어 그만큼 기다린다.
+    deadline = time.monotonic() + wait
     with path.open("a+b") as file:
-        file.seek(0)
-        if os.name == "nt":
-            import msvcrt
-            msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        while True:
+            file.seek(0)
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.5)
         yield
+
+
+def wait_port_free(port: int, timeout: float, host: str = "127.0.0.1") -> bool:
+    """True once nothing accepts on host:port (the old API has let go), False on timeout."""
+    import socket
+    deadline = time.monotonic() + timeout
+    while True:
+        with socket.socket() as probe:
+            probe.settimeout(1)
+            if probe.connect_ex((host, port)) != 0:
+                return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
 
 
 async def with_store(callback):
@@ -114,12 +138,22 @@ def main(argv=None):
     base.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(filename=base / (args.component + ".log"), encoding="utf-8", level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
-    with singleton(base / (args.component + ".lock")):
+    # API는 /End 직후 /Run(또는 watchdog 재시작)으로 바로 다시 뜬다. 이전 프로세스가 잠금과 포트를
+    # 놓을 때까지 기다리지 않으면 잠금 OSError로 rc=1 종료한다.
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(singleton(base / (args.component + ".lock"), wait=30 if args.component == "api" else 0))
+        except OSError:
+            log.error("runtime lock busy component=%s pid=%s", args.component, os.getpid())
+            raise
         log.info("runtime started component=%s pid=%s parent_pid=%s", args.component, os.getpid(), os.getppid())
         if args.component == "api":
             if not os.environ.get("ALL_TOMORROW_DATABASE_URL"):
                 raise ValueError("DP7 백엔드는 PostgreSQL 설정이 필요합니다")
             os.environ.setdefault("ALL_TOMORROW_PORT", "5476")
+            if not wait_port_free(int(os.environ["ALL_TOMORROW_PORT"]), 30):
+                log.error("api port %s still in use after 30s", os.environ["ALL_TOMORROW_PORT"])
+                raise SystemExit(1)
             os.environ.setdefault("ALL_TOMORROW_MIGRATIONS", str(REPO / "migrations"))
             from all_tomorrow.web import run
             run()

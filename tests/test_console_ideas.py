@@ -62,3 +62,28 @@ def test_idea_desk_flow_prompt_paste_list_and_brief(tmp_path) -> None:
     on_disk = (tmp_path / "ideas" / "briefs" / f"{iid}.md").read_text(encoding="utf-8")
     assert on_disk == brief
     assert (tmp_path / "ideas" / "ideas.sqlite").exists()
+
+
+def test_plan_paste_and_deletes(tmp_path) -> None:
+    app = create_app(auth=Auth("owner", "correct horse", "s" * 32), console_data_dir=str(tmp_path))
+    with TestClient(app, base_url="https://testserver") as c:
+        c.post("/api/login", json={"username": "owner", "password": "correct horse"})
+        iid = c.post("/api/ideas", json={"text": "아이디어"}).json()["id"]
+        assert c.put(f"/api/ideas/{iid}/plan", json={"text": "## 과제 표\n| S1 | 기존 서비스 | 독립 |"}).status_code == 200
+        detail = c.get(f"/api/ideas/{iid}").json()
+        assert detail["plan"].startswith("## 과제 표") and detail["plan_at"]
+        assert "| S1 | 기존 서비스 | 독립 |" in detail["brief"].split("## 정리본")[0]
+
+        c.post(f"/api/ideas/{iid}/results", json={"text": result(iid, "S1", "a", "첫째")})
+        c.post(f"/api/ideas/{iid}/results", json={"text": result(iid, "S2", "b", "둘째")})
+        rid = next(r["id"] for r in c.get(f"/api/ideas/{iid}").json()["results"] if r["subtask_id"] == "S2")
+        assert c.delete(f"/api/ideas/{iid}/results/{rid}").status_code == 204
+        assert c.delete(f"/api/ideas/{iid}/results/{rid}").status_code == 404
+        detail = c.get(f"/api/ideas/{iid}").json()
+        assert [r["subtask_id"] for r in detail["results"]] == ["S1"] and len(detail["pastes"]) == 1
+        assert "둘째" not in detail["brief"]
+
+        assert c.delete(f"/api/ideas/{iid}").status_code == 204
+        assert c.get(f"/api/ideas/{iid}").status_code == 404
+        assert c.get("/api/ideas").json() == []
+    assert not (tmp_path / "ideas" / "briefs" / f"{iid}.md").exists()

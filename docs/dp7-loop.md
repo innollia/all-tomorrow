@@ -138,3 +138,5 @@ Eve 연결 추가분: 중앙 `src/all_tomorrow/overseer/{discord_edge,reports,lo
 실제 검증: key-pool.env를 비밀값 출력 없이 읽어 Windows Selector 루프에서 PostgreSQL SELECT 1 성공. 같은 DP7 Python으로 임시 API를 127.0.0.1:57700에서 띄워 lifespan DB 연결·마이그레이션 후 /healthz HTTP 200을 확인했다. 임시 프로세스는 finally에서 종료했다. 5476 예약 작업은 건드리지 않았으므로 기존 프로세스에 수정이 적용됐는지는 확인하지 않았다. 재시작 후 새 진입점이 적용된다.
 
 변경 diff와 회귀시험으로 검토했다. Jev 외부 검토 checkout은 없어 실행하지 않았다. git diff --check 통과. 커밋하지 않았다. 전체·Stage 1·Runtime packet 상태 기록을 함께 갱신했다.
+
+- API 재시작(`schtasks /End` 직후 `/Run`, watchdog 재시작): `runtime api`는 이전 프로세스가 `api.lock`과 5476 포트를 놓을 때까지 각각 최대 30초 기다린 뒤 뜬다. 예전에는 잠금이 남아 있으면 바로 rc=1로 끝났다.

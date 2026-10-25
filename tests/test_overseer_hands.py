@@ -380,3 +380,36 @@ async def test_claude_last_resort_order(tmp_path, monkeypatch, first_ok, codex_o
     assert result["worker"] == f"claude-{first_ok}"
     assert called == ["codex", "claude-sonnet-5-5"] + (["claude-haiku-5-5"] if first_ok == "haiku" else [])
     assert [a["worker"] for a in result["attempts"]][:2] == ["codex", "free"]
+
+
+def test_singleton_waits_for_a_released_lock_and_port_probe(tmp_path):
+    import socket
+    import threading
+
+    path = tmp_path / "api.lock"
+    with runtime.singleton(path):
+        with pytest.raises(OSError):
+            with runtime.singleton(path):
+                pass
+    held = threading.Event()
+    release = threading.Event()
+
+    def holder():
+        with runtime.singleton(path):
+            held.set()
+            release.wait(5)
+    thread = threading.Thread(target=holder)
+    thread.start()
+    held.wait(5)
+    threading.Timer(1.0, release.set).start()
+    with runtime.singleton(path, wait=10):  # the old holder lets go after ~1s
+        pass
+    thread.join()
+
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen()
+    port = server.getsockname()[1]
+    assert runtime.wait_port_free(port, 0.6) is False
+    server.close()
+    assert runtime.wait_port_free(port, 5) is True
