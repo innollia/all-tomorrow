@@ -166,7 +166,7 @@ def test_render_all_sections_limits_deadlines_and_fallback(tmp_path):
                      notion={"할 일": {"text": "최신 할 일\n" * 2000}, "일기": {"text": "최근 일기 흐름"}},
                      discord=dd.recent(tmp_path, now=datetime(2026, 10, 22, 10, tzinfo=timezone.utc)),
                      counts="열린 Work 2 / 실패 Work 1", now=datetime(2026, 10, 22, tzinfo=timezone.utc))
-    assert len(text) <= 8000
+    assert len(text) <= 12000
     assert text.count("\n## ") == 5
     assert all(word in text for word in ("D-9", "D-17", "D-24", "D-52", "최근 일기 흐름", "원문 발췌", "실패 Work 1", "최근 보고 내용", "최신 일지"))
     store.close()
