@@ -1,3 +1,5 @@
+import re
+
 from fastapi.testclient import TestClient
 
 from all_tomorrow.console.ideas import parse_results
@@ -11,15 +13,15 @@ def result(idea_id: str, sid: str, title: str, body: str, status: str = "완료"
 
 
 def test_parse_results_splits_blocks_and_keeps_unformatted_text() -> None:
-    text = "잡담\n" + result("I-1", "s1", "기존 서비스", "있다") + "\n\n" + result("I-1", "S2", "수요", "있음")
+    text = "잡담\n" + result("I-261025-00a1", "s1", "기존 서비스", "있다") + "\n\n" + result("I-261025-00a1", "S2", "수요", "있음")
     parsed = parse_results(text)
     assert [(p["idea_id"], p["subtask_id"], p["subtask_title"]) for p in parsed] == [
-        ("I-1", "S1", "기존 서비스"), ("I-1", "S2", "수요")]
+        ("I-261025-00a1", "S1", "기존 서비스"), ("I-261025-00a1", "S2", "수요")]
     assert parsed[0]["body"].startswith("## 결론") and parsed[0]["status"] == "완료"
     assert parsed[0]["claims"] == [
         {"id": "C1", "claim": "비슷한 서비스가 있다", "source": "https://example.com/a", "quote": '"we make covers"', "kind": "확인"},
         {"id": "C2", "claim": "시장이 크다", "source": "", "quote": "", "kind": "추정"}]
-    assert parse_results(result("I-1", "S3", "x", "y", status="불완전 | 실패"))[0]["status"] == "불완전"
+    assert parse_results(result("I-261025-00a1", "S3", "x", "y", status="불완전 | 실패"))[0]["status"] == "불완전"
     loose = parse_results("형식 없이 온 답")
     assert loose == [{"idea_id": "", "subtask_id": "", "subtask_title": "", "status": "", "claims": [],
                       "body": "형식 없이 온 답"}]
@@ -40,7 +42,7 @@ def test_idea_desk_flow_prompt_paste_list_and_brief(tmp_path) -> None:
                       "deliverables", "completion_rule", "교차검증", "현장검증", "핵심 불확실성"):
             assert field in idea["prompt"]
 
-        other = c.post(f"/api/ideas/{iid}/results", json={"text": result("I-000000-zzzz", "S1", "x", "y")})
+        other = c.post(f"/api/ideas/{iid}/results", json={"text": result("I-000000-ffff", "S1", "x", "y")})
         assert other.status_code == 422
         paste = result(iid, "S1", "기존 서비스", "옛 결과") + "\n" + result(iid, "S2", "수요", "수요 있음")
         assert c.post(f"/api/ideas/{iid}/results", json={"text": paste}).json()["added"] == [
@@ -111,3 +113,41 @@ def test_history_status_counts_and_overseer_summary(tmp_path) -> None:
     summary = store.recent_summary(7)
     assert iid in summary and "완료 1/불완전 1/실패 0" in summary and str(store.briefs / f"{iid}.md") in summary
     assert "없음" in store.recent_summary(7, datetime.now(UTC) + timedelta(days=8))
+
+
+MESSY = [
+    # Header (and body) squashed onto one line, as 자료봉 output arrived in real use.
+    ("=== 자료봉 결과 === 아이디어 ID: I-261025-62d7 하위과제 ID: S1 하위과제: 경쟁 제품·대체재 분석 상태: 완료 "
+     "기준 시점: 2026-10-25 --- ## 결론 (3줄 이내) 대체재가 많다 ## 주장과 근거 - [C1] 앱이 있다 === 끝 ===",
+     ("I-261025-62d7", "S1", "경쟁 제품·대체재 분석", "완료")),
+    # Markdown bold and inline code around labels and values.
+    ("**=== 자료봉 결과 ===**\n**아이디어 ID:** `I-261025-62D7`\n**하위과제 ID:** **S2**\n**하위과제:** 수요·지불 의사\n"
+     "**상태:** 불완전 (일부만)\n\n---\n\n## 결론\n수요는 있다\n## 주장과 근거\n- **[C1]** 커뮤니티 글이 많다\n"
+     "- 출처: https://example.com/x\n- 구분: 확인\n**=== 끝 ===**",
+     ("I-261025-62d7", "S2", "수요·지불 의사", "불완전")),
+    # Wrapped in a code fence, task_id form, labels reordered, no end marker before the next block.
+    ("```\n=== 자료봉 결과 ===\n상태: 실패\ntask_id: I-261025-62d7 / s3\n과제: 가격 모델\n---\n## 결론\n근거 없음\n```\n"
+     "=== 자료봉 결과 ===\n하위과제 ID: S4\n아이디어 ID: I-261025-62d7\n하위과제: 법·정책\n상태: 완료\n---\n## 결론\n괜찮다\n=== 끝 ===",
+     ("I-261025-62d7", "S3", "가격 모델", "실패")),
+]
+
+
+def test_parser_tolerates_messy_researcher_output() -> None:
+    for text, expected in MESSY:
+        first = parse_results(text)[0]
+        assert (first["idea_id"], first["subtask_id"], first["subtask_title"], first["status"]) == expected, text[:60]
+    bold = parse_results(MESSY[1][0])[0]
+    assert bold["claims"] == [{"id": "C1", "claim": "커뮤니티 글이 많다", "source": "https://example.com/x",
+                               "quote": "", "kind": "확인"}]
+    two = parse_results(MESSY[2][0])
+    assert [(p["subtask_id"], p["subtask_title"]) for p in two] == [("S3", "가격 모델"), ("S4", "법·정책")]
+
+
+def test_messy_paste_is_accepted_for_its_own_idea(tmp_path) -> None:
+    from all_tomorrow.console.ideas import IdeaStore
+
+    store = IdeaStore(tmp_path / "ideas")
+    iid = store.create("t", "본문")
+    paste = re.sub("(?i)I-261025-62d7", iid, MESSY[0][0] + "\n" + MESSY[1][0])
+    added = store.add_results(iid, paste)
+    assert [(a["subtask_id"], a["status"]) for a in added] == [("S1", "완료"), ("S2", "불완전")]

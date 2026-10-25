@@ -104,10 +104,18 @@ META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사�
 {text}
 """
 
-BLOCK = re.compile(r"=== *자료봉 결과 *===(.*?)(?:=== *끝 *===|\Z)", re.S)
-FIELD = re.compile(r"^\s*(아이디어 ID|하위과제 ID|과제 ID|task_id|하위과제|과제|상태)\s*[:：]\s*(.*?)\s*$", re.M)
-CLAIM = re.compile(r"^\s*[-*]\s*\[(C\d+)\]\s*(.+)$")
-CLAIM_FIELD = re.compile(r"^\s+[-*]\s*(출처|인용|구분)\s*[:：]\s*(.*?)\s*$")
+BLOCK = re.compile(r"=+\s*자료봉\s*결과\s*=+(.*?)(?:=+\s*끝\s*=+?|(?==+\s*자료봉\s*결과)|\Z)", re.S)
+IDEA_ID = re.compile(r"I-\d{6}-[0-9a-f]{4}", re.I)
+TASK_ID = re.compile(r"(?:하위\s*과제|과제)\s*ID|task_id", re.I)
+SUBTASK = re.compile(r"\bS\d{1,2}\b", re.I)
+# Header labels; a value runs until the next label, a line break or the body separator, because
+# 자료봉 output often arrives with several fields on one line (lost line breaks, markdown bold).
+LABELS = r"(?:아이디어\s*ID|하위\s*과제\s*ID|과제\s*ID|task_id|하위\s*과제|과제|상태|기준\s*시점|분류)"
+TITLE = re.compile(r"(?<![\w])(?:하위\s*과제|과제)(?!\s*ID)\s*[:：]\s*(.+?)(?=\s*" + LABELS + r"\s*[:：]|\n|$)")
+STATUS = re.compile(r"상태\s*[:：]?\s*(완료|불완전|실패)")
+SEPARATOR = re.compile(r"(?m)^\s*-{3,}\s*$|\s-{3,}\s|(?=#+\s*결론)")
+CLAIM = re.compile(r"^\s*[-*]?\s*\[(C\d+)\]\s*(.+)$")
+CLAIM_FIELD = re.compile(r"^\s*[-*]\s*(출처|인용|구분)\s*[:：]\s*(.*?)\s*$")
 STATUSES = ("완료", "불완전", "실패")
 
 
@@ -116,37 +124,46 @@ def now() -> str:
 
 
 def parse_claims(body: str) -> list[dict[str, str]]:
-    """`- [C1] 주장` lines with indented 출처/인용/구분 sub-items."""
+    """`- [C1] 주장` lines with 출처/인용/구분 sub-items (indented or not)."""
     claims: list[dict[str, str]] = []
     for line in body.splitlines():
         if m := CLAIM.match(line):
-            claims.append({"id": m.group(1), "claim": m.group(2).strip(), "source": "", "quote": "", "kind": ""})
+            claims.append({"id": m.group(1).upper(), "claim": m.group(2).strip(), "source": "", "quote": "", "kind": ""})
         elif claims and (m := CLAIM_FIELD.match(line)):
             key = {"출처": "source", "인용": "quote", "구분": "kind"}[m.group(1)]
             claims[-1][key] = m.group(2).strip().strip("<>")
     return claims
 
 
+def parse_header(head: str) -> dict[str, str]:
+    """Pick IDs by shape, not by line layout: I-yymmdd-xxxx and S<n>, wherever they sit."""
+    idea = IDEA_ID.search(head)
+    task = ""
+    label = TASK_ID.search(head)
+    if label and (m := SUBTASK.search(head, label.end())):
+        task = m.group(0)
+    elif m := SUBTASK.search(head):
+        task = m.group(0)
+    title = TITLE.search(head)
+    status = STATUS.search(head)
+    return {
+        "idea_id": idea.group(0)[:9].upper() + idea.group(0)[9:].lower() if idea else "",
+        "subtask_id": task.upper(),
+        "subtask_title": title.group(1).strip(" -·|") if title else "",
+        "status": status.group(1) if status else "",
+    }
+
+
 def parse_results(text: str) -> list[dict[str, Any]]:
     """Split a paste into result blocks. Text without any block becomes one unlabelled result."""
+    text = text.replace("\r\n", "\n").replace("**", "").replace("__", "")
     blocks = [m.group(1) for m in BLOCK.finditer(text)] or [text]
     parsed = []
     for block in blocks:
-        head, sep, body = block.partition("\n---")
-        if not sep:
-            head, body = block, block
-        fields = {k: v.strip("`* ") for k, v in FIELD.findall(head)}
-        status = next((s for s in STATUSES if s == fields.get("상태", "").split("|")[0].strip()), "")
-        task = fields.get("하위과제 ID") or fields.get("과제 ID") or fields.get("task_id", "")
-        task = task.split("/")[-1].strip().upper()
-        parsed.append({
-            "idea_id": fields.get("아이디어 ID", ""),
-            "subtask_id": task,
-            "subtask_title": fields.get("하위과제") or fields.get("과제", ""),
-            "status": status,
-            "claims": parse_claims(body),
-            "body": body.strip(),
-        })
+        sep = SEPARATOR.search(block)
+        head, body = (block[:sep.start()], block[sep.end():]) if sep else (block, block)
+        head = head.replace("`", "")
+        parsed.append({**parse_header(head), "claims": parse_claims(body), "body": body.strip()})
     return [p for p in parsed if p["body"]]
 
 
