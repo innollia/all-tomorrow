@@ -87,3 +87,27 @@ def test_plan_paste_and_deletes(tmp_path) -> None:
         assert c.get(f"/api/ideas/{iid}").status_code == 404
         assert c.get("/api/ideas").json() == []
     assert not (tmp_path / "ideas" / "briefs" / f"{iid}.md").exists()
+
+
+def test_history_status_counts_and_overseer_summary(tmp_path) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from all_tomorrow.console.ideas import IdeaStore
+
+    store = IdeaStore(tmp_path / "ideas")
+    iid = store.create("공모전 알림", "본문")
+    store.set_plan(iid, "첫 쪼개기")
+    store.set_plan(iid, "둘째 쪼개기")
+    store.add_results(iid, result(iid, "S1", "a", "옛", "실패"))
+    store.add_results(iid, result(iid, "S1", "a", "새", "완료") + result(iid, "S2", "b", "x", "불완전"))
+    idea = store.get(iid)
+    assert [p["text"] for p in idea["plans"]] == ["둘째 쪼개기", "첫 쪼개기"]
+    assert [(r["subtask_id"], r["status"], r["latest"]) for r in idea["results"]] == [
+        ("S2", "불완전", True), ("S1", "완료", True), ("S1", "실패", False)]
+    assert "첫 쪼개기" in store.brief(iid)  # replaced decompositions stay in the brief
+    listed = store.list()[0]
+    assert listed["subtasks"] == 2 and listed["results"] == 3
+    assert listed["status_counts"] == {"완료": 1, "불완전": 1, "실패": 0, "": 0}
+    summary = store.recent_summary(7)
+    assert iid in summary and "완료 1/불완전 1/실패 0" in summary and str(store.briefs / f"{iid}.md") in summary
+    assert "없음" in store.recent_summary(7, datetime.now(UTC) + timedelta(days=8))

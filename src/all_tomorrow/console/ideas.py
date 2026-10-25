@@ -29,7 +29,7 @@ import secrets
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -152,9 +152,9 @@ def parse_results(text: str) -> list[dict[str, Any]]:
 
 class IdeaStore:
     def __init__(self, base: Path) -> None:
-        self.base = base
-        self.db_path = base / "ideas.sqlite"
-        self.briefs = base / "briefs"
+        self.base = base.resolve()
+        self.db_path = self.base / "ideas.sqlite"
+        self.briefs = self.base / "briefs"
         self.briefs.mkdir(parents=True, exist_ok=True)
         with self.db() as db:
             db.executescript("""
@@ -173,6 +173,9 @@ class IdeaStore:
                 # 자료봉's decomposition answer (analysis, uncertainties, task table), pasted back as-is.
                 db.execute("ALTER TABLE ideas ADD COLUMN plan TEXT NOT NULL DEFAULT ''")
                 db.execute("ALTER TABLE ideas ADD COLUMN plan_at TEXT NOT NULL DEFAULT ''")
+            # Every saved decomposition stays readable after it is replaced.
+            db.execute("""CREATE TABLE IF NOT EXISTS plans (id INTEGER PRIMARY KEY, idea_id TEXT NOT NULL,
+                text TEXT NOT NULL, created_at TEXT NOT NULL)""")
 
     @contextmanager
     def db(self) -> Iterator[sqlite3.Connection]:
@@ -201,12 +204,35 @@ class IdeaStore:
         return idea_id
 
     def list(self) -> list[dict[str, Any]]:
+        """Ideas newest-updated first; statuses count the latest result of each subtask."""
         with self.db() as db:
-            rows = db.execute("""SELECT i.id, i.title, i.created_at, i.updated_at,
-                (SELECT COUNT(*) FROM results r WHERE r.idea_id = i.id) AS results,
-                (SELECT COUNT(DISTINCT subtask_id) FROM results r WHERE r.idea_id = i.id) AS subtasks
-                FROM ideas i ORDER BY i.updated_at DESC""").fetchall()
-        return [dict(r) for r in rows]
+            ideas = [dict(r) for r in db.execute(
+                "SELECT id, title, created_at, updated_at, plan_at FROM ideas ORDER BY updated_at DESC")]
+            rows = db.execute("SELECT idea_id, subtask_id, status FROM results ORDER BY id DESC").fetchall()
+        latest: dict[str, dict[str, str]] = {}
+        totals: dict[str, int] = {}
+        for r in rows:
+            latest.setdefault(r["idea_id"], {}).setdefault(r["subtask_id"], r["status"])
+            totals[r["idea_id"]] = totals.get(r["idea_id"], 0) + 1
+        for idea in ideas:
+            per = latest.get(idea["id"], {})
+            idea["results"] = totals.get(idea["id"], 0)
+            idea["subtasks"] = len(per)
+            idea["status_counts"] = {s: sum(v == s for v in per.values()) for s in (*STATUSES, "")}
+        return ideas
+
+    def recent_summary(self, days: int = 7, now_: datetime | None = None) -> str:
+        """Lines for the overseer brief: ideas touched in the last `days` days."""
+        cutoff = ((now_ or datetime.now(UTC)) - timedelta(days=days)).isoformat(timespec="seconds")
+        lines = []
+        for i in self.list():
+            if i["updated_at"] < cutoff:
+                continue
+            c = i["status_counts"]
+            lines.append(f"- {i['id']} {i['title']} · 과제 {i['subtasks']} (완료 {c['완료']}/불완전 {c['불완전']}/실패 {c['실패']}"
+                         f"{'/상태없음 ' + str(c['']) if c[''] else ''}) · 쪼개기 {'있음' if i['plan_at'] else '없음'}"
+                         f" · 갱신 {i['updated_at'][:16]} · 정리본 {self.briefs / (i['id'] + '.md')}")
+        return "\n".join(lines) or f"최근 {days}일 아이디어 조사 없음"
 
     def get(self, idea_id: str) -> dict[str, Any] | None:
         with self.db() as db:
@@ -215,7 +241,13 @@ class IdeaStore:
                 return None
             results = db.execute("SELECT * FROM results WHERE idea_id = ? ORDER BY id DESC", (idea_id,)).fetchall()
             pastes = db.execute("SELECT * FROM pastes WHERE idea_id = ? ORDER BY id", (idea_id,)).fetchall()
-        return {**dict(idea), "results": [{**dict(r), "claims": json.loads(r["claims"])} for r in results], "pastes": [dict(p) for p in pastes]}
+            plans = db.execute("SELECT * FROM plans WHERE idea_id = ? ORDER BY id DESC", (idea_id,)).fetchall()
+        seen: set[str] = set()
+        decoded = []
+        for r in results:  # newest first: the first of each subtask is current, the rest were replaced
+            decoded.append({**dict(r), "claims": json.loads(r["claims"]), "latest": r["subtask_id"] not in seen})
+            seen.add(r["subtask_id"])
+        return {**dict(idea), "results": decoded, "pastes": [dict(p) for p in pastes], "plans": [dict(p) for p in plans]}
 
     def add_results(self, idea_id: str, raw: str) -> list[dict[str, Any]]:
         parsed = parse_results(raw)
@@ -242,11 +274,12 @@ class IdeaStore:
         with self.db() as db:
             db.execute("UPDATE ideas SET plan = ?, plan_at = ?, updated_at = ? WHERE id = ?",
                        (text.strip(), stamp, stamp, idea_id))
+            db.execute("INSERT INTO plans (idea_id, text, created_at) VALUES (?,?,?)", (idea_id, text.strip(), stamp))
         self.write_brief(idea_id)
 
     def delete_idea(self, idea_id: str) -> None:
         with self.db() as db:
-            for table, column in (("results", "idea_id"), ("pastes", "idea_id"), ("ideas", "id")):
+            for table, column in (("results", "idea_id"), ("pastes", "idea_id"), ("plans", "idea_id"), ("ideas", "id")):
                 db.execute(f"DELETE FROM {table} WHERE {column} = ?", (idea_id,))
         (self.briefs / f"{idea_id}.md").unlink(missing_ok=True)
 
@@ -293,6 +326,10 @@ class IdeaStore:
             title = r["subtask_title"] or ("형식 밖 결과" if sid == "?" else "")
             lines += [f"### {sid} · {title}".rstrip(" ·"), f"_{r['status'] or '상태 표시 없음'} · {r['created_at']}_", "",
                       r["body"], ""]
+        if len(idea["plans"]) > 1:
+            lines += ["## 이전 과제 쪼개기 (바뀌기 전, 최신 순)", ""]
+            for old in idea["plans"][1:]:
+                lines += [f"<details><summary>{old['created_at']}</summary>", "", old["text"], "", "</details>", ""]
         lines += ["## 붙여넣은 원문 (전부, 오래된 순)", ""]
         for p in idea["pastes"]:
             lines += [f"<details><summary>{p['created_at']}</summary>", "", "```", p["raw"], "```", "", "</details>", ""]

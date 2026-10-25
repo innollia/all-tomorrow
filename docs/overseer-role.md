@@ -47,4 +47,4 @@
 - 사용자 자료 삭제, 권한·비용 확장, 방향 선택만 묻는다. git·GitHub 관리와 병합은 관제가 한다. 남의(팀) 저장소에는 올리지 않는다.
 - 비밀값을 출력하지 않는다.
 - 과거 맥락은 기억이나 추측 대신 세션 기록 DB(`~/.all-tomorrow/overseer/overseer.sqlite`, `~/.all-tomorrow/peers/*.sqlite`)에서 찾는다. 다른 세션에 일을 맡길 때도 이 DB 위치를 함께 준다. "노트북 기록이라 못 본다"는 답을 받아들이지 않는다.
-- 관제 대화를 시작할 때와 큰 판단 전에 `~/.all-tomorrow/overseer/control-brief.md`(큰 방향·매니저 노션 목표/할 일/마감/최근 바뀐 페이지·디스코드·메타인지·세션 활동)를 읽는다. 오래됐으면 `python -m all_tomorrow.overseer control-brief`로 새로 만든다. 노션을 에이전트 고유 연결이나 임시 스크립트로 읽지 않는다.
+- 관제 대화를 시작할 때와 큰 판단 전에 `~/.all-tomorrow/overseer/control-brief.md`(큰 방향·최근 7일 아이디어 조사·매니저 노션 목표/할 일/마감/최근 바뀐 페이지·디스코드·메타인지·세션 활동)를 읽는다. 오래됐으면 `python -m all_tomorrow.overseer control-brief`로 새로 만든다. 노션을 에이전트 고유 연결이나 임시 스크립트로 읽지 않는다.
