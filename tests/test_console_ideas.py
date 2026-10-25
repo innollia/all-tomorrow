@@ -4,9 +4,10 @@ from all_tomorrow.console.ideas import parse_results
 from all_tomorrow.web import Auth, create_app
 
 
-def result(idea_id: str, sid: str, title: str, body: str) -> str:
-    return (f"=== 자료봉 결과 ===\n아이디어 ID: {idea_id}\n하위과제 ID: {sid}\n하위과제: {title}\n---\n"
-            f"## 결론\n{body}\n=== 끝 ===")
+def result(idea_id: str, sid: str, title: str, body: str, status: str = "완료") -> str:
+    return (f"=== 자료봉 결과 ===\n아이디어 ID: {idea_id}\n하위과제 ID: {sid}\n하위과제: {title}\n상태: {status}\n---\n"
+            f"## 결론\n{body}\n## 주장과 근거\n- [C1] 비슷한 서비스가 있다\n  - 출처: https://example.com/a\n"
+            f"  - 인용: \"we make covers\"\n  - 구분: 확인\n- [C2] 시장이 크다\n  - 구분: 추정\n=== 끝 ===")
 
 
 def test_parse_results_splits_blocks_and_keeps_unformatted_text() -> None:
@@ -14,9 +15,14 @@ def test_parse_results_splits_blocks_and_keeps_unformatted_text() -> None:
     parsed = parse_results(text)
     assert [(p["idea_id"], p["subtask_id"], p["subtask_title"]) for p in parsed] == [
         ("I-1", "S1", "기존 서비스"), ("I-1", "S2", "수요")]
-    assert parsed[0]["body"].startswith("## 결론")
+    assert parsed[0]["body"].startswith("## 결론") and parsed[0]["status"] == "완료"
+    assert parsed[0]["claims"] == [
+        {"id": "C1", "claim": "비슷한 서비스가 있다", "source": "https://example.com/a", "quote": '"we make covers"', "kind": "확인"},
+        {"id": "C2", "claim": "시장이 크다", "source": "", "quote": "", "kind": "추정"}]
+    assert parse_results(result("I-1", "S3", "x", "y", status="불완전 | 실패"))[0]["status"] == "불완전"
     loose = parse_results("형식 없이 온 답")
-    assert loose == [{"idea_id": "", "subtask_id": "", "subtask_title": "", "body": "형식 없이 온 답"}]
+    assert loose == [{"idea_id": "", "subtask_id": "", "subtask_title": "", "status": "", "claims": [],
+                      "body": "형식 없이 온 답"}]
 
 
 def test_idea_desk_flow_prompt_paste_list_and_brief(tmp_path) -> None:
@@ -30,13 +36,17 @@ def test_idea_desk_flow_prompt_paste_list_and_brief(tmp_path) -> None:
         assert idea["title"] == "웹소설 표지 자동 생성기"
         assert f"아이디어 ID: {iid}" in idea["prompt"] and "작가가 줄거리를" in idea["prompt"]
         assert "{idea_id}" not in idea["prompt"]
+        for field in ("idea_brief", "task_id", "objective", "scope", "exclusions", "source_policy",
+                      "deliverables", "completion_rule", "교차검증", "현장검증", "핵심 불확실성"):
+            assert field in idea["prompt"]
 
         other = c.post(f"/api/ideas/{iid}/results", json={"text": result("I-000000-zzzz", "S1", "x", "y")})
         assert other.status_code == 422
         paste = result(iid, "S1", "기존 서비스", "옛 결과") + "\n" + result(iid, "S2", "수요", "수요 있음")
         assert c.post(f"/api/ideas/{iid}/results", json={"text": paste}).json()["added"] == [
-            {"subtask_id": "S1", "subtask_title": "기존 서비스"}, {"subtask_id": "S2", "subtask_title": "수요"}]
-        c.post(f"/api/ideas/{iid}/results", json={"text": result(iid, "S1", "기존 서비스", "새 결과")})
+            {"subtask_id": "S1", "subtask_title": "기존 서비스", "status": "완료", "claims": 2},
+            {"subtask_id": "S2", "subtask_title": "수요", "status": "완료", "claims": 2}]
+        c.post(f"/api/ideas/{iid}/results", json={"text": result(iid, "S1", "기존 서비스", "새 결과", "불완전")})
 
         listed = c.get("/api/ideas").json()
         assert listed[0]["id"] == iid and listed[0]["results"] == 3 and listed[0]["subtasks"] == 2
@@ -45,6 +55,8 @@ def test_idea_desk_flow_prompt_paste_list_and_brief(tmp_path) -> None:
         brief = detail["brief"]
         assert "새 결과" in brief.split("## 붙여넣은 원문")[0] and "옛 결과" not in brief.split("## 붙여넣은 원문")[0]
         assert "옛 결과" in brief  # raw pastes stay in full
+        assert "| S1 기존 서비스 | 불완전 | 2 | 1 | 1 |" in brief
+        assert detail["results"][0]["claims"][0]["source"] == "https://example.com/a"
         assert c.get("/api/ideas/I-nope").status_code == 404
 
     on_disk = (tmp_path / "ideas" / "briefs" / f"{iid}.md").read_text(encoding="utf-8")

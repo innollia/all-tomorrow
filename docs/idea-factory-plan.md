@@ -27,6 +27,7 @@
 5. 관제용 저장: 콘솔 데이터 폴더 `ideas/ideas.sqlite`(붙여넣은 원문·파싱 결과)와 `ideas/briefs/<ID>.md`(원문 + 하위과제별 최신 결과 정리본 + 붙여넣은 원문 전부). 관제는 `docs/overseer-role.md`의 경로에서 읽는다.
 
 - 코드: `src/all_tomorrow/console/ideas.py`, `src/all_tomorrow/static/console/pages/ideas.js`, 시험 `tests/test_console_ideas.py`.
+- 설계 근거: 자료봉 조사 보고서 `docs/research/idea-pipeline-research-2026-10-25.md`. 메타 프롬프트는 아이디어 분석 → 핵심 불확실성 → 조사 과제(기본 3~5개, 독립/의존/교차검증/현장검증 분류) 순으로 분해시키고, 하위 프롬프트마다 `idea_brief·task_id·objective·scope·exclusions·source_policy·deliverables·completion_rule`을 넣게 한다. 결과 블록은 `상태: 완료|불완전|실패`와 주장별 근거(`- [C1] 주장` + `출처`·`인용`·`구분: 확인|추정`)를 담고, 붙여넣을 때 상태·주장을 파싱해 DB(`results.status`, `results.claims` JSON)와 화면·정리본 표(주장 수·출처 없음·추정)에 남긴다.
 - 메타 프롬프트를 바꾸려면 `ideas/prompt.md`를 두면 내장본 대신 쓴다(`{idea_id}`·`{title}`·`{text}` 치환).
 
 ## 1. 완료된 상태

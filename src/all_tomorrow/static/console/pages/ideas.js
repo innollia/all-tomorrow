@@ -23,8 +23,14 @@
 
   AT.pages["/idea/"] = async id => {
     const i = current = await api(`/api/ideas/${encodeURIComponent(id)}`);
+    const claim = c => `<div class="small" style="margin-top:6px"><b>${esc(c.id)}</b> ${esc(c.claim)}
+      ${c.kind ? `<span class="pill">${esc(c.kind)}</span>` : ""}
+      <div class="mute">${/^https?:\/\//.test(c.source) ? `<a href="${esc(c.source)}" target="_blank" rel="noopener">${esc(c.source)}</a>` : esc(c.source) || '<span style="color:var(--bad)">출처 없음</span>'}${c.quote ? ` — ${esc(c.quote)}` : ""}</div></div>`;
     const results = i.results.map(r => `<div style="display:block">
-      <div class="row"><b>${esc(r.subtask_id)}</b><span style="flex:1">${esc(r.subtask_title || (r.subtask_id === "?" ? "형식 밖 결과" : ""))}</span><span class="small mute">${ago(r.created_at)}</span></div>
+      <div class="row"><b>${esc(r.subtask_id)}</b><span style="flex:1">${esc(r.subtask_title || (r.subtask_id === "?" ? "형식 밖 결과" : ""))}</span>
+        <span class="pill"${r.status && r.status !== "완료" ? ' style="color:var(--warn)"' : ""}>${esc(r.status || "상태 없음")}</span>
+        <span class="small mute">주장 ${r.claims.length} · 출처 없음 ${r.claims.filter(c => !c.source).length}</span><span class="small mute">${ago(r.created_at)}</span></div>
+      ${r.claims.map(claim).join("")}
       <details><summary>본문 ${r.body.length}자</summary><pre class="small" style="white-space:pre-wrap">${esc(r.body)}</pre></details></div>`);
     return `<h1>${esc(i.title)}</h1><div class="sub mono">${esc(i.id)} · ${ago(i.created_at)} 생성</div>
       <h2>1 · 원문</h2><details><summary>${i.text.length}자</summary><pre class="small" style="white-space:pre-wrap">${esc(i.text)}</pre></details>
