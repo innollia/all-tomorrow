@@ -55,7 +55,7 @@
       <h2>2-1 · 자료봉의 과제 쪼개기 답</h2>
       ${i.plan ? `<details${i.results.length ? "" : " open"}><summary>저장됨 · ${ago(i.plan_at)} · ${i.plan.length}자</summary><pre class="small" style="white-space:pre-wrap">${esc(i.plan)}</pre></details>${i.plans.slice(1).map(o => `<details><summary>이전 쪼개기 · ${ago(o.created_at)} · ${o.text.length}자</summary><pre class="small" style="white-space:pre-wrap">${esc(o.text)}</pre></details>`).join("")}` : '<div class="small mute">자료봉이 돌려준 분석·불확실성·과제 표(하위 프롬프트 포함 전체)를 붙여넣어 두면 정리본에 같이 들어간다</div>'}
       <form id="idea-plan" style="margin-top:8px"><textarea id="idea-plan-text" rows="8" placeholder="자료봉 답 전체 붙여넣기 (저장하면 이전 것을 바꾼다)">${esc(draft.get(i.id + ":plan") || i.plan)}</textarea>
-        <div class="row" style="margin-top:8px"><button>${i.plan ? "바꿔 저장" : "저장"}</button></div></form>
+        <div class="row" style="margin-top:8px"><button>${i.plan ? "바꿔 저장" : "저장"}</button><span class="small mute">비우고 저장하면 지운다 · 하위과제 결과(=== 자료봉 결과 ===)는 3번 칸에</span></div></form>
       <h2>3 · 결과 붙여넣기</h2>
       <form id="idea-paste"><textarea id="idea-paste-text" rows="8" placeholder="=== 자료봉 결과 === … === 끝 === 블록. 여러 개를 한꺼번에 붙여도 된다">${esc(draft.get(i.id + ":paste"))}</textarea>
         <div class="row" style="margin-top:8px"><button class="primary">결과 저장</button></div></form>
@@ -100,9 +100,11 @@
       catch (err) { toast("실패: " + err.message); }
     } else if (e.target.id === "idea-plan" && current) {
       e.preventDefault();
-      const text = $("#idea-plan-text").value.trim(); if (!text) return;
+      const text = $("#idea-plan-text").value.trim();
       if (text === current.plan) { draft.set(current.id + ":plan", ""); toast("바뀐 것 없음"); return; }
-      try { await api(`/api/ideas/${encodeURIComponent(current.id)}/plan`, { text }, "PUT"); draft.set(current.id + ":plan", ""); toast("과제 쪼개기 저장"); AT.render(); }
+      // Empty clears the saved answer (kept in the history); before, an empty box could not be saved at all.
+      if (!text && !confirm("저장된 과제 쪼개기 답을 비운다. 이전 것은 기록에 남는다.")) return;
+      try { await api(`/api/ideas/${encodeURIComponent(current.id)}/plan`, { text }, "PUT"); draft.set(current.id + ":plan", ""); toast(text ? "과제 쪼개기 저장" : "과제 쪼개기 비움"); AT.render(); }
       catch (err) { toast("실패: " + err.message); }
     } else if (e.target.id === "idea-paste" && current) {
       e.preventDefault();

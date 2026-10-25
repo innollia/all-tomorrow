@@ -17,8 +17,10 @@ the whole idea and ends with a fixed result block (idea ID + subtask ID) that `p
 reads. No model is called here: the brief is a deterministic grouping of the pasted results.
 
 State for the overseer: ctx.feature_dir("ideas") holds ideas.sqlite (original pastes and
-parsed results) and briefs/<idea id>.md (idea + latest result per subtask + every raw paste),
-rewritten on every change. A prompt.md in that directory replaces the built-in meta-prompt.
+parsed results) and briefs/<idea id>.md, rewritten on every change. The brief holds every result
+body exactly once (latest per subtask, then replaced ones); raw pastes appear there only as what the
+parser did not keep (block headers, text outside blocks), since their bodies are already above. The
+full raw pastes stay in the database. A prompt.md in that directory replaces the built-in meta-prompt.
 """
 from __future__ import annotations
 
@@ -56,6 +58,31 @@ META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사�
    - 현장검증: 조사로는 답이 안 나는 것(실제 구매 의향 등)은 조사로 가설과 직접 검증 방법을 쓰는 과제로 만든다.
 - 과제 수는 기본 3~5개(사용자가 손으로 돌리므로 많을수록 좋지 않다). 과제끼리 범위가 겹치지 않게 exclusions로 경계를 나눈다.
 - 과제 ID는 S1, S2, … 로 붙인다. 아이디어 ID는 `{idea_id}` 그대로 쓴다.
+- 아래 세 관점은 어떤 아이디어든 빠짐없이 과제에 배정한다. 표에 어느 과제가 맡았는지 적는다.
+
+## 반드시 넣을 관점 1: 유사 제품의 성장 궤적 사례
+"이미 비슷한 기능이 있다"는 기능 단위 비교만으로 결론을 내지 않는다. 과제 하나는 반드시 유사·인접 제품이 **어떤 모습으로 시작해 어떻게 커졌는지(또는 멈췄는지)**를 사례로 조사한다(독립 과제로 병렬).
+- 사례 고르기: 성공한 것만 고르지 않는다. 범주를 선점한 것, 정체한 것, 실패·중단한 것을 섞는다. 다음 유형을 각각 찾는다.
+  - 처음 공개판은 조악했지만 관심이 붙어, 지금은 "그 분야 프로그램" 하면 반드시 거론되는 이름이 된 프로그램
+  - 모듈·플러그인·확장으로 먼저 인기를 끈 뒤, 그 모듈을 탑재한 통합 도구(하네스·앱)로 넓힌 경우(확장 후 성패가 확인 안 되면 "미상"으로 적는다)
+  - 개인·소규모 팀이 시작한 것을 우선하고, 대기업 제품은 비교 기준으로만 쓴다
+- 사례마다 적을 것(표로):
+  - 처음 내놓은 형태: 완성된 하나의 프로그램 / 모듈·플러그인·확장 / 기타
+  - 초기 완성도: 첫 공개판이 얼마나 거칠었는지(첫 공개 시점, 기능 범위, 당시 불만·버그)
+  - 관심이 붙은 경로: 어느 커뮤니티·입소문·채널(포럼, 디스코드, 유튜브, 스토어 순위, 추천 글 등)에서 무엇 때문에
+  - 이후 확장 경로: 예) 모듈→통합 하네스, 무료→유료, 한 용도→여러 용도
+  - 성과 판정: 성공 / 정체 / 실패 / 미상 과 그 근거(사용자 수·매출·업데이트 중단·커뮤니티 활동 등, 1차 출처 우선)
+  - 범주 대표성: 그 분야 프로그램을 찾는 사람이 먼저 떠올리는 이름이 되었는지(추천·비교 글, 커뮤니티 질문 답변, 검색 상위에서 거론되는 근거)
+  - 이 아이디어에 주는 교훈 한 줄
+
+## 반드시 넣을 관점 2: 사업 형태를 나눠 평가
+- "모듈(다른 도구에 붙는 기능 단위)을 파는 것"과 "완성된 하나의 프로그램을 파는 것"은 서로 다른 사업이다. 고객·유통 채널·가격·경쟁 상대·성장 경로가 다르다.
+- 시장·수익·경쟁을 다루는 과제의 scope와 deliverables에 두 형태를 **각각** 평가하는 항목을 넣는다. 하나로 뭉뚱그려 "기능이 겹치니 좁은 모듈부터" 같은 결론을 내지 않게 한다.
+- 두 형태를 잇는 단계 전략(모듈로 시작해 프로그램으로 확장 등)을 말하려면 관점 1의 실제 사례를 근거로 단다.
+
+## 반드시 넣을 관점 3: 국가·언어권별 시장
+- 글로벌 시장과 국가·언어권별 시장(특히 아이디어 원문 언어의 시장)을 따로 본다. 글로벌에 비슷한 제품이 있어도 그 언어권에서 범주를 대표하는 프로그램이 아직 없으면 따로 판단한다.
+- 그 언어권의 현재 대표 프로그램, 사용자 커뮤니티, 유통 채널, 범주를 선점하는 경로(현지화·커뮤니티·플랫폼)를 글로벌 결론과 분리해 적게 한다.
 
 ## 하위 프롬프트 계약 (모든 하위 프롬프트에 아래 필드를 이 이름 그대로 다 넣는다)
 - idea_brief: 아이디어 공통 맥락. 1단계 분석 요약 + 이 과제에 필요한 원문. 다른 세션이 이것만 보고 이해할 수 있게.
@@ -89,7 +116,7 @@ META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사�
 ```
 
 ## 네 답의 형식
-1~3단계(분석·불확실성·과제 표: ID·제목·분류·결정에 쓰이는 곳)를 짧게 적은 뒤, 과제마다 아래처럼 낸다.
+1~3단계(분석·불확실성·과제 표: ID·제목·분류·결정에 쓰이는 곳·맡은 관점 1~3)를 짧게 적은 뒤, 과제마다 아래처럼 낸다.
 사용자가 코드블록 하나씩 복사해 새 세션에 붙여넣는다. 2차 과제는 제목에 "(2차)"를 붙인다.
 
 ### S1 · (과제 제목) · (분류)
@@ -117,6 +144,8 @@ SEPARATOR = re.compile(r"(?m)^\s*-{3,}\s*$|\s-{3,}\s|(?=#+\s*결론)")
 CLAIM = re.compile(r"^\s*[-*]?\s*\[(C\d+)\]\s*(.+)$")
 CLAIM_FIELD = re.compile(r"^\s*[-*]\s*(출처|인용|구분)\s*[:：]\s*(.*?)\s*$")
 STATUSES = ("완료", "불완전", "실패")
+# The result template inside a decomposition answer lists every status; a filled result names one.
+TEMPLATE_STATUS = re.compile(r"완료\s*\|\s*불완전")
 
 
 def now() -> str:
@@ -156,8 +185,8 @@ def parse_header(head: str) -> dict[str, str]:
 
 def parse_results(text: str) -> list[dict[str, Any]]:
     """Split a paste into result blocks. Text without any block becomes one unlabelled result."""
-    text = text.replace("\r\n", "\n").replace("**", "").replace("__", "")
-    blocks = [m.group(1) for m in BLOCK.finditer(text)] or [text]
+    text = normalize(text)
+    blocks =[m.group(1) for m in BLOCK.finditer(text)] or [text]
     parsed = []
     for block in blocks:
         sep = SEPARATOR.search(block)
@@ -165,6 +194,35 @@ def parse_results(text: str) -> list[dict[str, Any]]:
         head = head.replace("`", "")
         parsed.append({**parse_header(head), "claims": parse_claims(body), "body": body.strip()})
     return [p for p in parsed if p["body"]]
+
+
+def normalize(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("**", "").replace("__", "")
+
+
+def looks_like_results(text: str) -> bool:
+    """Filled 자료봉 result blocks, as opposed to a decomposition answer that quotes the empty template."""
+    for m in BLOCK.finditer(normalize(text)):
+        block = m.group(1)
+        if not TEMPLATE_STATUS.search(block) and STATUS.search(block):
+            return True
+    return False
+
+
+def paste_residue(raw: str) -> str:
+    """What `parse_results` did not store as a body: block headers and text between blocks."""
+    text = normalize(raw)
+    matches = list(BLOCK.finditer(text))
+    if not matches:  # the whole paste became one unlabelled result body
+        return ""
+    parts, pos = [], 0
+    for m in matches:
+        parts.append(text[pos:m.start()])
+        if sep := SEPARATOR.search(m.group(1)):
+            parts.append(m.group(1)[:sep.start()])
+        pos = m.end()
+    parts.append(text[pos:])
+    return "\n".join(p.strip() for p in parts if re.search(r"\w", p))
 
 
 class IdeaStore:
@@ -287,6 +345,8 @@ class IdeaStore:
         return parsed
 
     def set_plan(self, idea_id: str, text: str) -> None:
+        if looks_like_results(text):
+            raise ValueError("자료봉 결과 블록이다. 과제 쪼개기 칸이 아니라 '결과 붙여넣기'에 넣는다")
         stamp = now()
         with self.db() as db:
             db.execute("UPDATE ideas SET plan = ?, plan_at = ?, updated_at = ? WHERE id = ?",
@@ -338,18 +398,34 @@ class IdeaStore:
                 lines.append(f"| {sid} {r['subtask_title']} | {r['status'] or '표시 없음'} | {len(claims)} | "
                              f"{sum(not c['source'] for c in claims)} | {sum(c['kind'] == '추정' for c in claims)} |")
             lines.append("")
+        def heading(r: dict[str, Any]) -> str:
+            title = r["subtask_title"] or ("형식 밖 결과" if r["subtask_id"] == "?" else "")
+            return f"{r['subtask_id']} · {title}".rstrip(" ·")
+
         for sid in order:
             r = latest[sid]
-            title = r["subtask_title"] or ("형식 밖 결과" if sid == "?" else "")
-            lines += [f"### {sid} · {title}".rstrip(" ·"), f"_{r['status'] or '상태 표시 없음'} · {r['created_at']}_", "",
-                      r["body"], ""]
+            lines += [f"### {heading(r)}", f"_{r['status'] or '상태 표시 없음'} · {r['created_at']}_", "", r["body"], ""]
+        replaced = [r for r in idea["results"] if not r["latest"]]
+        if replaced:
+            lines += ["## 덮어쓴 이전 결과 (최신 순)", ""]
+            for r in replaced:
+                lines += [f"<details><summary>{heading(r)} · {r['status'] or '상태 표시 없음'} · {r['created_at']}</summary>",
+                          "", r["body"], "", "</details>", ""]
+        bodies = {r["body"] for r in idea["results"]}
         if len(idea["plans"]) > 1:
             lines += ["## 이전 과제 쪼개기 (바뀌기 전, 최신 순)", ""]
             for old in idea["plans"][1:]:
-                lines += [f"<details><summary>{old['created_at']}</summary>", "", old["text"], "", "</details>", ""]
-        lines += ["## 붙여넣은 원문 (전부, 오래된 순)", ""]
+                # Result blocks saved in the plan box by mistake: the same bodies are already in the results above.
+                misplaced = looks_like_results(old["text"]) and all(
+                    p["body"] in bodies for p in parse_results(old["text"]))
+                text = "(결과 블록을 이 칸에 잘못 넣은 기록. 같은 내용이 위 결과에 있어 생략)" if misplaced else old["text"]
+                lines += [f"<details><summary>{old['created_at']}</summary>", "", text, "", "</details>", ""]
+        lines += ["## 붙여넣은 원문 (오래된 순 · 결과 본문은 위에 있어 블록 머리와 블록 밖 글만)", ""]
         for p in idea["pastes"]:
-            lines += [f"<details><summary>{p['created_at']}</summary>", "", "```", p["raw"], "```", "", "</details>", ""]
+            sids = [r["subtask_id"] for r in reversed(idea["results"]) if r["paste_id"] == p["id"]]
+            residue = paste_residue(p["raw"])
+            lines += [f"<details><summary>{p['created_at']} · {len(p['raw'])}자 · 결과 {', '.join(sids) or '없음'}</summary>",
+                      "", *(["```", residue, "```"] if residue else ["(블록 밖 글 없음)"]), "", "</details>", ""]
         return "\n".join(lines)
 
     def write_brief(self, idea_id: str) -> None:
@@ -400,7 +476,10 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
     @router.put("/{idea_id}/plan")
     async def plan(idea_id: str, body: PlanRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
         found(idea_id)
-        store.set_plan(idea_id, body.text)
+        try:
+            store.set_plan(idea_id, body.text)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
         return {"ok": True}
 
     @router.delete("/{idea_id}", status_code=204)

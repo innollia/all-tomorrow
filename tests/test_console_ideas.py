@@ -1,5 +1,7 @@
 import re
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from all_tomorrow.console.ideas import parse_results
@@ -55,8 +57,9 @@ def test_idea_desk_flow_prompt_paste_list_and_brief(tmp_path) -> None:
         detail = c.get(f"/api/ideas/{iid}").json()
         assert len(detail["pastes"]) == 2
         brief = detail["brief"]
-        assert "새 결과" in brief.split("## 붙여넣은 원문")[0] and "옛 결과" not in brief.split("## 붙여넣은 원문")[0]
-        assert "옛 결과" in brief  # raw pastes stay in full
+        current = brief.split("## 덮어쓴 이전 결과")[0]
+        assert "새 결과" in current and "옛 결과" not in current
+        assert brief.count("옛 결과") == 1  # replaced results stay, once
         assert "| S1 기존 서비스 | 불완전 | 2 | 1 | 1 |" in brief
         assert detail["results"][0]["claims"][0]["source"] == "https://example.com/a"
         assert c.get("/api/ideas/I-nope").status_code == 404
@@ -151,3 +154,50 @@ def test_messy_paste_is_accepted_for_its_own_idea(tmp_path) -> None:
     paste = re.sub("(?i)I-261025-62d7", iid, MESSY[0][0] + "\n" + MESSY[1][0])
     added = store.add_results(iid, paste)
     assert [(a["subtask_id"], a["status"]) for a in added] == [("S1", "완료"), ("S2", "불완전")]
+
+
+def test_prompt_asks_for_growth_cases_business_forms_and_language_markets(tmp_path) -> None:
+    from all_tomorrow.console.ideas import IdeaStore
+
+    store = IdeaStore(tmp_path / "ideas")
+    prompt = store.get(store.create("t", "웹소설 집필 도구"))["prompt"]
+    for phrase in ("성장 궤적", "처음 내놓은 형태", "초기 완성도", "관심이 붙은 경로", "확장 경로", "성공 / 정체 / 실패 / 미상",
+                   "범주 대표성", "모듈", "완성된 하나의 프로그램", "각각", "뭉뚱그려", "언어권", "선점"):
+        assert phrase in prompt, phrase
+
+
+def test_brief_holds_each_result_once_and_plan_box_refuses_results(tmp_path) -> None:
+    from all_tomorrow.console.ideas import META_PROMPT, IdeaStore, looks_like_results
+
+    store = IdeaStore(tmp_path / "ideas")
+    iid = store.create("t", "본문")
+    paste = "\\" + result(iid, "S1", "가", "첫본문") + "\n머리말 밖 메모\n" + result(iid, "S2", "나", "둘본문")
+    store.add_results(iid, paste)
+    store.add_results(iid, result(iid, "S1", "가", "새본문"))
+
+    # Real incident: the whole result paste was saved as the decomposition, then "." over it because
+    # an empty plan box could not be saved. Legacy rows like that are written directly here.
+    with store.db() as db:
+        db.execute("INSERT INTO plans (idea_id, text, created_at) VALUES (?,?,?)", (iid, paste, "2026-10-25T01:18:23+00:00"))
+    store.set_plan(iid, ".")
+    brief = store.brief(iid)
+    for body in ("첫본문", "둘본문", "새본문"):
+        assert brief.count(body) == 1, body
+    assert "잘못 넣은 기록" in brief and "머리말 밖 메모" in brief and "하위과제 ID: S2" in brief
+
+    assert looks_like_results(paste) and not looks_like_results(META_PROMPT)
+    with pytest.raises(ValueError):
+        store.set_plan(iid, paste)
+    store.set_plan(iid, "## 과제 표\n" + META_PROMPT)  # a decomposition quoting the empty template is fine
+    store.set_plan(iid, "")
+    assert store.get(iid)["plan"] == "" and "아직 붙여넣지 않음" in store.brief(iid)
+
+
+def test_plan_api_rejects_result_blocks(tmp_path) -> None:
+    app = create_app(auth=Auth("owner", "correct horse", "s" * 32), console_data_dir=str(tmp_path))
+    with TestClient(app, base_url="https://testserver") as c:
+        c.post("/api/login", json={"username": "owner", "password": "correct horse"})
+        iid = c.post("/api/ideas", json={"text": "아이디어"}).json()["id"]
+        r = c.put(f"/api/ideas/{iid}/plan", json={"text": result(iid, "S1", "a", "b")})
+        assert r.status_code == 422 and "결과 붙여넣기" in r.json()["detail"]
+        assert c.put(f"/api/ideas/{iid}/plan", json={"text": ""}).status_code == 200
