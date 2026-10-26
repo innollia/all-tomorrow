@@ -95,8 +95,10 @@ async def serve(component: str, base: Path):
                 redact = Redactor.from_files(default_secret_files(Path.home()))
                 await asyncio.to_thread(reports.flush, base)
                 idle = idle_seconds(base)
+                # 이 파일이 있으면 메타인지 깨어남과 그 Work 실행을 멈춘다. 사용량 수집·보고는 계속한다.
+                paused = (base / "metacog.paused").exists()
                 if component == "executor":
-                    if idle is not None and idle >= 300:
+                    if not paused and idle is not None and idle >= 300:
                         await with_store(lambda store: execute_pending(store, base, registry=project_registry(),
                                                                         redact=redact, limit=1))
                 else:
@@ -115,7 +117,7 @@ async def serve(component: str, base: Path):
                             reports.enqueue(base, "login-" + provider["id"] + "-" + time.strftime("%Y-%m-%d"),
                                             f"[질문] {provider['name']} 사용량 조회에 다시 로그인이 필요합니다.")
                     delay, reason = wake_delay(snapshot, idle)
-                    if delay is not None and time.monotonic() >= next_wake:
+                    if not paused and delay is not None and time.monotonic() >= next_wake:
                         log.info("메타인지: %s", reason)
                         await with_store(lambda store: observe_once(store, sessions, base, usage=snapshot))
                         next_wake = time.monotonic() + delay

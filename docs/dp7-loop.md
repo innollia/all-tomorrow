@@ -140,3 +140,7 @@ Eve 연결 추가분: 중앙 `src/all_tomorrow/overseer/{discord_edge,reports,lo
 변경 diff와 회귀시험으로 검토했다. Jev 외부 검토 checkout은 없어 실행하지 않았다. git diff --check 통과. 커밋하지 않았다. 전체·Stage 1·Runtime packet 상태 기록을 함께 갱신했다.
 
 - API 재시작(`schtasks /End` 직후 `/Run`, watchdog 재시작): `runtime api`는 이전 프로세스가 `api.lock`과 5476 포트를 놓을 때까지 각각 최대 30초 기다린 뒤 뜬다. 예전에는 잠금이 남아 있으면 바로 rc=1로 끝났다.
+
+## 메타인지 일시정지
+
+`~/.all-tomorrow/overseer/metacog.paused` 파일이 있으면 overseer는 메타인지를 깨우지 않고 executor는 대기 Work를 실행하지 않는다. 사용량 수집과 보고 전송은 계속한다. 파일을 지우면 다음 1분 주기부터 다시 돈다. 2026-10-26 사용자 지시로 멈췄다(사흘 562회 깨어남, 자기 자신에 대한 중복 Work 고리, 관제가 적은 방향 메모 덮어쓰기).
