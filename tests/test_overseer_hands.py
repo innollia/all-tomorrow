@@ -27,6 +27,7 @@ def local_only(monkeypatch):
     monkeypatch.setattr("all_tomorrow.overseer.reports.flush", lambda *a: 0)
     monkeypatch.setattr("all_tomorrow.overseer.redact.Redactor.from_files", lambda files: Redactor({SECRET}))
     monkeypatch.setattr("all_tomorrow.usage.collect_codex", lambda home: {"windows": []})
+    monkeypatch.setenv("ALL_TOMORROW_METACOG_MIN_INTERVAL_MINUTES", "0")
 
 
 class NoClaude:
@@ -199,15 +200,26 @@ async def test_observe_does_not_wake_itself_from_applied_marker(tmp_path):
         sessions.close()
 
 
-def test_open_work_is_actionable_but_waiting_and_closed_work_are_not():
+def test_only_new_evidence_wakes_the_model_not_open_work_or_own_records():
     snap = {"since": "2026-10-21", "changed_sessions": [], "new_cards": [], "oracle_questions": [],
-            "system": {"own_log_errors": []}, "central": {"events": [], "work": []}}
-    for status in ("PENDING", "RUNNING"):
-        snap["central"]["work"] = [{"status": status}]
-        assert not metacog.nothing_new(snap)
-    for status in ("WAITING", "SUCCEEDED", "FAILED"):
+            "system": {"own_log_errors": ["2026-10-22 WARNING 사용량 push 실패"]},
+            "central": {"events": [], "work": []}}
+    # 열린 Work·자기 로그 경고·직전 판단이 만든 기록은 새 근거가 아니다(사흘 562회 깨어남의 원인).
+    for status in ("PENDING", "RUNNING", "WAITING", "SUCCEEDED", "FAILED"):
         snap["central"]["work"] = [{"status": status}]
         assert metacog.nothing_new(snap)
+    for kind in ("metacog.wake_applied", "metacog.report", "metacog.question", "researcher.create_work",
+                 "metacog.self_work_deferred", "metacog.execution_attempt"):
+        snap["central"]["events"] = [{"at": "2026-10-22", "type": kind}]
+        assert metacog.nothing_new(snap)
+    for kind in ("metacog.rolled_back", "metacog.applied", "metacog.held", "discord.question_reply"):
+        snap["central"]["events"] = [{"at": "2026-10-22", "type": kind}]
+        assert not metacog.nothing_new(snap)
+        snap["central"]["events"] = [{"at": "2026-10-20", "type": kind}]   # 지난 깨어남 전 결과
+        assert metacog.nothing_new(snap)
+    snap["central"]["events"] = []
+    assert not metacog.nothing_new(dict(snap, direction_changed=True))
+    assert not metacog.nothing_new(dict(snap, changed_sessions=[{"session": "codex:1"}]))
 
 
 async def test_runtime_scheduled_wake_never_forces_reasoner(tmp_path, monkeypatch):
@@ -215,7 +227,7 @@ async def test_runtime_scheduled_wake_never_forces_reasoner(tmp_path, monkeypatc
     monkeypatch.setattr("all_tomorrow.usage.collect", lambda: {"providers": []})
     monkeypatch.setattr("all_tomorrow.usage.collector_token", lambda *a: None)
     monkeypatch.setattr(schedule, "idle_seconds", lambda p: 900)
-    monkeypatch.setattr(schedule, "wake_delay", lambda *a: (60, "사용 가능"))
+    monkeypatch.setattr(schedule, "wake_gate", lambda *a: (True, "사용 가능"))
     seen = []
 
     async def observe(*a, **kw):

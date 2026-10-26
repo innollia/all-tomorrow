@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from datetime import timedelta
@@ -65,11 +66,45 @@ async def central_snapshot(store) -> dict:
     events = await store.list_events()
     goals = [g for g in await store.list_goals() if g.user_id == (os.environ.get("ALL_TOMORROW_ADMIN_USER") or "owner")]
     work = [w for g in goals for w in await store.list_work(g.goal_id)]
+    # 작업자 시도 진단(attempts)은 길고 자기 자신에 대한 것이라 스냅샷에서 뺀다. 결과·이유·보고는 남긴다.
     return {"goals": [{"id": str(g.goal_id), "title": g.title, "status": g.status} for g in goals][-100:],
             "work": [{"id": str(w.work_id), "title": w.title, "status": w.status} for w in work][-100:],
             "events": [{"ref": str(e.event_id), "type": e.type, "work_id": e.work_id,
-                        "at": e.occurred_at.isoformat(), "payload": e.payload}
-                       for e in events if e.actor == ACTOR or e.type == "discord.question_reply"][-100:]}
+                        "at": e.occurred_at.isoformat(),
+                        "payload": {k: v for k, v in e.payload.items() if k != "attempts"}}
+                       for e in events if (e.actor == ACTOR and e.type != "metacog.execution_attempt")
+                       or e.type == "discord.question_reply"][-60:]}
+
+
+def purpose_key(project_id: str, title: str) -> str:
+    """같은 목적 판단용: 대상 프로젝트 + 공백·문장부호·대소문자를 뺀 제목."""
+    return f"{project_id}:" + re.sub(r"[\W_]+", "", title.casefold())
+
+
+def is_self_project(project_id: str, project: dict | None) -> bool:
+    """All Tomorrow(메타인지 포함) 자체를 고치는 일인지."""
+    from all_tomorrow.overseer.environment import REPO
+    if project_id == "all-tomorrow":
+        return True
+    try:
+        return Path((project or {})["path"]).resolve() == REPO.resolve()
+    except (KeyError, OSError, TypeError):
+        return False
+
+
+async def open_metacog_work(tx) -> list[dict]:
+    """메타인지가 만든 열린(PENDING·RUNNING·WAITING) Work."""
+    items = []
+    for created in await tx.list_events():
+        if created.actor != ACTOR or created.type != "researcher.create_work":
+            continue
+        work = await tx.get_work(created.work_id)
+        if work is None or work.is_terminal():
+            continue
+        decision = created.payload.get("decision", {})
+        items.append({"work": work, "project_id": decision.get("project_id", ""),
+                      "title": decision.get("title") or work.title})
+    return items
 
 
 def valid_project(registry: dict, project_id: str) -> dict | None:
@@ -98,6 +133,15 @@ async def materialize_actions(store, actions: list, *, wake_id: str, known_refs:
             payload = {"source_action": did, "action": action}
             if kind != "fix" or not ordinary or project is None:
                 question = kind != "report"
+                # 같은 제목의 보고·질문을 하루 안에 다시 보내지 않는다(멱등).
+                key = purpose_key(project_id, title)
+                cutoff = utc_now() - timedelta(days=1)
+                if any(e.type in {"metacog.report", "metacog.question"} and e.occurred_at >= cutoff
+                       and purpose_key(e.payload.get("action", {}).get("project_id", ""),
+                                       str(e.payload.get("action", {}).get("title", ""))) == key
+                       for e in previous):
+                    results.append({"duplicate": True})
+                    continue
                 text = f"{'[질문 · 실행 보류]' if question else '[보고]'} {title}\n{detail}"
                 if kind == "fix" and not project:
                     text += "\n등록되지 않았거나 이 PC에 없는 프로젝트입니다."
@@ -112,6 +156,20 @@ async def materialize_actions(store, actions: list, *, wake_id: str, known_refs:
             refs = action.get("evidence_refs", [])
             if not refs or not set(refs) <= known_refs or not action.get("problem_key") or not detail or not title:
                 raise ValueError("자동 작업은 스냅샷 근거와 안정적인 문제 키가 필요합니다")
+            # 같은 목적(대상 + 정규화한 제목)의 열린 Work가 있으면 만들지 않는다. All Tomorrow 자체를
+            # 고치는 열린 Work는 하나만 둔다: 중복을 막는 Work의 중복을 또 만드는 고리가 있었다(2026-10-26).
+            opened = await open_metacog_work(tx)
+            if any(purpose_key(o["project_id"], o["title"]) == purpose_key(project_id, title) for o in opened):
+                results.append({"duplicate": True})
+                continue
+            if is_self_project(project_id, project) and any(
+                    is_self_project(o["project_id"], registry.get(o["project_id"])) for o in opened):
+                await tx.append_event(event("metacog.self_work_deferred", payload={
+                    "source_action": did, "title": title,
+                    "open_work": [str(o["work"].work_id) for o in opened
+                                  if is_self_project(o["project_id"], registry.get(o["project_id"]))]}))
+                results.append({"self_work_open": True})
+                continue
             fingerprint = dedup_fingerprint(action_type="CREATE_WORK", target_goal_id="autonomy",
                 target_project_id=project_id, objective=action["problem_key"], evidence_refs=(),
                 materializer_schema_version=PROMPT_VERSION)
@@ -195,6 +253,9 @@ async def run_worker(task: dict, candidate: Path) -> dict:
               "범위를 벗어나야 하면 변경 없이 질문을 남겨라.\n" + task["objective"])
     attempts = []
     baseline = tree(candidate)
+    from all_tomorrow.overseer.cooldown import FILE_NAME, Cooldowns
+    # 사본은 <base>/changes/<work>/candidate다. 쿼터가 소진된 작업자는 초기화 시각까지 건너뛴다.
+    cooldowns = Cooldowns(candidate.parents[2] / FILE_NAME if candidate.parent.parent.name == "changes" else None)
 
     def record(item):
         from all_tomorrow.overseer.workspace import save
@@ -205,6 +266,11 @@ async def run_worker(task: dict, candidate: Path) -> dict:
 
     for name, adapter in sorted(configured_adapters(config).items(), key=lambda p: p[0] != "codex"):
         result = None
+        waiting = cooldowns.until(name)
+        if waiting is not None:
+            record(diagnostic(name, "작업", status="QUOTA_COOLDOWN",
+                              error="쿼터 초기화 대기 " + waiting.astimezone().strftime("%m-%d %H:%M")))
+            continue
         try:
             if not await adapter.is_available():
                 record(diagnostic(name, "작업", status="EXECUTABLE_NOT_FOUND", error="작업자 실행 파일을 찾지 못했습니다"))
@@ -227,6 +293,7 @@ async def run_worker(task: dict, candidate: Path) -> dict:
             result = await adapter.execute(request)
             payload = result.payload or {}
             if result.status != WorkerStatus.SUCCESS:
+                cooldowns.note(name, f"{result.error or ''}\n{payload.get('stderr') or ''}")
                 record(diagnostic(name, "작업", status=result.status.value, error=result.error,
                     exit_code=payload.get("exit_code"), stderr=payload.get("stderr", ""),
                     timed_out=result.status == WorkerStatus.TIMEOUT, duration_ms=result.duration_ms))
@@ -531,3 +598,33 @@ async def finish_work(store, work, success, reason, change, info, *, question=Fa
         await tx.transition_goal_status(goal.goal_id,
             GoalStatus.SUCCEEDED if success else GoalStatus.WAITING if question else GoalStatus.FAILED,
             goal.revision, event("metacog.goal_finished", goal_id=goal.goal_id), evidence=evidence)
+
+
+async def close_self_work(store, registry: dict, *, reason: str, apply: bool = False) -> list[dict]:
+    """메타인지가 만든 All Tomorrow 자체 대상의 열린 Goal/Work를 지우지 않고 CANCELLED로 닫는다.
+    ``apply=False``면 목록만 돌려준다. 보고(report)는 남기지 않아 디스코드로 가지 않는다."""
+    closed = []
+    for item in await open_metacog_work(store):
+        if not is_self_project(item["project_id"], registry.get(item["project_id"])):
+            continue
+        work = item["work"]
+        closed.append({"work_id": str(work.work_id), "goal_id": str(work.goal_id),
+                       "status": str(work.status.value), "title": item["title"]})
+        if not apply:
+            continue
+        async with store.autonomous_batch() as tx:
+            for run in await tx.list_runs(work.work_id):
+                if run.is_active():
+                    await tx.transition_run_status(run.run_id, RunStatus.CANCELLED,
+                        await tx.current_run_revision(run.run_id),
+                        event("metacog.run_cancelled", work_id=work.work_id, run_id=run.run_id,
+                              payload={"reason": reason}))
+            current = await tx.get_work(work.work_id)
+            await tx.transition_work_status(work.work_id, WorkStatus.CANCELLED, current.revision,
+                event("metacog.cancelled", work_id=work.work_id, goal_id=work.goal_id,
+                      payload={"reason": reason, "previous_status": closed[-1]["status"]}))
+            goal = await tx.get_goal(work.goal_id)
+            if goal is not None and not goal.is_terminal():
+                await tx.transition_goal_status(goal.goal_id, GoalStatus.CANCELLED, goal.revision,
+                    event("metacog.goal_cancelled", goal_id=goal.goal_id, payload={"reason": reason}))
+    return closed

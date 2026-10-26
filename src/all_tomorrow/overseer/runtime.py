@@ -76,7 +76,7 @@ async def observe_once(store, sessions, base, *, force=False, usage=None):
     from all_tomorrow.overseer.redact import Redactor, default_secret_files
     redact = Redactor.from_files(default_secret_files(Path.home()))
     return await observe(store, sessions, base, registry=project_registry(), redact=redact,
-                         projects=brief.load_projects(), notion=brief.load_notion(), force=force, usage=usage)
+                         projects=brief.load_projects(), notion=brief.load_notion, force=force, usage=usage)
 
 
 async def serve(component: str, base: Path):
@@ -84,9 +84,10 @@ async def serve(component: str, base: Path):
     from all_tomorrow.overseer import reports
     from all_tomorrow.overseer.loop import execute_pending
     from all_tomorrow.overseer.redact import Redactor, default_secret_files
-    from all_tomorrow.overseer.schedule import idle_seconds, wake_delay
+    from all_tomorrow.overseer.schedule import idle_seconds, settings, wake_gate
     from all_tomorrow.console.usage import UsageStore
     next_wake = 0.0
+    gate_reason = None
     sessions = SessionStore(base / "overseer.sqlite") if component == "overseer" else None
     try:
         while True:
@@ -116,11 +117,18 @@ async def serve(component: str, base: Path):
                         if provider["status"] in {"needs_login", "not_logged_in"}:
                             reports.enqueue(base, "login-" + provider["id"] + "-" + time.strftime("%Y-%m-%d"),
                                             f"[질문] {provider['name']} 사용량 조회에 다시 로그인이 필요합니다.")
-                    delay, reason = wake_delay(snapshot, idle)
-                    if not paused and delay is not None and time.monotonic() >= next_wake:
-                        log.info("메타인지: %s", reason)
+                    config = settings()
+                    ready, reason = wake_gate(idle, config)
+                    if paused:
+                        ready, reason = False, "일시정지 파일 있음"
+                    # 깨우지 않는 이유도 바뀔 때마다 남긴다. 예전에는 이유 없이 멈춰 원인을 알 수 없었다.
+                    if reason != gate_reason:
+                        log.info("메타인지 확인 조건: %s", reason)
+                        gate_reason = reason
+                    if ready and time.monotonic() >= next_wake:
+                        # 확인 자체는 코드만 쓴다. 변화·최소 간격·하루 상한은 metacog.wake가 판단한다.
                         await with_store(lambda store: observe_once(store, sessions, base, usage=snapshot))
-                        next_wake = time.monotonic() + delay
+                        next_wake = time.monotonic() + config["check_interval"]
             except Exception as error:
                 log.warning("%s 실행 실패: %s", component, type(error).__name__)
             await asyncio.sleep(60)

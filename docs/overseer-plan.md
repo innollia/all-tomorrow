@@ -236,7 +236,7 @@
      - 프로젝트 git, 노션 프로필
      - 자기 지난 깨어남 8번과 자기 메모
   2. Codex(무인, 읽기 전용)에게 원래 목표와 함께 넘긴다. 점검 목록은 주지 않는다. Codex는 필요하면 파일을 직접 열어 조사한다.
-  3. 돌아온 관찰과 행동(report/propose)은 `metacog_wakes` 테이블과 `~/.all-tomorrow/overseer/metacog-journal.md`에 남긴다. 메모(`metacog-notes.md`)는 메타인지가 매번 스스로 고쳐 쓴다. 자기 판단 기준을 스스로 바꾸는 부분이다.
+  3. 돌아온 관찰과 행동(report/propose)은 `metacog_wakes` 테이블과 `~/.all-tomorrow/overseer/metacog-journal.md`에 남긴다. 메모(`metacog-notes.md`)는 메타인지가 매번 스스로 고쳐 쓴다. 자기 판단 기준을 스스로 바꾸는 부분이다. 사용자·관제의 방향은 `direction.md`(사용자 원문)·`direction-notes.md`(관제가 정한 방향)에 따로 두고 메타인지는 읽기만 한다(2026-10-26).
 - 바뀐 게 없으면 모델을 부르지 않는다. 메타인지 자신의 Codex 실행은 `--ephemeral`이고 스냅샷에서도 뺀다.
 - 거친 부분(남은 일)
   - 프로젝트를 직접 바꾸지 못한다. 바꿀 것은 제안으로만 남는다.
@@ -281,7 +281,7 @@
 - 메타인지가 운영 문제를 판단해 기존 validate_decision → DecisionMaterializer → lineage/BudgetLedger로 Goal/Work를 만든다. 문제 키 중복·하루 생성 예산·영속 provenance는 기존 semantic store의 Event와 PostgreSQL advisory transaction으로 묶었다.
 - 별도 작업 실행기가 Codex → Antigravity → 무료 gateway 순으로 사본을 수정한다. 고정 시험과 실제 diff 심사를 통과하면 커밋 없이 파일을 반영하고, 실패·중단 시 백업/manifest로 복구한다. 사용자 자료 삭제·권한/비용 확대·방향 선택·등록 폴더 밖은 실행하지 않고 질문으로 쌓는다.
 - Run/Work/Goal 결과와 보고 Event를 함께 확정하고 다음 메타인지 스냅샷에 포함했다. Discord 값이 없으면 파일에 쌓고 값이 생기면 밀린 보고를 보낸다.
-- 고정 6시간 대신 PC 미사용 시간과 Codex 잔량/초기화 시각으로 깨어날 때를 정한다. Codex 공식 live 사용량 RPC와 관측 시각 기반 로그 fallback, Claude 만료 토큰 갱신, 없어진 프로젝트 경로 건너뛰기를 추가했다.
+- 고정 6시간 대신 PC 미사용 시간과 Codex 잔량/초기화 시각으로 깨어날 때를 정한다(2026-10-26 폐기: 변화가 있을 때만 모델 호출, 최소 30분·하루 24회, `docs/dp7-loop.md`). Codex 공식 live 사용량 RPC와 관측 시각 기반 로그 fallback, Claude 만료 토큰 갱신, 없어진 프로젝트 경로 건너뛰기를 추가했다.
 - DP7 등록용 scripts/dp7-up.ps1은 만들기만 했다. API·작업 실행기·메타인지·수집·사용자 입력 관측을 부팅/로그인 때 실행할 준비다. Postgres/Discord 비밀값 이름과 관제 명령은 [운영 문서](dp7-loop.md)에 적었다.
 - 최종 관련 시험: 89 passed. 전체 python -m pytest -q: 720 passed, 69 skipped, 1 failed. 기존 OpenCode 실 CLI help smoke가 이 Windows sandbox에서 바이너리를 실행하지 못했다. 기존 Antigravity smoke는 이번 PATH에서 CLI가 없어 skip됐다. 시험을 제거하거나 skip으로 바꾸지 않았다. 원본 결과: .artifacts/pytest-loop-final.txt.
 - PowerShell 구문·Python 컴파일·diff 공백 검사 통과. 실제 Postgres(AT_TEST_POSTGRES_URL 미설정), Discord 전송, 실계정 사용량 갱신, 재부팅 뒤 운영은 확인 전이다. 이 sandbox의 하위 Codex는 홈 디렉터리 접근 문제로 live 조회를 확인하지 못했다.

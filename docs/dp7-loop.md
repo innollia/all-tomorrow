@@ -63,7 +63,7 @@ Eve는 사용자 말의 의미를 기존 Groq 모델로 먼저 판단하고 중�
 
 Codex는 [공식 app-server의 account/rateLimits/read](https://learn.chatgpt.com/docs/app-server)로 현재 잔량과 초기화 시각을 읽는다. 실패하면 로그를 쓰되 Syncthing 파일 수정 시각보다 실제 관측 시각을 우선한다. 오래된 관측값으로 메타인지를 깨우지 않는다. Claude의 만료 access token은 기존 refresh token으로 갱신하고 CLI가 도중에 새로 로그인한 값은 덮어쓰지 않는다. 갱신 불가 시 재로그인 질문을 쌓는다. 토큰 값이나 오류 응답 본문은 보고하지 않는다.
 
-PC가 5분 이상 미사용이고 Codex 잔량이 확인되면 초기화까지 남은 시간/잔량에 맞춰 간격을 정한다(최소 1분, 최대 30분). 미사용 시간은 [Windows 사용자 세션의 LastInputTime](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/ns-wtsapi32-wtsinfow)을 읽는다. WTS가 이 값을 제공하지 않는 로컬 세션은 로그인 때 뜨는 activity 작업이 입력 시각을 파일로 전달한다. 관측할 수 없으면 보류한다. 실제 사용량 소진 효율은 상시 운영 뒤 조정해야 한다.
+(2026-10-26 폐기) 예전에는 PC가 5분 이상 미사용이고 Codex 잔량이 확인되면 초기화까지 남은 시간/잔량에 맞춰 간격을 정했다(최소 1분, 최대 30분). 지금은 위 "메타인지 자기 고리 수정"의 최소 간격·하루 상한을 쓰고 잔량은 판단자 건너뛰기에만 쓴다. 미사용 시간은 [Windows 사용자 세션의 LastInputTime](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/ns-wtsapi32-wtsinfow)을 읽는다. WTS가 이 값을 제공하지 않는 로컬 세션은 로그인 때 뜨는 activity 작업이 입력 시각을 파일로 전달한다. 관측할 수 없으면 보류한다. 실제 사용량 소진 효율은 상시 운영 뒤 조정해야 한다.
 
 ## 사용자가 준비할 것
 
@@ -140,6 +140,23 @@ Eve 연결 추가분: 중앙 `src/all_tomorrow/overseer/{discord_edge,reports,lo
 변경 diff와 회귀시험으로 검토했다. Jev 외부 검토 checkout은 없어 실행하지 않았다. git diff --check 통과. 커밋하지 않았다. 전체·Stage 1·Runtime packet 상태 기록을 함께 갱신했다.
 
 - API 재시작(`schtasks /End` 직후 `/Run`, watchdog 재시작): `runtime api`는 이전 프로세스가 `api.lock`과 5476 포트를 놓을 때까지 각각 최대 30초 기다린 뒤 뜬다. 예전에는 잠금이 남아 있으면 바로 rc=1로 끝났다.
+
+## 2026-10-26 메타인지 자기 고리 수정
+
+10/24~10/26 사흘 동안 562번 깨어나(Codex 440·Antigravity 130·Claude 1) 대부분 "변화 없음"을 쓰는 데 모델을 썼고, [수정 판단] 39개가 거의 전부 자기 자신(중복 Goal/Work, 스냅샷 JSON, fallback 보고, 반복 호출 억제)에 대한 것이었다. 바뀐 동작:
+
+- **변화 없으면 모델을 부르지 않는다.** 새 근거는 세션 변경·새 카드·작업 결과 이벤트(`metacog.applied/rolled_back/held/scope_changed`)·디스코드 답장(`discord.question_reply`, 보고 답장)·방향 파일 변경뿐이다. 열린 PENDING/RUNNING Work, overseer.log 경고, 직전 판단이 만든 Goal/Work/보고 이벤트는 근거가 아니다(이것들 때문에 한 번도 건너뛰지 않았다). 건너뛸 때는 `metacog_wakes`에 `skipped`와 이유를 남기고 overseer.log에 `메타인지 건너뜀(모델 호출 없음)`을 쓴다. 노션은 모델을 부를 때만 읽는다.
+- **간격.** Codex 잔량 소진형 간격(`wake_delay`, 60~1800초)을 없앴다. overseer는 PC 미사용(기본 5분) 동안 10분마다 코드로만 확인하고, 모델 호출(성공·실패)은 최소 30분 간격·24시간 24회까지다. 설정: `ALL_TOMORROW_METACOG_MIN_INTERVAL_MINUTES`(30), `ALL_TOMORROW_METACOG_DAILY_LIMIT`(24), `ALL_TOMORROW_METACOG_IDLE_SECONDS`(300, 0이면 PC 사용 여부 무시), `ALL_TOMORROW_METACOG_CHECK_MINUTES`(10). key-pool.env에 넣으면 다음 루프부터 적용된다. 깨우지 않는 이유(PC 사용 중·일시정지 등)는 바뀔 때마다 `메타인지 확인 조건:`으로 남긴다. `metacog --force`는 변화·간격·상한을 무시한다.
+- **방향 파일.** `~/.all-tomorrow/overseer/direction-notes.md`(관제가 사용자와 정한 방향)와 `direction.md`(사용자 원문)는 메타인지가 읽기만 한다. 메모 재작성은 `metacog-notes.md`만 바꾼다. 10/25 "AI 게임개발 프로그램" 방향을 이 파일에 복원했다. 관제 브리핑 1절에도 함께 보인다.
+- **판단 대상.** 스냅샷에 `user_direction`·`control_brief`(최대 14000자)를 넣고, 프롬프트는 사용자 목표·마감 → 사용자 프로젝트 운영 문제 → (새 실패가 있을 때만) All Tomorrow 자체 순으로 보게 했다. 지난 깨어남은 3개만 보이고, 작업자 시도 진단(`attempts`, `metacog.execution_attempt`)은 스냅샷에서 뺐다. 중앙 상태는 전체 Goal/Work 목록 대신 열린 Work·최근 닫힌 10개·상태별 개수와 결과·보고·질문·답장·생성 이벤트만 담는다(예전에는 닫힌 자기 Work 목록이 스냅샷의 1/3을 차지해 사용자 세션 26개 중 25개가 잘렸다). 새 카드 30개·신탁 질문 15개까지, 스냅샷 한도는 140000자(예전 90000).
+- **자기 Work 제한(코드 강제).** 같은 목적(프로젝트 + 공백·문장부호·대소문자를 뺀 제목)의 열린(PENDING·RUNNING·WAITING) Work가 있으면 만들지 않는다. All Tomorrow 자체(`all-tomorrow` 또는 이 저장소 경로)를 고치는 열린 Work가 있으면 새 자기 Work는 `metacog.self_work_deferred` 이벤트만 남긴다(디스코드 보고 없음). 같은 제목의 보고·질문은 24시간 안에 다시 보내지 않는다. 쌓인 자기 Work는 `loop.close_self_work(store, registry, reason=..., apply=True)`로 Run/Work/Goal을 CANCELLED로 닫는다(삭제 없음, `metacog.cancelled` 이벤트에 이유).
+- **판단자 순서와 쿼터.** 기본 순서는 Codex → Antigravity → Claude Sonnet → Claude Haiku(`ALL_TOMORROW_METACOG_REASONER=antigravity`면 Antigravity 먼저). 쿼터 소진 문구("quota", "usage limit", "Resets in 150h28m49s" 등)는 초기화 시각만 `~/.all-tomorrow/overseer/worker-cooldowns.json`에 기억하고 그때까지 그 판단자·작업자를 부르지 않는다(시각을 모르면 1시간). 사용량 스냅샷에서 Codex 창이 소진됐으면 호출 전에 건너뛴다. 모두 대기 중이면 모델 호출 없이 `skipped`. 실행기 `run_worker`도 같은 파일을 보고 `QUOTA_COOLDOWN`으로 건너뛴다.
+- **스냅샷 JSON.** 파일은 처음부터 유효한 UTF-8 JSON이었다(같은 파일을 Node.js·`-Encoding UTF8`로는 읽었다). PowerShell 5.1 `Get-Content`가 BOM 없는 UTF-8을 시스템 코드페이지(cp949)로 읽어 한글이 깨지면서 3400~4100번째 문자 근처에서 구문 오류가 났다. 프롬프트에 읽는 법(`Get-Content -Raw -Encoding UTF8`)과 Python 절대 경로(PATH에 `python` 없음)를 적었다. 별개로 직렬화한 JSON 문자열에 비밀값 가리기를 하면 `KEY=값\"`의 역슬래시가 함께 지워져 JSON이 깨질 수 있어, 문자열마다 가린 뒤 직렬화하고 쓰기 전에 다시 파싱한다. 모델 답도 파싱한 뒤 가린다.
+- **10/26 12:17 이후 멈춤.** 마지막 깨어남은 12:16(완료 12:17:39). 이후 `wake_delay`가 None을 돌려줬지만 이유를 로그에 남기지 않아 직접 증거는 없다. 남은 증거: 직전 깨어남 간격이 4~5분으로 줄어 있었고(잔량 소진형), Codex 5시간·주간 창이 16:19에 새로 시작했다(세션 로그의 resets_at 기준). 가장 그럴듯한 설명은 메타인지 자신이 Codex 창을 다 써 "Codex 잔량 없음"(또는 초기화 뒤 "재수집 필요")으로 대기하다가, 창이 다시 열린 뒤(~17:00~20:11)에는 사용자가 PC를 써서 "PC 사용 중"으로 대기했고, 20:11에 일시정지 파일이 생긴 것이다. 같은 날 실행기는 10:14에 시작한 Codex 작업자가 18:28 재시작까지 끝나지 않았다. 이제 간격은 잔량에 의존하지 않고 대기 이유가 로그에 남는다.
+
+- **자기 수정은 새 실패가 있을 때만(코드 강제).** 지난 깨어남 뒤 `metacog.rolled_back`·`metacog.held` 이벤트나 overseer.log ERROR가 없으면 All Tomorrow 자체 fix 행동은 저장 전에 빼고 관찰(mid)로만 남긴다. 강제 실행 검증(21:53, Codex)에서 프롬프트만으로는 모델이 지난 Work 생성 이벤트를 보고 다시 "중복 등록 방지" 수정을 내놓았기 때문이다. 같은 실행은 플레시핏(10/31 마감) 활동이 스냅샷에 없다는 사용자 일 관찰도 냈다.
+
+정리한 중복 자기 Work 19건(WAITING 14·RUNNING 1·PENDING 4)의 목록은 `~/.all-tomorrow/overseer/self-work-cleanup-2026-10-26.md`에 있다. 남은 메타인지 열린 Work는 TINProject Blender 조사(WAITING) 1건이다. 자기 고리 내용으로 채워졌던 `metacog-notes.md`는 `metacog-notes.md.bak-20261026-self-loop`로 보관하고 비웠다.
 
 ## 메타인지 일시정지
 

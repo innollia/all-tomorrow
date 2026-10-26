@@ -4,10 +4,12 @@
 
 ## 메타인지와의 관계
 
-- 메타인지 루프(`python -m all_tomorrow.overseer run`, 6시간마다 깨어남)는 관제가 없어도 혼자 관찰하고 판단한다. 결과는 `~/.all-tomorrow/overseer/metacog-journal.md`(일지)와 `metacog-notes.md`(메타인지가 스스로 고쳐 쓰는 가설·기준)에 남는다.
+- 메타인지 루프(예약 작업 AllTomorrow-DP7-overseer, PC 미사용 때 10분마다 확인하고 변화가 있을 때만 모델 호출, 최소 30분·하루 24회)는 관제가 없어도 혼자 관찰하고 판단한다. 결과는 `~/.all-tomorrow/overseer/metacog-journal.md`(일지)와 `metacog-notes.md`(메타인지가 매번 통째로 고쳐 쓰는 가설·기준)에 남는다. 자세한 동작은 `docs/dp7-loop.md`.
 - 관제는 이 둘을 자기 기억으로 쓴다. 사용자와 대화하기 전과 판단하기 전에 읽는다.
 - 메타인지의 제안(propose)은 관제가 사용자에게 가져가고, 사용자가 정하면 관제가 실행한다.
-- 관제가 대화에서 알게 된 방향이나 결정은 `metacog-notes.md`에 덧붙인다. 다음 깨어남의 메타인지가 그것을 읽는다.
+- 관제가 대화에서 알게 된 방향이나 결정은 `~/.all-tomorrow/overseer/direction-notes.md`에 날짜 제목과 함께 덧붙인다. 메타인지는 이 파일과 `direction.md`(사용자 원문)를 읽기만 하고 고치지 않으며, 바뀌면 다음 확인 때 깨어난다. `metacog-notes.md`에는 적지 않는다(메타인지가 매번 덮어써 10/25 방향이 지워졌다).
+- 메타인지를 멈추려면 `~/.all-tomorrow/overseer/metacog.paused` 파일을 만들고, 다시 켜려면 지운다. 정지 중에도 `metacog --force`는 실행된다.
+- 메타인지가 만든 All Tomorrow 자체 Work가 쌓이면 지우지 말고 `loop.close_self_work(..., apply=True)`로 CANCELLED 처리한다.
 - 필요하면 관제가 메타인지를 바로 깨운다: `metacog --force`.
 
 ## 보는 것

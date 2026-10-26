@@ -83,14 +83,18 @@ def _ensure_gateway() -> bool:
 def _metacog_due(store: SessionStore) -> bool:
     from datetime import datetime, timezone
     from all_tomorrow.overseer import metacog
-    from all_tomorrow.overseer.schedule import idle_seconds, wake_delay
-    from all_tomorrow.usage import collect
-    delay, reason = wake_delay(collect(), idle_seconds(default_dir()))
-    if delay is None:
+    from all_tomorrow.overseer.schedule import idle_seconds, settings, wake_gate
+    config = settings()
+    ready, reason = wake_gate(idle_seconds(default_dir()), config)
+    if not ready:
         log.info("metacog deferred: %s", reason)
         return False
+    if (default_dir() / "metacog.paused").exists():
+        log.info("metacog deferred: 일시정지 파일 있음")
+        return False
+    # 최소 간격·하루 상한·변화 없음은 metacog.wake가 모델 호출 전에 다시 확인한다.
     last = metacog.last_wake(store.con)
-    if last and (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() < delay:
+    if last and (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() < config["min_interval"]:
         return False
     return True
 

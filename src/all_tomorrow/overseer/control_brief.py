@@ -245,6 +245,9 @@ def render(con, base: Path, *, projects, notion, discord, counts, now=None, idea
     now = now or datetime.now(timezone.utc).astimezone()
     path = base / "direction.md"
     original = path.read_text(encoding="utf-8") if path.is_file() else ""
+    # 관제가 사용자와 정한 방향(메타인지는 읽기만 한다). 사용자 원문 direction.md와 따로 둔다.
+    notes_path = base / "direction-notes.md"
+    decided = notes_path.read_text(encoding="utf-8").strip() if notes_path.is_file() else ""
     items = notion or {}
     weights = {"진행 중 목표": 3, "미완료 할 일": 4, "최근 일기 흐름": 3, "실행 인덱스": 2, "일일 기록 인덱스": 1,
                "최근 48시간 바뀐 페이지": 3, "프로필 / 다가오는 마감": 3}
@@ -253,7 +256,8 @@ def render(con, base: Path, *, projects, notion, discord, counts, now=None, idea
                                  for name, item in items.items())
     activity = brief.render(con, projects, None).split("## 노션", 1)[0]
     sections = [
-        ("1. 큰 방향과 마감", direction(original, now.date()), 1700),
+        ("1. 큰 방향과 마감", direction(original, now.date())
+         + ("\n\n### 관제가 사용자와 정한 방향 (direction-notes.md)\n" + decided if decided else ""), 2600),
         # Small and user-initiated, so it sits before the long Notion block and keeps its space.
         ("2. 최근 아이디어 조사 (7일, 콘솔 #/ideas)", ideas or "아이디어 조사 기록 없음", 900),
         ("3. 노션 요약", notion_text or "읽지 못함", 6850),

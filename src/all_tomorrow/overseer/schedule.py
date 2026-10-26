@@ -1,5 +1,4 @@
-"""PC 미사용 시간과 초기화 전에 남은 사용량으로 깨어날 때를 정한다."""
-from datetime import datetime, timezone
+"""PC 미사용 시간과 설정한 간격으로 메타인지를 깨울지 정한다."""
 import ctypes
 import os
 
@@ -81,28 +80,31 @@ def _session_idle_seconds() -> float | None:
         api.WTSFreeMemory(sessions)
 
 
-def wake_delay(usage: dict, idle: float | None, *, now=None) -> tuple[float | None, str]:
-    now = now or datetime.now(timezone.utc)
-    if idle is None or idle < 300:
-        return None, "PC 사용 중이거나 미사용 시간 확인 불가"
-    codex = next((p for p in usage.get("providers", []) if p.get("id") == "codex"), {})
-    if codex.get("status") != "connected" or not codex.get("windows"):
-        return None, "Codex 잔량 확인 불가"
-    try:
-        observed = datetime.fromisoformat(codex["observed_at"].replace("Z", "+00:00"))
-        if (now - observed).total_seconds() > 1800:
-            return None, "사용량 관측이 오래됨"
-        intervals = []
-        for window in codex["windows"]:
-            reset = datetime.fromisoformat(window["resets_at"].replace("Z", "+00:00"))
-            seconds = (reset - now).total_seconds()
-            if seconds <= 0:
-                return None, "초기화 뒤 사용량 재수집 필요"
-            remaining = 100 - float(window["percent"])
-            if remaining <= 0:
-                return None, "Codex 잔량 없음"
-            # 한 번에 약 1포인트를 쓰는 시작 추정치. 매번 최신 잔량으로 다시 계산한다.
-            intervals.append(seconds / remaining)
-        return max(60, min(1800, min(intervals))), "PC 미사용 · 잔량과 초기화 시각에 맞춤"
-    except (KeyError, TypeError, ValueError):
-        return None, "사용량 형식 확인 불가"
+def settings() -> dict:
+    """메타인지 깨어남 설정. 환경 변수(예: key-pool.env)로 바꾼다."""
+    def number(name: str, default: float) -> float:
+        try:
+            value = float(os.environ.get(name, "") or default)
+        except ValueError:
+            return default
+        return value if value >= 0 else default
+    return {"min_interval": number("ALL_TOMORROW_METACOG_MIN_INTERVAL_MINUTES", 30) * 60,
+            "daily_limit": int(number("ALL_TOMORROW_METACOG_DAILY_LIMIT", 24)),
+            "idle_seconds": number("ALL_TOMORROW_METACOG_IDLE_SECONDS", 300),
+            "check_interval": number("ALL_TOMORROW_METACOG_CHECK_MINUTES", 10) * 60}
+
+
+def wake_gate(idle: float | None, config: dict | None = None) -> tuple[bool, str]:
+    """코드만으로 깨어남을 확인해도 되는지. 모델 호출 여부는 metacog.wake가 변화·간격·하루 상한으로 정한다.
+
+    예전에는 Codex 잔량을 초기화 전에 다 쓰도록 60~1800초 간격을 계산했다(사흘 562회 깨어남).
+    잔량이 0이거나 초기화 시각이 지나면 조용히 멈춰 원인도 남지 않았다(2026-10-26 12:17 이후)."""
+    config = config or settings()
+    need = config["idle_seconds"]
+    if need <= 0:
+        return True, "PC 사용 여부 무시(설정)"
+    if idle is None:
+        return False, "PC 미사용 시간 확인 불가"
+    if idle < need:
+        return False, "PC 사용 중"
+    return True, "PC 미사용"

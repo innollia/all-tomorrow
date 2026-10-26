@@ -9,7 +9,7 @@ import pytest
 
 from all_tomorrow.domain.state import WorkStatus
 from all_tomorrow.overseer import loop, metacog, reports
-from all_tomorrow.overseer.schedule import wake_delay
+from all_tomorrow.overseer.schedule import settings, wake_gate
 from all_tomorrow.overseer.store import SessionStore
 from all_tomorrow.overseer.workspace import ProjectChange, digest, tree
 from all_tomorrow.storage.semantic_store import InMemoryGoalWorkRunStore
@@ -19,6 +19,8 @@ from all_tomorrow.storage.semantic_store import InMemoryGoalWorkRunStore
 def no_real_discord(monkeypatch):
     monkeypatch.setattr("all_tomorrow.overseer.environment.load_key_pool", lambda: None)
     monkeypatch.delenv("ALL_TOMORROW_DISCORD_WEBHOOK_URL", raising=False)
+    # 고리 시험은 깨어남을 연달아 부른다. 최소 간격·하루 상한은 따로 시험한다.
+    monkeypatch.setenv("ALL_TOMORROW_METACOG_MIN_INTERVAL_MINUTES", "0")
 
 
 def project(tmp_path):
@@ -89,7 +91,7 @@ async def test_dedup_budget_and_atomic_rollback(tmp_path):
     store = InMemoryGoalWorkRunStore()
     await asyncio.gather(make_work(store, registry, wid="a"), make_work(store, registry, wid="b"))
     assert len(await store.list_goals()) == 1
-    result = await make_work(store, registry, fix(problem_key="different"), wid="c", limit=1)
+    result = await make_work(store, registry, fix(problem_key="different", title="다른 문제"), wid="c", limit=1)
     assert result == [{"budget_deferred": True}]
     assert len(await store.list_goals()) == 1
     with pytest.raises(ValueError):
@@ -190,19 +192,20 @@ def test_reports_flush_backlog_and_retry_without_leaking_webhook(tmp_path, monke
     assert "secret" not in next((tmp_path / "reports").glob("*.json")).read_text(encoding="utf-8")
 
 
-def test_idle_quota_reset_and_stale_usage_schedule():
-    now = datetime(2026, 10, 21, tzinfo=timezone.utc)
-    def usage(reset, percent=10):
-        return {"providers": [{"id": "codex", "status": "connected", "observed_at": now.isoformat(),
-            "windows": [{"percent": percent, "resets_at": (now + timedelta(hours=reset)).isoformat()}]}]}
-    assert wake_delay(usage(2), 30, now=now)[0] is None
-    assert wake_delay(usage(2), None, now=now)[0] is None
-    assert wake_delay(usage(2, 100), 900, now=now)[0] is None
-    assert wake_delay(usage(-1), 900, now=now)[0] is None
-    assert wake_delay(usage(2), 900, now=now)[0] < wake_delay(usage(24), 900, now=now)[0]
-    stale = usage(2)
-    stale["providers"][0]["observed_at"] = (now - timedelta(hours=2)).isoformat()
-    assert wake_delay(stale, 900, now=now)[0] is None
+def test_wake_gate_uses_idle_only_and_settings_come_from_environment(monkeypatch):
+    for name in ("MIN_INTERVAL_MINUTES", "DAILY_LIMIT", "IDLE_SECONDS", "CHECK_MINUTES"):
+        monkeypatch.delenv("ALL_TOMORROW_METACOG_" + name, raising=False)
+    config = settings()
+    assert config == {"min_interval": 1800, "daily_limit": 24, "idle_seconds": 300, "check_interval": 600}
+    assert wake_gate(30, config)[0] is False and wake_gate(None, config)[0] is False
+    assert wake_gate(900, config)[0] is True
+    monkeypatch.setenv("ALL_TOMORROW_METACOG_MIN_INTERVAL_MINUTES", "45")
+    monkeypatch.setenv("ALL_TOMORROW_METACOG_DAILY_LIMIT", "6")
+    monkeypatch.setenv("ALL_TOMORROW_METACOG_IDLE_SECONDS", "0")
+    monkeypatch.setenv("ALL_TOMORROW_METACOG_CHECK_MINUTES", "bad")
+    config = settings()
+    assert (config["min_interval"], config["daily_limit"], config["check_interval"]) == (2700, 6, 600)
+    assert wake_gate(None, config)[0] is True   # 0이면 PC 사용 여부를 보지 않는다
 
 
 async def test_changed_project_verifier_is_held_instead_of_running_old_authority(tmp_path):

@@ -11,6 +11,13 @@ from all_tomorrow.overseer.store import SessionStore
 SECRET = "pool-value-1234567890"
 
 
+@pytest.fixture(autouse=True)
+def no_interval(monkeypatch):
+    # 깨어남을 연달아 부르는 시험. 최소 간격·하루 상한은 test_metacog_loop_guards.py에서 시험한다.
+    monkeypatch.setenv("ALL_TOMORROW_METACOG_MIN_INTERVAL_MINUTES", "0")
+    monkeypatch.delenv("ALL_TOMORROW_METACOG_DAILY_LIMIT", raising=False)
+
+
 def _store(tmp_path):
     store = SessionStore(tmp_path / "overseer.sqlite")
     s = Session("codex", "c1", cwd="C:\\projects\\web", title="빌드", updated_at="2026-10-20T00:00:00")
@@ -90,24 +97,24 @@ async def test_default_judge_fallback_and_persisted_event(tmp_path, monkeypatch,
     monkeypatch.setenv("ALL_TOMORROW_METACOG_MODEL", "test-gemini")
     monkeypatch.setattr(loop.reports, "flush", lambda *a: None)
 
-    def gemini(prompt, directory):
-        calls.append("antigravity")
+    def codex(prompt, directory):
+        calls.append("codex")
         if isinstance(failure, Exception):
             raise failure
         return failure or '{"observations": [], "actions": []}'
 
-    def codex(prompt, directory):
-        calls.append("codex")
+    def gemini(prompt, directory):
+        calls.append("antigravity")
         return '{"observations": [], "actions": []}'
 
     monkeypatch.setattr(metacog, "antigravity_reasoner", gemini)
     monkeypatch.setattr(metacog, "codex_reasoner", codex)
     result = await loop.observe(central, sessions, tmp_path, registry={}, redact=lambda t: t, force=True)
-    expected = "codex" if failure else "antigravity"
+    expected = "antigravity" if failure else "codex"
     assert result["status"] == "done" and result["reasoner"] == expected
-    assert calls == (["antigravity", "codex"] if failure else ["antigravity"])
+    assert calls == (["codex", "antigravity"] if failure else ["codex"])   # 기본 순서: Codex 먼저
     row = sessions.con.execute("select reasoner,model,fallback_reason from metacog_wakes").fetchone()
-    assert row == (expected, "default" if failure else "test-gemini", result["fallback_reason"])
+    assert row == (expected, "test-gemini" if failure else "default", result["fallback_reason"])
     payload = next(e.payload for e in await central.list_events() if e.type == "metacog.wake_applied")
     assert all(payload[k] == result[k] for k in ("reasoner", "model", "fallback_reason"))
     journal = (tmp_path / "metacog-journal.md").read_text(encoding="utf-8")
@@ -116,7 +123,7 @@ async def test_default_judge_fallback_and_persisted_event(tmp_path, monkeypatch,
     # A fallback must not change the next wake's selected reasoner.
     calls.clear()
     await loop.observe(central, sessions, tmp_path, registry={}, redact=lambda t: t, force=True)
-    assert calls[0] == "antigravity"
+    assert calls[0] == "codex"
 
 
 def test_explicit_codex_and_failed_fallback(tmp_path, monkeypatch):
@@ -153,8 +160,8 @@ def test_antigravity_adapter_is_read_only_noninteractive(tmp_path, monkeypatch):
     assert metacog._parse(metacog.antigravity_reasoner("test", tmp_path))["actions"] == []
 
 
-@pytest.mark.parametrize("sonnet_fails,codex_ok", [(False, False), (True, False), (False, True)])
-def test_claude_is_last_resort_sonnet_then_haiku(tmp_path, monkeypatch, sonnet_fails, codex_ok):
+@pytest.mark.parametrize("sonnet_fails,agy_ok", [(False, False), (True, False), (False, True)])
+def test_claude_is_last_resort_sonnet_then_haiku(tmp_path, monkeypatch, sonnet_fails, agy_ok):
     sessions = _store(tmp_path)
     monkeypatch.delenv("ALL_TOMORROW_METACOG_REASONER", raising=False)
     calls = []
@@ -171,18 +178,19 @@ def test_claude_is_last_resort_sonnet_then_haiku(tmp_path, monkeypatch, sonnet_f
             raise subprocess.TimeoutExpired("secret", 1)
         return '{"observations": [], "actions": []}'
 
-    monkeypatch.setattr(metacog, "antigravity_reasoner", fail("antigravity"))
-    monkeypatch.setattr(metacog, "codex_reasoner", (lambda *a: calls.append("codex") or '{}') if codex_ok else fail("codex"))
+    monkeypatch.setattr(metacog, "codex_reasoner", fail("codex"))
+    monkeypatch.setattr(metacog, "antigravity_reasoner",
+                        (lambda *a: calls.append("antigravity") or '{}') if agy_ok else fail("antigravity"))
     monkeypatch.setattr(metacog, "claude_reasoner", claude)
     result = metacog.wake(sessions.con, tmp_path, redact=lambda t: t, projects=None, notion=None, force=True)
     assert result["status"] == "done"
-    if codex_ok:
-        assert calls == ["antigravity", "codex"] and result["reasoner"] == "codex"
+    if agy_ok:
+        assert calls == ["codex", "antigravity"] and result["reasoner"] == "antigravity"
         return
     expected = "claude-haiku-5-5" if sonnet_fails else "claude-sonnet-5-5"
     assert result["reasoner"] == "claude" and result["model"] == expected
-    assert calls == ["antigravity", "codex", "claude-sonnet-5-5"] + (["claude-haiku-5-5"] if sonnet_fails else [])
-    assert "antigravity: CalledProcessError" in result["fallback_reason"] and "codex:" in result["fallback_reason"]
+    assert calls == ["codex", "antigravity", "claude-sonnet-5-5"] + (["claude-haiku-5-5"] if sonnet_fails else [])
+    assert "codex: CalledProcessError" in result["fallback_reason"] and "antigravity:" in result["fallback_reason"]
     assert "secret" not in result["fallback_reason"]
     row = sessions.con.execute("select reasoner,model,fallback_reason from metacog_wakes").fetchone()
     assert row == ("claude", expected, result["fallback_reason"])
