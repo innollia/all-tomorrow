@@ -16,7 +16,7 @@
   const card = (t, i) => `<div class="card" data-topic="${esc(t.id)}">
     <div class="row" style="justify-content:space-between;gap:8px"><span class="t">${esc(t.title)}</span>
       <span class="mute small">${esc(t.project_id)} · ${repeatText(t.repeat_days)}${t.enabled ? "" : " · 꺼짐"}</span></div>
-    <div class="small" style="white-space:pre-wrap;margin:6px 0">${esc(t.ask)}</div>
+    ${t.idea_id ? `<div class="small"><a href="#/idea/${encodeURIComponent(t.idea_id)}">아이디어 ${esc(t.idea_id)}의 추가 조사</a> · 끝나면 그 아이디어의 자유 자료로 들어간다</div>` : ""}<div class="small" style="white-space:pre-wrap;margin:6px 0">${esc(t.ask)}</div>
     ${t.runs.map(runLine).join("")}
     <div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">
       <button data-act="now">지금 돌리기</button>

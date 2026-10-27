@@ -20,8 +20,8 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 URL = re.compile(r"https?://[^\s<>\"'`)\]]+", re.I)
-MAX_BODY = 500_000
-MAX_FILE_BYTES = 8 * 1024 * 1024
+MAX_BODY = 2_000_000
+MAX_FILE_BYTES = 24 * 1024 * 1024
 MAX_PAGE_BYTES = 3 * 1024 * 1024
 TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".text", ".csv", ".json", ".log", ".rst"}
 NOISE_TAGS = {"script", "style", "noscript", "svg", "nav", "footer", "header", "form", "iframe"}
@@ -222,7 +222,7 @@ def file_item(name: str, data_b64: str) -> dict[str, Any]:
     if not data:
         raise ValueError(f"{name}: 빈 파일")
     if len(data) > MAX_FILE_BYTES:
-        raise ValueError(f"{name}: 8MB가 넘는다")
+        raise ValueError(f"{name}: 24MB가 넘어 건너뜀")
     suffix = Path(name).suffix.lower()
     item: dict[str, Any] = {"kind": "file", "label": name, "url": "", "title": Path(name).stem, "note": "", "raw": None}
     if suffix == ".pdf" or data[:5] == b"%PDF-":
@@ -231,8 +231,9 @@ def file_item(name: str, data_b64: str) -> dict[str, Any]:
                     note="" if text else "PDF 글자를 읽지 못함")
         return item
     text = decode_text(data)
-    if text is None:
-        raise ValueError(f"{name}: md·txt·pdf 같은 글 파일만 받는다")
+    if text is None:   # not text (image, zip, ...): keep the file itself, no refusal
+        item.update(body=f"(글로 읽지 못한 파일 {name} · {len(data)}바이트. 원본 파일은 저장함)", raw=data, note="글로 읽지 못함")
+        return item
     if suffix in (".html", ".htm"):
         title, text = html_to_text(text)
         item["title"] = title or item["title"]

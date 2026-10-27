@@ -6,7 +6,9 @@
   실패 뒤 6시간이 지났거나, '지금 돌리기'를 눌렀으면 차례다. 반복 주제는 지난 결과를 들려 보내 바뀐 것 위주로 쓰게 한다.
 - 조건: PC 미사용 10분 이상('지금 돌리기'는 무시), Codex 사용량 창이 모두 80% 미만, 하루 8회, research.paused 없음.
 - Codex는 웹 검색을 켜고(-c web_search="live") 그 주제의 프로젝트 폴더에서 돈다. 파일은 고치지 않게 한다.
+- 자유 자료는 원문을 보관만 하고, 저장되면 압축 작업(kind=compress)을 먼저 띄운다(PC 사용 여부·하루 횟수와 무관, 웹 검색 없음).
 - 결과는 results/<실행 id>.md로 남기고, 끝날 때 보고 1건을 낸다.
+- 아이디어에 연결된 주제(idea_id, 아이디어 화면의 '추가 조사')는 돌릴 때 아이디어 맥락을 붙이고, 끝나면 결과를 그 아이디어의 자유 자료로 넣는다.
 """
 from __future__ import annotations
 
@@ -22,6 +24,8 @@ from all_tomorrow.console.research import RESULTS, load_runs, load_topics, resea
 log = logging.getLogger(__name__)
 
 PAUSE = "research.paused"
+COMPRESS_RETRY = 1800      # 압축이 실패한 자료는 30분 뒤 다시, 3번 실패하면 그만둔다
+COMPRESS_TRIES = 3
 RETRY_AFTER = 6 * 3600
 PROMPT = """너는 All Tomorrow의 유휴 조사 담당이다. 사용자가 정해 둔 주제를 웹 검색으로 조사해 한국어 보고서 하나로 답한다.
 사용자는 지금 자리에 없다. 묻지 말고 끝까지 조사한다.
@@ -97,7 +101,91 @@ def build_task(topic: dict, runs: list[dict], folder: Path, cwd: str) -> str:
                         f"<previous>\n{text[:6000]}\n</previous>\n")
         except OSError:
             pass
+    if topic.get("idea_id"):   # 아이디어 추가 조사: 짧은 요청에 그 아이디어의 지금 맥락을 붙인다
+        prompt = _followup_prompt(topic, folder)
+        if prompt:
+            return prompt
     return PROMPT.format(cwd=cwd, title=topic["title"], ask=topic["ask"], previous=previous)
+
+
+def _followup_prompt(topic: dict, folder: Path) -> str:
+    from all_tomorrow.console import ideas_followup
+    from all_tomorrow.console.ideas import IdeaStore
+    try:
+        idea = IdeaStore(folder.parent / "ideas").get(topic["idea_id"])
+        return ideas_followup.build_prompt(idea, topic["ask"], "codex") if idea else ""
+    except Exception as error:   # 맥락을 못 읽어도 요청 원문으로 조사는 한다
+        log.warning("추가 조사 맥락 읽기 실패: %s", type(error).__name__)
+        return ""
+
+
+def _file_material(folder: Path, run: dict, output: str) -> str:
+    """끝난 추가 조사를 그 아이디어의 자유 자료로 넣는다(아이디어 DB 쓰기는 IdeaStore를 재사용). 반환: 보고에 덧붙일 말."""
+    from all_tomorrow.console import ideas_followup
+    from all_tomorrow.console.ideas import IdeaStore
+    try:
+        store = IdeaStore(folder.parent / "ideas")
+        if store.get(run["idea_id"]) is None:
+            return " (아이디어가 지워져 자료로는 넣지 못했습니다)"
+        run["material_id"] = store.add_material(run["idea_id"], ideas_followup.material_item(run.get("request", ""), output, run["id"]))
+        store.write_brief(run["idea_id"])
+        return f" 아이디어 {run['idea_id']}의 자유 자료로 들어갔습니다(압축본은 곧 정리본에 반영)."
+    except Exception as error:
+        run["material_error"] = type(error).__name__
+        log.warning("추가 조사 자료 넣기 실패: %s", type(error).__name__)
+        return " (아이디어 자료로 넣기는 실패했습니다)"
+
+
+def next_compress(folder: Path, runs: list[dict], now: float) -> dict | None:
+    """압축을 기다리는 자료 하나(오래된 것부터). 방금 실패한 것·세 번 실패한 것은 건너뛴다."""
+    from all_tomorrow.console.ideas import IdeaStore
+    if not (folder.parent / "ideas" / "ideas.sqlite").is_file():
+        return None
+    for item in IdeaStore(folder.parent / "ideas").pending_summaries():
+        mine = [r for r in runs if r.get("kind") == "compress" and r.get("material_id") == item["id"]]
+        failed = [r for r in mine if r.get("status") != "SUCCESS"]
+        if len(failed) >= COMPRESS_TRIES or (failed and now - failed[-1]["started"] < COMPRESS_RETRY):
+            continue
+        return item
+    return None
+
+
+def _start_compress(folder: Path, item: dict, runs: list[dict], now: float, start: Callable[..., dict], cfg: dict) -> str:
+    """원문은 두고 압축본만 만들게 한다: read-only, 웹 검색 없음, PC 사용 여부와 상관없이 바로."""
+    from all_tomorrow import mcp_server
+    from all_tomorrow.console import ideas_followup
+    from all_tomorrow.console.ideas import IdeaStore
+    store = IdeaStore(folder.parent / "ideas")
+    idea, material = store.get(item["idea_id"]), store.material(item["id"])
+    if idea is None or material is None:
+        return "none"
+    run = {"id": "RC-" + time.strftime("%y%m%d-%H%M%S", time.localtime(now)) + f"-{item['id']}", "kind": "compress",
+           "idea_id": item["idea_id"], "material_id": item["id"], "title": "압축: " + item["title"][:40],
+           "project_id": "all-tomorrow", "started": now, "status": "RUNNING"}
+    try:
+        meta = start("all-tomorrow", "codex", ideas_followup.compress_prompt(idea, material),
+                     worker_options={"timeout_seconds": min(cfg["timeout"], 900), "sandbox": "read-only"})
+    except Exception as error:
+        run.update(status="FAILED", error=type(error).__name__ + ": " + str(error)[:200], finished=now)
+        runs.append(run)
+        save_runs(folder, runs)
+        return "failed"
+    run["run_id"] = meta["run_id"]
+    runs.append(run)
+    save_runs(folder, runs)
+    log.info("자료 압축 시작: %s (%s)", item["title"][:30], meta["run_id"])
+    return "compress"
+
+
+def _finish_compress(folder: Path, run: dict, output: str | None) -> None:
+    from all_tomorrow.console.ideas import IdeaStore
+    if not output:
+        return
+    try:
+        if not IdeaStore(folder.parent / "ideas").set_summary(run["material_id"], output):
+            run["status"], run["error"] = "FAILED", "자료가 없거나 압축본이 비었다"
+    except Exception as error:
+        run["status"], run["error"] = "FAILED", type(error).__name__
 
 
 def _finish(folder: Path, run: dict, info: dict, base: Path) -> None:
@@ -108,14 +196,20 @@ def _finish(folder: Path, run: dict, info: dict, base: Path) -> None:
     output = payload.get("output") if status == "SUCCESS" else None
     run["status"] = status if output else ("FAILED" if status == "SUCCESS" else status)
     run["finished"] = time.time()
+    if run.get("kind") == "compress":   # 결과 파일·보고 없이 압축본만 아이디어에 넣는다
+        _finish_compress(folder, run, output)
+        if run["status"] != "SUCCESS":
+            run.setdefault("error", str((result.get("error") or info.get("stderr_tail") or status))[:300])
+        return
     if output:
         name = run["id"] + ".md"
         path = folder / RESULTS / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"# {run['title']}\n\n{output.strip()}\n", encoding="utf-8")
         run["result_file"] = name
+        tail = _file_material(folder, run, output) if run.get("idea_id") else ""
         reports.enqueue(base, "research-" + run["id"],
-                        f"[보고] 유휴 조사 끝: {run['title']} — 콘솔 '조사 목록'에서 결과를 볼 수 있습니다.")
+                        f"[보고] 유휴 조사 끝: {run['title']} — 콘솔 '조사 목록'에서 결과를 볼 수 있습니다.{tail}")
     else:
         error = result.get("error") or info.get("stderr_tail") or status
         run["error"] = str(error)[:300]
@@ -147,7 +241,12 @@ def tick(base: Path, idle: float | None, *, now: float | None = None,
     if (base / PAUSE).exists():
         return "paused"
     cfg = settings()
-    if len([r for r in runs if now - r["started"] < 86400]) >= cfg["daily"]:
+    job = next_compress(folder, runs, now)     # 짧은 일이라 PC가 쉬는지·하루 횟수와 상관없이 주제보다 먼저
+    if job and quota_ok(base, cfg["max_percent"], now)[0]:
+        started = _start_compress(folder, job, runs, now, start, cfg)
+        if started != "none":
+            return started
+    if len([r for r in runs if now - r["started"] < 86400 and r.get("kind") != "compress"]) >= cfg["daily"]:
         return "budget"
     idle_ok = idle is not None and idle >= cfg["idle_seconds"]
     topic = next((t for t in load_topics(folder) if due(t, runs, now, idle_ok)), None)
@@ -162,6 +261,8 @@ def tick(base: Path, idle: float | None, *, now: float | None = None,
     cwd = (project or mcp_server.load_projects().get("all-tomorrow", {})).get("path", "")
     run = {"id": "RR-" + time.strftime("%y%m%d-%H%M%S", time.localtime(now)), "topic_id": topic["id"],
            "title": topic["title"], "project_id": project_id, "started": now, "status": "RUNNING"}
+    if topic.get("idea_id"):
+        run.update(idea_id=topic["idea_id"], request=topic["ask"])
     try:
         meta = start(project_id, "codex", build_task(topic, runs, folder, cwd),
                      worker_options={"timeout_seconds": cfg["timeout"], "sandbox": "read-only"}, argv_suffix=["-c", 'web_search="live"'])

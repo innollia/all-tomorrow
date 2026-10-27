@@ -45,7 +45,10 @@ def test_idea_desk_flow_prompt_paste_list_and_brief(tmp_path) -> None:
             assert field in idea["prompt"]
 
         other = c.post(f"/api/ideas/{iid}/results", json={"text": result("I-000000-ffff", "S1", "x", "y")})
-        assert other.status_code == 422
+        assert other.status_code == 200                           # 다른 아이디어 ID가 적힌 블록도 거절하지 않고 이 화면의 아이디어에 둔다
+        first = c.get(f"/api/ideas/{iid}").json()["results"][0]
+        assert first["subtask_id"] == "S1"
+        c.delete(f"/api/ideas/{iid}/results/{first['id']}")
         paste = result(iid, "S1", "기존 서비스", "옛 결과") + "\n" + result(iid, "S2", "수요", "수요 있음")
         assert c.post(f"/api/ideas/{iid}/results", json={"text": paste}).json()["added"] == [
             {"subtask_id": "S1", "subtask_title": "기존 서비스", "status": "완료", "claims": 2, "assigned": "ID"},
@@ -199,7 +202,8 @@ def test_plan_api_rejects_result_blocks(tmp_path) -> None:
         c.post("/api/login", json={"username": "owner", "password": "correct horse"})
         iid = c.post("/api/ideas", json={"text": "아이디어"}).json()["id"]
         r = c.put(f"/api/ideas/{iid}/plan", json={"text": result(iid, "S1", "a", "b")})
-        assert r.status_code == 422 and "결과 붙여넣기" in r.json()["detail"]
+        assert r.status_code == 200 and r.json()["moved"] == "results"   # 쪼개기 칸에 결과를 넣어도 결과로 저장한다
+        assert c.get(f"/api/ideas/{iid}").json()["plan"] == ""
         assert c.put(f"/api/ideas/{iid}/plan", json={"text": ""}).status_code == 200
 
 
@@ -408,7 +412,9 @@ def test_file_items_md_txt_pdf_and_rejects() -> None:
     assert "Hello research world" in got["body"] and got["raw"] == pdf
     unreadable = ideas_intake.file_item("scan.pdf", b64(b"%PDF-1.4\n%%EOF"))
     assert unreadable["raw"] and "읽지 못함" in unreadable["note"]
-    for name, data in (("x.png", b"\x89PNG\x00\x00\x00"), ("e.txt", b" \n"), ("z.md", b"")):
+    png = ideas_intake.file_item("x.png", b64(b"\x89PNG\x00\x00\x00"))   # 글이 아닌 파일도 거절하지 않고 원본을 보관한다
+    assert png["kind"] == "file" and png["raw"] and "읽지 못함" in png["note"]
+    for name, data in (("e.txt", b" \n"), ("z.md", b"")):
         with pytest.raises(ValueError):
             ideas_intake.file_item(name, b64(data))
 
@@ -508,9 +514,10 @@ def test_intake_api_text_link_file_assign_delete_and_old_data(tmp_path, monkeypa
             {"name": "memo.md", "data": md}, {"name": "pic.png", "data": base64.b64encode(b"\x00\x01").decode()}]})
         assert r.status_code == 200, r.text
         added = r.json()["added"]
-        assert [a["kind"] for a in added] == ["url", "file"] and all(a["idea_id"] == iid for a in added)
-        assert added[1]["task_id"] == "S2" and len(r.json()["skipped"]) == 1
-        assert c.post("/api/ideas/intake", json={}).status_code == 422
+        assert [a["kind"] for a in added] == ["url", "file", "file"] and all(a["idea_id"] == iid for a in added[:2])
+        assert added[2]["candidate"] is True   # 글로 읽지 못한 파일은 맞는 아이디어를 못 정해 새 후보가 된다(거절하지 않는다)
+        assert added[1]["task_id"] == "S2" and r.json()["skipped"] == []
+        assert c.post("/api/ideas/intake", json={}).json() == {"added": [], "skipped": []}
         assert c.post("/api/ideas/intake", json={"text": "메모", "idea_id": "I-000000-ffff"}).status_code == 404
         detail = c.get(f"/api/ideas/{iid}").json()
         assert {m["kind"] for m in detail["materials"]} == {"url", "file"}
@@ -523,4 +530,6 @@ def test_intake_api_text_link_file_assign_delete_and_old_data(tmp_path, monkeypa
         assert c.delete(f"/api/ideas/{iid}/materials/{mid}").status_code == 404
         assert c.post(f"/api/ideas/{iid}/adopt").status_code == 200
         assert c.delete(f"/api/ideas/{iid}").status_code == 204
+        for left in c.get("/api/ideas").json():   # the candidate made by the unreadable file
+            assert left["candidate"] and c.delete(f"/api/ideas/{left['id']}").status_code == 204
         assert c.get("/api/ideas").json() == []

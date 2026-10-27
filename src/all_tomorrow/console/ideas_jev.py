@@ -49,7 +49,7 @@ def classify_bodies(tasks: dict[str, dict[str, str]], bodies: list[str]) -> list
     criteria = {names[sid]: BREAKS.sub(" ", t["context"])[:300] or t["title"] for sid, t in tasks.items()}
     questions = {f"slot{n}": {
         "type": "choice",
-        "instructions": "자료조사 에이전트가 낸 아래 결과는 어느 조사 과제에 대한 결과인가?\n\n결과:\n" + excerpt(body),
+        "instructions": "자료조사 에이전트가 낸 아래 결과는 어느 조사 과제에 대한 결과인가?\n\n결과:\n" + excerpt(body, 1200, 300),
         "criteria": criteria} for n, body in enumerate(bodies)}
     answers = jev.ask({"조사 과제 목록": {sid: t["title"] for sid, t in tasks.items()}}, questions)
     by_name = {name: sid for sid, name in names.items()}
@@ -75,7 +75,7 @@ def choose_ideas(ideas: list[dict[str, str]], bodies: list[str]) -> list[str | N
     criteria[NONE] = "아래 자료는 위 아이디어들 중 어느 것의 조사에도 쓰이지 않는다. 다른 주제다."
     questions = {f"item{n}": {
         "type": "choice",
-        "instructions": "사용자가 직접 조사해 모은 아래 자료는 어느 아이디어를 위한 것인가?\n\n자료:\n" + excerpt(body),
+        "instructions": "사용자가 직접 조사해 모은 아래 자료는 어느 아이디어를 위한 것인가?\n\n자료:\n" + excerpt(body, 1200, 300),
         "criteria": criteria} for n, body in enumerate(bodies)}
     answers = jev.ask({"아이디어 목록": {i["id"]: i["title"] for i in ideas}}, questions)
     by_name = {name: iid for iid, name in names.items()}

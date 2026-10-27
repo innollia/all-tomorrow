@@ -52,7 +52,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from all_tomorrow.console import ConsoleContext, ideas_intake, ideas_jev, jev
+from all_tomorrow.console import ConsoleContext, ideas_followup, ideas_intake, ideas_jev, jev
+from all_tomorrow.console.research import ResearchStore
 
 META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사업·프로젝트로 할 만한지 판단할 자료를 모으려 한다.
 지금 할 일은 조사 자체가 아니라, 조사를 나눠 맡길 **자기완결 하위 프롬프트**와 그 작업 경계를 만드는 것이다.
@@ -144,6 +145,9 @@ META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사�
 
 {text}
 """
+
+SHORT = 300         # a material this short is its own summary
+SUMMARY_MAX = 1800  # hard cap on a compressed summary (the prompt asks for 1500 or 1/5 of the original)
 
 BLOCK = re.compile(r"=+\s*자료봉\s*결과\s*=+(.*?)(?:=+\s*끝\s*=+?|(?==+\s*자료봉\s*결과)|\Z)", re.S)
 IDEA_ID = re.compile(r"I-\d{6}-[0-9a-f]{4}", re.I)
@@ -279,6 +283,11 @@ class IdeaStore:
                 kind TEXT NOT NULL, label TEXT NOT NULL, url TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL,
                 note TEXT NOT NULL, task_id TEXT NOT NULL, assigned TEXT NOT NULL, file TEXT NOT NULL,
                 created_at TEXT NOT NULL)""")
+            if "summary" not in {row["name"] for row in db.execute("PRAGMA table_info(materials)")}:
+                # `body` is the original and is only kept and shown; the brief, the overseer summary and follow-up prompts
+                # read `summary` alone (made by Codex, see overseer.idle_research). "" = not compressed yet.
+                db.execute("ALTER TABLE materials ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
+                db.execute("ALTER TABLE materials ADD COLUMN summary_at TEXT NOT NULL DEFAULT ''")
             # Every saved decomposition stays readable after it is replaced.
             db.execute("""CREATE TABLE IF NOT EXISTS plans (id INTEGER PRIMARY KEY, idea_id TEXT NOT NULL,
                 text TEXT NOT NULL, created_at TEXT NOT NULL)""")
@@ -322,6 +331,8 @@ class IdeaStore:
                 "SELECT id, title, created_at, updated_at, plan_at, candidate FROM ideas ORDER BY updated_at DESC")]
             rows = db.execute("SELECT idea_id, subtask_id, status FROM results ORDER BY id DESC").fetchall()
             free = {r["idea_id"]: r["n"] for r in db.execute("SELECT idea_id, COUNT(*) AS n FROM materials GROUP BY idea_id")}
+            waiting = {r["idea_id"]: r["n"] for r in db.execute(
+                "SELECT idea_id, COUNT(*) AS n FROM materials WHERE summary = '' GROUP BY idea_id")}
         latest: dict[str, dict[str, str]] = {}
         totals: dict[str, int] = {}
         for r in rows:
@@ -331,6 +342,7 @@ class IdeaStore:
             per = latest.get(idea["id"], {})
             idea["results"] = totals.get(idea["id"], 0)
             idea["materials"] = free.get(idea["id"], 0)
+            idea["pending"] = waiting.get(idea["id"], 0)
             idea["candidate"] = bool(idea["candidate"])
             idea["subtasks"] = len(per)
             idea["status_counts"] = {s: sum(v == s for v in per.values()) for s in (*STATUSES, "")}
@@ -345,7 +357,7 @@ class IdeaStore:
                 continue
             c = i["status_counts"]
             lines.append(f"- {i['id']} {i['title']}{' [새 아이디어 후보]' if i['candidate'] else ''} · 과제 {i['subtasks']} (완료 {c['완료']}/불완전 {c['불완전']}/실패 {c['실패']}"
-                         f"{'/상태없음 ' + str(c['']) if c[''] else ''}) · 자유 자료 {i['materials']}건 · 쪼개기 {'있음' if i['plan_at'] else '없음'}"
+                         f"{'/상태없음 ' + str(c['']) if c[''] else ''}) · 자유 자료 {i['materials']}건{' (압축 대기 ' + str(i['pending']) + '건)' if i['pending'] else ''} · 쪼개기 {'있음' if i['plan_at'] else '없음'}"
                          f" · 갱신 {i['updated_at'][:16]} · 정리본 {self.briefs / (i['id'] + '.md')}")
         return "\n".join(lines) or f"최근 {days}일 아이디어 조사 없음"
 
@@ -386,9 +398,6 @@ class IdeaStore:
                 entries.append((raw, p, "ID" if p["subtask_id"] else ""))
         if not entries:
             raise ValueError("붙여넣은 내용이 비어 있다")
-        wrong = sorted({p["idea_id"] for _, p, _ in entries if p["idea_id"] and p["idea_id"] != idea_id})
-        if wrong:
-            raise ValueError(f"다른 아이디어의 결과다: {', '.join(wrong)} (이 화면은 {idea_id})")
         pending = [n for n, (_, _, how) in enumerate(entries) if not how]
         picked = None  # Jev's answers; None = Jev not used or failed, then the old loose reading stands
         if pending and self.use_jev:
@@ -496,12 +505,17 @@ class IdeaStore:
         return placed
 
     def add_material(self, idea_id: str, item: dict[str, Any], task_id: str = "", assigned: str = "") -> int:
+        # The original is kept as it came. A short one is its own summary; a long one waits for the Codex compression.
         stamp = now()
+        body = item["body"]
+        note = item["note"] + (" · 너무 길어 앞부분만 저장" if len(body) > ideas_intake.MAX_BODY else "")
+        body = body[:ideas_intake.MAX_BODY]
+        short = body.strip() if len(body.strip()) <= SHORT else ""
         with self.db() as db:
             mid = db.execute("""INSERT INTO materials (idea_id, kind, label, url, title, body, note, task_id, assigned, file,
-                                created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                             (idea_id, item["kind"], item["label"], item["url"], item["title"], item["body"][:ideas_intake.MAX_BODY],
-                              item["note"], task_id, assigned, "", stamp)).lastrowid
+                                created_at, summary, summary_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                             (idea_id, item["kind"], item["label"], item["url"], item["title"], body,
+                              note.strip(" ·"), task_id, assigned, "", stamp, short, stamp if short else "")).lastrowid
             if item.get("raw"):  # keep the original (a PDF) next to the data so the overseer can open it
                 folder = self.base / "files"
                 folder.mkdir(exist_ok=True)
@@ -510,6 +524,50 @@ class IdeaStore:
                 db.execute("UPDATE materials SET file = ? WHERE id = ?", (str(target), mid))
             db.execute("UPDATE ideas SET updated_at = ? WHERE id = ?", (stamp, idea_id))
         return mid
+
+    def pending_summaries(self) -> list[dict[str, Any]]:
+        """Materials still waiting for compression, oldest first."""
+        with self.db() as db:
+            return [dict(r) for r in db.execute("SELECT id, idea_id, title FROM materials WHERE summary = '' ORDER BY id")]
+
+    def material(self, material_id: int) -> dict[str, Any] | None:
+        with self.db() as db:
+            row = db.execute("SELECT * FROM materials WHERE id = ?", (material_id,)).fetchone()
+        return dict(row) if row else None
+
+    def set_summary(self, material_id: int, summary: str) -> bool:
+        summary = summary.strip()
+        if len(summary) > SUMMARY_MAX:
+            summary = summary[:SUMMARY_MAX].rstrip() + "…"
+        with self.db() as db:
+            row = db.execute("SELECT idea_id FROM materials WHERE id = ?", (material_id,)).fetchone()
+            if row is None or not summary:
+                return False
+            db.execute("UPDATE materials SET summary = ?, summary_at = ? WHERE id = ?", (summary, now(), material_id))
+        self.write_brief(row["idea_id"])
+        return True
+
+    def move_material(self, idea_id: str, material_id: int, to_id: str) -> bool:
+        """Put a material under another idea (the user corrects where it went). Its task is cleared and a long one is
+        compressed again, since the summary was made against the old idea. An emptied new-idea candidate is dropped."""
+        with self.db() as db:
+            row = db.execute("SELECT body FROM materials WHERE id = ? AND idea_id = ?", (material_id, idea_id)).fetchone()
+            if row is None:
+                return False
+            if not db.execute("SELECT 1 FROM ideas WHERE id = ?", (to_id,)).fetchone():
+                raise LookupError(to_id)
+            body = row["body"].strip()
+            short = body if len(body) <= SHORT else ""
+            db.execute("UPDATE materials SET idea_id = ?, task_id = '', assigned = 'user', summary = ?, summary_at = ? WHERE id = ?",
+                       (to_id, short, now() if short else "", material_id))
+            db.execute("UPDATE ideas SET updated_at = ? WHERE id IN (?, ?)", (now(), idea_id, to_id))
+        old = self.get(idea_id)
+        if old and old["candidate"] and idea_id != to_id and not (old["materials"] or old["results"] or old["plan"]):
+            self.delete_idea(idea_id)
+        else:
+            self.write_brief(idea_id)
+        self.write_brief(to_id)
+        return True
 
     def assign_material(self, idea_id: str, material_id: int, task_id: str) -> bool:
         sid = task_id.strip().upper()
@@ -637,7 +695,7 @@ class IdeaStore:
         if idea["materials"]:
             tasks = idea["tasks"]
             kinds = {"paste": "붙여넣기", "url": "링크", "file": "파일"}
-            lines += ["## 자유 자료 (사용자가 프롬프트 없이 직접 조사해 넣은 것 · 오래된 순)", "",
+            lines += ["## 자유 자료 (사용자가 프롬프트 없이 직접 조사해 넣은 것 · 오래된 순 · 압축본만, 원문은 콘솔에서)", "",
                       "| # | 출처 | 받은 때 | 과제 | 제목 |", "|---|---|---|---|---|"]
             for m in reversed(idea["materials"]):
                 where = f"{m['task_id']} {tasks.get(m['task_id'], {}).get('title', '')}".strip() if m["task_id"] else "자유 자료"
@@ -648,7 +706,8 @@ class IdeaStore:
                 where = f"{m['task_id']} ({m['assigned']})" if m["task_id"] else "과제 배정 없음 (자유 자료)"
                 src = {"paste": "붙여넣은 글", "url": "링크 " + m["url"], "file": "파일 " + m["label"]}.get(m["kind"], m["kind"])
                 extra = (" · " + m["note"] if m["note"] else "") + (" · 원본 " + m["file"] if m["file"] else "")
-                lines += [f"### 자료 {m['id']} · {m['title']}", f"_{src} · 받은 때 {m['created_at']} · {where}{extra}_", "", m["body"], ""]
+                lines += [f"### 자료 {m['id']} · {m['title']}", f"_{src} · 받은 때 {m['created_at']} · {where}{extra}_", "",
+                          m["summary"] or f"(압축 대기 · 원문 {len(m['body'])}자는 콘솔에서 본다)", ""]
         replaced = [r for r in idea["results"] if not r["latest"]]
         if replaced:
             lines += ["## 덮어쓴 이전 결과 (최신 순)", ""]
@@ -682,35 +741,44 @@ class IdeaStore:
 
 class IdeaRequest(BaseModel):
     title: str = Field(default="", max_length=200)
-    text: str = Field(min_length=1, max_length=50_000)
+    text: str = Field(min_length=1, max_length=20_000_000)
 
 
 class PlanRequest(BaseModel):
-    text: str = Field(default="", max_length=200_000)
+    text: str = Field(default="", max_length=20_000_000)
 
 
 class PasteRequest(BaseModel):
-    text: str = Field(default="", max_length=500_000)
+    text: str = Field(default="", max_length=20_000_000)
     slots: list[str] = Field(default_factory=list, max_length=20)  # one pasted result per slot, any order
 
 
 class IntakeFile(BaseModel):
     name: str = Field(max_length=300)
-    data: str = Field(max_length=12_000_000)  # base64
+    data: str = Field(max_length=40_000_000)  # base64
 
 
 class IntakeRequest(BaseModel):
-    text: str = Field(default="", max_length=ideas_intake.MAX_BODY)
+    text: str = Field(default="", max_length=20_000_000)  # longer than MAX_BODY is cut when stored, never refused
     files: list[IntakeFile] = Field(default_factory=list, max_length=10)
     idea_id: str = Field(default="", max_length=40)
+
+
+class FollowupRequest(BaseModel):
+    request: str = Field(min_length=1, max_length=2000)
 
 
 class AssignRequest(BaseModel):
     subtask_id: str = Field(max_length=8)
 
 
+class MoveRequest(BaseModel):
+    idea_id: str = Field(max_length=40)
+
+
 def build_router(ctx: ConsoleContext) -> APIRouter:
     store = IdeaStore(ctx.feature_dir("ideas"), use_jev=True)
+    research = ResearchStore(ctx.feature_dir("research"))
     router = APIRouter(prefix="/api/ideas")
 
     def found(idea_id: str) -> dict[str, Any]:
@@ -742,21 +810,39 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
                 skipped.append(str(error))
         try:
             placed = await asyncio.to_thread(store.intake, items, body.idea_id)
-        except ValueError as error:
-            raise HTTPException(422, "; ".join([str(error), *skipped])) from error
+        except ValueError:   # nothing usable in it: not an error, just nothing added
+            placed = []
         return {"added": placed, "skipped": skipped}
 
     @router.get("/{idea_id}")
     async def idea(idea_id: str, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
-        return {**found(idea_id), "brief": store.brief(idea_id), "brief_path": str(store.briefs / f"{idea_id}.md")}
+        return {**found(idea_id), "brief": store.brief(idea_id), "brief_path": str(store.briefs / f"{idea_id}.md"),
+                "followups": research.followups(idea_id)}
+
+    @router.post("/{idea_id}/followup/prompt")
+    async def followup_prompt(idea_id: str, body: FollowupRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        """자료봉(GPT)에 붙일 완전한 추가 조사 요청. 아무것도 저장하지 않는다."""
+        try:
+            return {"prompt": ideas_followup.build_prompt(found(idea_id), body.request, "paste")}
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+
+    @router.post("/{idea_id}/followups")
+    async def followup_run(idea_id: str, body: FollowupRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        """Codex로 돌리기: 조사 목록에 idea_id가 붙은 주제로 넣고 바로 차례가 되게 한다."""
+        found(idea_id)
+        try:
+            return research.create_followup(idea_id, body.request)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
 
     @router.put("/{idea_id}/plan")
     async def plan(idea_id: str, body: PlanRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
         found(idea_id)
-        try:
-            await asyncio.to_thread(store.set_plan, idea_id, body.text)
-        except ValueError as error:
-            raise HTTPException(422, str(error)) from error
+        if looks_like_results(body.text):   # result blocks in the plan box are results: file them instead of refusing
+            await asyncio.to_thread(store.add_slots, idea_id, [body.text])
+            return {"ok": True, "moved": "results"}
+        await asyncio.to_thread(store.set_plan, idea_id, body.text)
         return {"ok": True}
 
     @router.delete("/{idea_id}", status_code=204)
@@ -779,6 +865,15 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
         return {"added": [{"subtask_id": p["subtask_id"], "subtask_title": p["subtask_title"], "status": p["status"],
                            "claims": len(p["claims"]),
                            "assigned": p["assigned"]} for p in parsed]}
+
+    @router.put("/{idea_id}/materials/{material_id}/move")
+    async def move_material(idea_id: str, material_id: int, body: MoveRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        try:
+            if not store.move_material(idea_id, material_id, body.idea_id):
+                raise HTTPException(404, "no such material")
+        except LookupError as error:
+            raise HTTPException(404, "no such idea") from error
+        return {"ok": True}
 
     @router.put("/{idea_id}/materials/{material_id}/subtask")
     async def assign_material(idea_id: str, material_id: int, body: AssignRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:

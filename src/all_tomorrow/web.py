@@ -551,7 +551,10 @@ def create_app(
         except HTTPException:
             return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
         shell = (STATIC_DIR / "console" / "console.html").read_text(encoding="utf-8")
-        return HTMLResponse(shell.replace("__USER__", escape(user)))
+        # Script/CSS addresses carry the newest file time, so a changed page file is fetched at once instead of from cache.
+        version = str(max((int(f.stat().st_mtime) for f in (STATIC_DIR / "console").rglob("*") if f.is_file()), default=0))
+        return HTMLResponse(shell.replace("__USER__", escape(user)).replace("__V__", version),
+                            headers={"Cache-Control": "no-cache"})
 
     @app.get("/requests", response_class=HTMLResponse)
     async def dashboard(

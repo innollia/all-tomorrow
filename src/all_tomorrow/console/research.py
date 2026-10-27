@@ -110,6 +110,25 @@ class ResearchStore:
         self._save(topics)
         return topic
 
+    def create_followup(self, idea_id: str, request: str) -> dict[str, Any]:
+        """아이디어 '추가 조사': idea_id가 붙은 주제를 만들고 바로 차례가 되게 한다('지금 돌리기'와 같다).
+        ask에는 사용자의 짧은 요청 원문만 둔다. 맥락은 실행기가 돌릴 때 아이디어에서 읽어 붙인다."""
+        request = request.strip()
+        if not request:
+            raise ValueError("추가 조사 요청이 비어 있다")
+        now = time.time()
+        topic = {"id": "R-" + time.strftime("%y%m%d") + "-" + uuid.uuid4().hex[:4],
+                 "title": "추가 조사 · " + request.splitlines()[0][:40], "ask": request, "idea_id": idea_id,
+                 "project_id": "all-tomorrow", "repeat_days": 0, "enabled": True, "created": now, "run_now_at": now}
+        topics = self.topics()
+        topics.append(topic)
+        self._save(topics)
+        return topic
+
+    def followups(self, idea_id: str) -> list[dict[str, Any]]:
+        """그 아이디어의 추가 조사 이력: 요청 원문, 실행 상태, 결과 링크(run id). 최근 것이 앞."""
+        return [t for t in reversed(self.overview()) if t.get("idea_id") == idea_id]
+
     def update(self, topic_id: str, patch: TopicPatch) -> dict[str, Any]:
         topics = self.topics()
         index = next((i for i, t in enumerate(topics) if t["id"] == topic_id), None)
