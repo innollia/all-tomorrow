@@ -126,6 +126,10 @@ def _file_material(folder: Path, run: dict, output: str) -> str:
     """끝난 추가 조사를 그 아이디어의 자유 자료로 넣는다(아이디어 DB 쓰기는 IdeaStore를 재사용). 반환: 보고에 덧붙일 말."""
     from all_tomorrow.console import ideas_followup
     from all_tomorrow.console.ideas import IdeaStore
+    from all_tomorrow.adapters.chrome_pages import FAILED_MARK
+    if output.lstrip().startswith(FAILED_MARK):   # 못 가져온 보고는 자료·종합에 넣지 않는다
+        run["material_skipped"] = "collection_failed"
+        return " 요청한 자료를 가져오지 못한 보고라 아이디어 자료로는 넣지 않았습니다."
     try:
         store = IdeaStore(folder.parent / "ideas")
         if store.get(run["idea_id"]) is None:

@@ -208,3 +208,17 @@ def test_followup_files_pages_read_in_chrome_as_raw_materials(env) -> None:
     page = next(m for m in mats if m["url"].endswith("/c/1"))
     assert page["title"] == "가격 조사" and page["body"].startswith("대화원문표식") and page["summary"] == ""   # 긴 원문은 압축 대기
     assert "대화원문표식" not in store.brief(iid)
+
+
+def test_failed_collection_report_is_not_filed_as_material(env) -> None:
+    from all_tomorrow.console.research import ResearchStore
+    base, folder, ideas_dir, calls, results, tick = env
+    store = IdeaStore(ideas_dir)
+    iid = store.create("게임 툴", "게임 개발 도구")
+    ResearchStore(folder).create_followup(iid, "https://chatgpt.com/g/g-p-x/project 전부 가져와")
+    assert tick(idle=None) == "started" and "[수집 실패]" in calls[0][0]
+    results["run1"] = {"status": "SUCCESS", "result": {"payload": {"output": "[수집 실패]\n## 한 줄 결론\n접근 못 함"}}}
+    assert tick(idle=None) == "finished"
+    run = load_runs(folder)[0]
+    assert run["status"] == "SUCCESS" and run["material_skipped"] == "collection_failed" and "material_id" not in run
+    assert store.get(iid)["materials"] == []
