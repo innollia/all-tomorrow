@@ -1,6 +1,6 @@
 "use strict";
 // Idea desk: 아이디어 원문 → 자료봉용 전체 프롬프트(복사) → 하위 결과 붙여넣기 → 결과 목록·관제용 정리본.
-// API: /api/ideas/* (console/ideas.py). 모델을 부르지 않는다.
+// API: /api/ideas/* (console/ideas.py). 자유 자료(intake)만 서버가 Jev로 아이디어·과제를 가른다.
 (() => {
   const { $, view, esc, api, toast, ago, list } = AT;
   AT.nav.push({ section: "기획", label: "아이디어 조사", href: "#/ideas", order: 39 });
@@ -14,9 +14,26 @@
   };
   const SLOTS = 7;  // result boxes: 3-5 tasks by default, plus retries and cross-checks
   const slotKey = n => current && current.id + ":paste" + n;
-  const DRAFTED = { "idea-title": () => "new-title", "idea-text": () => "new-text",
+  const DRAFTED = { "intake-text": () => "intake:" + (current && location.hash.startsWith("#/idea/") ? current.id : ""), "idea-title": () => "new-title", "idea-text": () => "new-text",
     "idea-plan-text": () => current && current.id + ":plan" };
   for (let n = 0; n < SLOTS; n++) DRAFTED["idea-slot-" + n] = () => slotKey(n);
+
+  // 자유 자료 넣기: 붙여넣기 칸 하나 + 파일 + 넣기 버튼. 아이디어를 고르지 않으면 서버(Jev)가 맞는 걸 고른다.
+  const intakeForm = (ideas, fixed) => `<form id="idea-intake" class="card" style="margin-bottom:16px">
+    <div class="t">${fixed ? "자료 넣기" : "내가 조사한 것 넣기"}</div>
+    <div class="small mute" style="margin:4px 0 8px">대화·메모·기사 본문을 그대로 붙이거나, 링크만 붙여도 된다. 형식은 상관없다.${fixed ? "" : " 아이디어를 안 고르면 맞는 걸 알아서 찾고, 없으면 새 아이디어 후보로 둔다."}</div>
+    <textarea id="intake-text" rows="6" placeholder="여기에 붙여넣기 (글 · 링크)" style="font-size:16px">${esc(draft.get("intake:" + (fixed || "")))}</textarea>
+    <div class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px">
+      <input id="intake-files" type="file" multiple accept=".md,.markdown,.txt,.pdf,text/plain,text/markdown,application/pdf" style="flex:1;min-width:200px;font-size:16px">
+      ${fixed ? "" : `<select id="intake-idea" aria-label="아이디어" style="flex:1;min-width:160px;font-size:16px"><option value="">아이디어: 알아서 고르기</option>${ideas.map(i => `<option value="${esc(i.id)}">${esc(i.title)}</option>`).join("")}</select>`}
+      <button class="primary" style="min-height:44px;min-width:96px">넣기</button></div>
+    <div id="intake-result" class="small" style="margin-top:8px"></div></form>`;
+
+  const readFile = f => new Promise((ok, no) => {
+    const r = new FileReader(); r.onerror = () => no(new Error(f.name + " 읽기 실패"));
+    r.onload = () => ok({ name: f.name, data: String(r.result).split(",")[1] || "" }); r.readAsDataURL(f);
+  });
+  const placeName = a => a.kind === "result" ? "결과로 저장" : `${esc(a.idea_title)}${a.candidate ? " (새 아이디어 후보)" : ""}${a.task_id ? " · " + esc(a.task_id) : " · 자유 자료"}`;
 
   AT.pages["/ideas"] = async () => {
     const ideas = await api("/api/ideas");
@@ -25,11 +42,12 @@
       const c = i.status_counts;
       return `<div style="flex-wrap:wrap"><a href="#/idea/${encodeURIComponent(i.id)}" style="flex:1;min-width:180px">${esc(i.title)}</a>
       <span class="small mute mono">${esc(i.id)} · 만든 날 ${day(i.created_at)}</span>
-      <span class="pill">과제 ${i.subtasks}${i.plan_at ? "" : " · 쪼개기 없음"}</span>
+      ${i.candidate ? '<span class="pill" style="color:var(--warn)">후보</span>' : ""}<span class="pill">과제 ${i.subtasks}${i.plan_at ? "" : " · 쪼개기 없음"}</span>${i.materials ? `<span class="pill">자유 자료 ${i.materials}</span>` : ""}
       <span class="pill">완료 ${c["완료"]} · 불완전 ${c["불완전"]} · 실패 ${c["실패"]}${c[""] ? " · 상태없음 " + c[""] : ""}</span>
       <span class="small mute">결과 ${i.results}개 · 갱신 ${ago(i.updated_at)}</span></div>`;
     });
-    return `<h1>아이디어 조사</h1><div class="sub">아이디어를 넣으면 자료봉에게 줄 전체 프롬프트를 만든다 · 결과는 여기 모아 관제가 읽는다</div>
+    return `<h1>아이디어 조사</h1><div class="sub">내가 조사한 건 아무 형식으로나 넣는다 · 체계적으로 하려면 아이디어를 넣어 자료봉용 프롬프트를 만든다 · 관제가 읽는다</div>
+      ${intakeForm(ideas, "")}
       <form id="idea-new" class="card">
         <input id="idea-title" placeholder="제목 (비우면 첫 줄)" maxlength="200" style="margin-bottom:8px" value="${esc(draft.get("new-title"))}">
         <textarea id="idea-text" rows="8" placeholder="아이디어 텍스트 뭉탱이를 그대로 붙여넣기">${esc(draft.get("new-text"))}</textarea>
@@ -60,8 +78,19 @@
         <span class="small mute">주장 ${r.claims.length} · 출처 없음 ${r.claims.filter(c => !c.source).length}</span><span class="small mute">${ago(r.created_at)}</span>${assignSelect(r, i)}<button class="danger" data-idel-result="${r.id}">삭제</button></div>
       ${r.claims.map(claim).join("")}
       <details><summary>본문 ${r.body.length}자</summary><pre class="small" style="white-space:pre-wrap">${esc(r.body)}</pre></details></div>`);
+    const taskName = m => m.task_id ? `${esc(m.task_id)} ${esc((i.tasks[m.task_id] || {}).title || "")}` : "자유 자료";
+    const kindName = { paste: "붙여넣기", url: "링크", file: "파일" };
+    const mats = i.materials.map(m => `<div style="display:block"><div class="row" style="flex-wrap:wrap">
+      <b style="flex:1;min-width:160px">${esc(m.title)}</b><span class="pill">${kindName[m.kind] || esc(m.kind)}</span><span class="pill">${taskName(m)}</span>
+      <span class="small mute">${ago(m.created_at)}</span>
+      ${Object.keys(i.tasks || {}).length ? `<select data-imat="${m.id}" aria-label="과제 고르기"><option value="">과제 바꾸기</option><option value="-">자유 자료로</option>${Object.keys(i.tasks).map(t => `<option value="${esc(t)}">${esc(t)} ${esc(i.tasks[t].title)}</option>`).join("")}</select>` : ""}
+      <button class="danger" data-idel-mat="${m.id}">삭제</button></div>
+      <div class="small mute">${m.url ? `<a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.url)}</a>` : esc(m.label)}${m.note ? " · " + esc(m.note) : ""}</div>
+      <details><summary>본문 ${m.body.length}자</summary><pre class="small" style="white-space:pre-wrap">${esc(m.body)}</pre></details></div>`);
     return `<div class="row" style="justify-content:space-between"><h1>${esc(i.title)}</h1><button class="danger" data-idel-idea="1">아이디어 삭제</button></div>
       <div class="sub mono">${esc(i.id)} · ${ago(i.created_at)} 생성</div>
+      ${i.candidate ? `<div class="card" style="margin-bottom:12px"><span class="small">새 아이디어 후보: 자유 자료에서 만들어졌다. 맞으면 확정하고, 아니면 삭제한다.</span> <button data-iadopt="1">아이디어로 확정</button></div>` : ""}
+      ${intakeForm([], i.id)}
       <h2>1 · 원문</h2><textarea rows="6" readonly>${esc(i.text)}</textarea>
       <h2>2 · 자료봉에게 줄 전체 프롬프트</h2>
       <div class="row" style="margin-bottom:8px"><button class="primary" data-icopy="prompt">전체 프롬프트 복사</button><span class="small mute">자료봉이 하위 프롬프트 S1…Sn을 돌려준다 → 각각 새 세션에 붙여 병렬로 돌린다</span></div>
@@ -75,6 +104,7 @@
       <form id="idea-paste">${Array.from({ length: SLOTS }, (_, n) => `<textarea id="idea-slot-${n}" rows="4" placeholder="결과 ${n + 1}" style="margin-bottom:6px">${esc(draft.get(slotKey(n)))}</textarea>`).join("")}
         <div class="row" style="margin-top:8px"><button class="primary">결과 저장</button></div></form>
       <h2>4 · 결과 (${i.results.length}, 덮어쓴 것 포함 · 최신 순)</h2>${list(results)}
+      <h2>4-1 · 자유 자료 (${i.materials.length} · 내가 직접 조사해 넣은 것)</h2>${list(mats)}
       <h2>5 · 관제용 정리본</h2>
       <div class="row"><button class="primary" data-icopy="overseer">관제에게 가져가기</button><button data-icopy="brief">정리본 복사</button><span class="small mute mono">${esc(i.brief_path)}</span></div>`;
   };
@@ -92,7 +122,11 @@
     const b = e.target.closest("button"); if (!b || !current || !view.contains(b)) return;
     const d = b.dataset, base = `/api/ideas/${encodeURIComponent(current.id)}`;
     try {
-      if (d.icopy) copy(d.icopy === "prompt" ? current.prompt : d.icopy === "overseer"
+      if (d.iadopt) { await api(`${base}/adopt`, {}); toast("확정함"); AT.render(); }
+      else if (d.idelMat) {
+        if (!confirm("이 자료를 지운다. 되돌릴 수 없다.")) return;
+        await api(`${base}/materials/${d.idelMat}`, undefined, "DELETE"); toast("자료 삭제함"); AT.render();
+      } else if (d.icopy) copy(d.icopy === "prompt" ? current.prompt : d.icopy === "overseer"
         ? `아이디어 ${current.id} 조사 결과 보고 얘기하자 — 정리본 ${current.brief_path}` : current.brief);
       else if (d.idelIdea) {
         if (!confirm(`아이디어 "${current.title}"와 결과 ${current.results.length}개를 지운다. 되돌릴 수 없다.`)) return;
@@ -105,6 +139,14 @@
     } catch (err) { toast("실패: " + err.message); }
   });
   view.addEventListener("change", async e => {
+    const mat = e.target.closest("select[data-imat]");
+    if (mat && current && mat.value) {
+      try {
+        await api(`/api/ideas/${encodeURIComponent(current.id)}/materials/${mat.dataset.imat}/subtask`, { subtask_id: mat.value === "-" ? "" : mat.value }, "PUT");
+        toast("옮김"); AT.render();
+      } catch (err) { toast("실패: " + err.message); }
+      return;
+    }
     const sel = e.target.closest("select[data-iassign]"); if (!sel || !current || !sel.value) return;
     try {
       await api(`/api/ideas/${encodeURIComponent(current.id)}/results/${sel.dataset.iassign}/subtask`, { subtask_id: sel.value }, "PUT");
@@ -115,7 +157,22 @@
     const key = DRAFTED[e.target.id]?.(); if (key) draft.set(key, e.target.value);
   });
   view.addEventListener("submit", async e => {
-    if (e.target.id === "idea-new") {
+    if (e.target.id === "idea-intake") {
+      e.preventDefault();
+      const text = $("#intake-text").value.trim(), picked = Array.from($("#intake-files").files);
+      if (!text && !picked.length) { toast("붙여넣거나 파일을 고른다"); return; }
+      const fixed = location.hash.startsWith("#/idea/") && current ? current.id : "";
+      const out = $("#intake-result"), btn = e.target.querySelector("button"); btn.disabled = true; out.textContent = "넣는 중…";
+      try {
+        const files = await Promise.all(picked.map(readFile));
+        const r = await api("/api/ideas/intake", { text, files, idea_id: fixed || ($("#intake-idea") || {}).value || "" });
+        draft.set("intake:" + fixed, "");
+        const lines = r.added.map(a => `${esc(a.title)} → ${placeName(a)}`).concat(r.skipped.map(x => "건너뜀: " + esc(x)));
+        toast("넣음: " + r.added.length + "건");
+        if (fixed) AT.render(); else { $("#intake-text").value = ""; $("#intake-files").value = ""; out.innerHTML = lines.join("<br>"); }
+      } catch (err) { out.textContent = ""; toast("실패: " + err.message); }
+      finally { btn.disabled = false; }
+    } else if (e.target.id === "idea-new") {
       e.preventDefault();
       const text = $("#idea-text").value.trim(); if (!text) return;
       try { const r = await api("/api/ideas", { title: $("#idea-title").value, text }); draft.set("new-title", ""); draft.set("new-text", ""); location.hash = "#/idea/" + encodeURIComponent(r.id); }

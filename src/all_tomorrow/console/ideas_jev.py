@@ -61,6 +61,32 @@ def classify_bodies(tasks: dict[str, dict[str, str]], bodies: list[str]) -> list
     return out
 
 
+NONE = "맞는 아이디어 없음"
+
+
+def choose_ideas(ideas: list[dict[str, str]], bodies: list[str]) -> list[str | None]:
+    """Which existing idea does each free material belong to? One Choice per material, all in one request,
+    with a "no idea fits" option. The idea id when sure (>= SURE), else None (the caller makes a new idea candidate).
+    `ideas` = [{id, title, text}]."""
+    if not ideas or not bodies:
+        return [None] * len(bodies)
+    names = {i["id"]: f"{i['id']} {BREAKS.sub(' ', i['title'])[:60]}".strip() for i in ideas}
+    criteria = {names[i["id"]]: BREAKS.sub(" ", i["text"])[:300] or i["title"] for i in ideas}
+    criteria[NONE] = "아래 자료는 위 아이디어들 중 어느 것의 조사에도 쓰이지 않는다. 다른 주제다."
+    questions = {f"item{n}": {
+        "type": "choice",
+        "instructions": "사용자가 직접 조사해 모은 아래 자료는 어느 아이디어를 위한 것인가?\n\n자료:\n" + excerpt(body),
+        "criteria": criteria} for n, body in enumerate(bodies)}
+    answers = jev.ask({"아이디어 목록": {i["id"]: i["title"] for i in ideas}}, questions)
+    by_name = {name: iid for iid, name in names.items()}
+    out: list[str | None] = []
+    for n in range(len(bodies)):
+        probs = (answers.get(f"item{n}") or {}).get("probabilities") or {}
+        top = max(probs, key=probs.get, default=None)
+        out.append(by_name[top] if top in by_name and probs[top] >= SURE else None)
+    return out
+
+
 def split_paragraphs(text: str) -> list[dict[str, Any]]:
     """Blank-line paragraphs; a fenced block (a sub-prompt) is one paragraph and is never asked about.
     `ask` marks prose worth a question: not a heading, table row or a few words."""

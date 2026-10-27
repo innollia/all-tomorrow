@@ -347,3 +347,180 @@ def test_api_accepts_slots_and_assignment(tmp_path, fake_jev) -> None:
         assert c.put(f"/api/ideas/{iid}/results/999/subtask", json={"subtask_id": "S1"}).status_code == 404
         assert {r["subtask_id"] for r in c.get(f"/api/ideas/{iid}").json()["results"]} == {"S1", "S2"}
         assert c.post(f"/api/ideas/{iid}/results", json={}).status_code == 422
+
+
+# --- free material: any pasted text, links, files; Jev picks the idea and (maybe) the task ---
+
+def intake_jev(monkeypatch, idea_by_word: dict[str, str], task_by_word: dict[str, str] | None = None):
+    """Fake Jev: an item* question picks the idea whose name starts with the key of the word found in the
+    material (else "맞는 아이디어 없음" gets no clear winner); a slot* question picks the task named for a word."""
+    from all_tomorrow.console import jev
+
+    calls: list[dict] = []
+
+    def ask(state, questions, timeout=90):
+        calls.append(questions)
+        answers = {}
+        for name, q in questions.items():
+            names = list(q["criteria"])
+            table = idea_by_word if name.startswith("item") else (task_by_word or {})
+            hit = next((n for w, key in table.items() if w in q["instructions"] for n in names if n.startswith(key)), None)
+            probs = {n: (0.9 if n == hit else 0.02) for n in names} if hit else {n: 1 / len(names) for n in names}
+            answers[name] = {"type": "choice", "choice": max(probs, key=probs.get), "probabilities": probs}
+        return answers
+
+    monkeypatch.setattr(jev, "ask", ask)
+    return calls
+
+
+def test_text_items_bare_links_are_fetched_and_failures_are_kept() -> None:
+    from all_tomorrow.console import ideas_intake
+
+    pages = {"https://a.example/x": {"title": "A 기사", "body": "본문 A", "note": ""},
+             "https://b.example/y": {"title": "", "body": "", "note": "가져오기 실패: HTTP 403"}}
+    items = ideas_intake.text_items("https://a.example/x\nhttps://b.example/y\nhttps://a.example/x", fetch=lambda u: pages[u])
+    assert [(i["kind"], i["url"], i["title"]) for i in items] == [
+        ("url", "https://a.example/x", "A 기사"), ("url", "https://b.example/y", "https://b.example/y")]
+    assert "링크만 저장" in items[1]["body"] and items[1]["note"].endswith("403")
+    mixed = ideas_intake.text_items("이 글 참고 https://a.example/x 좋았다")
+    assert len(mixed) == 1 and mixed[0]["kind"] == "paste"
+    title, text = ideas_intake.html_to_text("<html><title>T</title><script>x()</script><body><nav>menu</nav><p>첫 문단</p><p>둘째</p></body></html>")
+    assert (title, text) == ("T", "첫 문단\n\n둘째")
+    assert not ideas_intake.public_host("127.0.0.1") and not ideas_intake.public_host("192.168.0.5")
+    assert ideas_intake.fetch_page("http://127.0.0.1:8000/x")["note"].startswith("공개 주소가 아니라")
+
+
+def test_file_items_md_txt_pdf_and_rejects() -> None:
+    import base64
+    import zlib
+
+    from all_tomorrow.console import ideas_intake
+
+    def b64(data: bytes) -> str:
+        return base64.b64encode(data).decode()
+
+    md = ideas_intake.file_item("메모.md", b64("# 제목\n내용".encode()))
+    assert (md["kind"], md["label"], md["body"]) == ("file", "메모.md", "# 제목\n내용")
+    assert ideas_intake.file_item("a.txt", b64("한글".encode("cp949")))["body"] == "한글"
+    pdf = b"%PDF-1.4\n1 0 obj\n<<>>\nstream\n" + zlib.compress(
+        b"BT /F1 12 Tf (Hello research world about covers and authors market) Tj ET") + b"\nendstream\nendobj"
+    got = ideas_intake.file_item("r.pdf", b64(pdf))
+    assert "Hello research world" in got["body"] and got["raw"] == pdf
+    unreadable = ideas_intake.file_item("scan.pdf", b64(b"%PDF-1.4\n%%EOF"))
+    assert unreadable["raw"] and "읽지 못함" in unreadable["note"]
+    for name, data in (("x.png", b"\x89PNG\x00\x00\x00"), ("e.txt", b" \n"), ("z.md", b"")):
+        with pytest.raises(ValueError):
+            ideas_intake.file_item(name, b64(data))
+
+
+def free_item(body, kind="paste", label="붙여넣기", title="t", url=""):
+    return {"kind": kind, "label": label, "url": url, "title": title, "body": body, "note": "", "raw": None}
+
+
+def test_intake_picks_idea_then_task_and_falls_back_to_candidate_or_free(tmp_path, monkeypatch) -> None:
+    from all_tomorrow.console.ideas import IdeaStore
+
+    calls = intake_jev(monkeypatch, {"표지": "I-"}, {"지불": "S2"})
+    store = IdeaStore(tmp_path / "ideas", use_jev=True)
+    cover = store.create("웹소설 표지 생성기", "작가가 줄거리를 넣으면 표지를 만든다")
+    store.set_plan(cover, PLAN.replace("{iid}", cover))
+
+    out = store.intake([free_item("표지 시장 조사: 작가 지불 의사가 낮다", title="지불 메모"),
+                        free_item("표지 경쟁사 목록 정리", kind="url", label="https://x.example/p", url="https://x.example/p"),
+                        free_item("고양이 사료 구독 시장 메모", title="고양이 사료")])
+    assert [o["idea_id"] == cover for o in out] == [True, True, False]
+    assert out[0]["task_id"] == "S2" and out[0]["assigned"].startswith("jev:")
+    assert out[1]["task_id"] == "" and out[1]["assigned"] == ""        # no task sure: stays free, still accepted
+    assert out[2]["candidate"] is True and out[2]["idea_title"] == "고양이 사료"
+    idea_calls = [c for c in calls if any(k.startswith("item") for k in c)]
+    assert len(idea_calls) == 1 and set(idea_calls[0]) == {"item0", "item1", "item2"}   # one request, all items
+
+    detail = store.get(cover)
+    assert [m["task_id"] for m in detail["materials"]] == ["S2", ""] or sorted(m["task_id"] for m in detail["materials"]) == ["", "S2"]
+    brief = store.brief(cover)
+    assert "## 자유 자료" in brief and "지불 메모" in brief and "링크 https://x.example/p" in brief
+    assert "S2 수요" in brief and "받은 때" in brief and "자유 자료 2건" in brief
+    listed = {i["id"]: i for i in store.list()}
+    assert listed[cover]["materials"] == 2 and listed[out[2]["idea_id"]]["candidate"] is True
+    summary = store.recent_summary()
+    assert "자유 자료 2건" in summary and "[새 아이디어 후보]" in summary
+    assert "새 아이디어 후보" in store.brief(out[2]["idea_id"])
+    assert store.adopt(out[2]["idea_id"]) and not store.get(out[2]["idea_id"])["candidate"]
+
+
+def test_intake_never_refuses_when_jev_is_down_or_ids_are_given(tmp_path, monkeypatch) -> None:
+    from all_tomorrow.console import jev
+    from all_tomorrow.console.ideas import IdeaStore
+
+    def down(*a, **k):
+        raise jev.JevError("Jev HTTP 500")
+
+    monkeypatch.setattr(jev, "ask", down)
+    store = IdeaStore(tmp_path / "ideas", use_jev=True)
+    first = store.create("아이디어", "본문")
+    store.set_plan(first, PLAN.replace("{iid}", first))
+    body = free_item("아무 메모", title="메모")
+    out = store.intake([body])                      # no idea chosen, Jev down -> candidate, not an error
+    assert out[0]["candidate"] and out[0]["idea_id"] != first
+    out = store.intake([body], first)               # idea chosen, Jev down -> free material
+    assert out[0]["idea_id"] == first and out[0]["task_id"] == "" and not out[0]["candidate"]
+    with pytest.raises(ValueError):
+        store.intake([free_item("  ")])
+    with pytest.raises(LookupError):
+        store.intake([body], "I-000000-ffff")
+
+
+def test_intake_sends_filled_result_blocks_down_the_old_path(tmp_path, monkeypatch) -> None:
+    from all_tomorrow.console.ideas import IdeaStore
+
+    intake_jev(monkeypatch, {})
+    store = IdeaStore(tmp_path / "ideas", use_jev=True)
+    iid = store.create("표지", "본문")
+    out = store.intake([free_item(result(iid, "S1", "기존 서비스", "있다"), title="r")])   # idea from the block's own ID
+    assert out[0]["kind"] == "result" and out[0]["idea_id"] == iid and out[0]["task_id"] == "S1"
+    assert store.get(iid)["materials"] == [] and store.get(iid)["results"][0]["subtask_id"] == "S1"
+
+
+def test_intake_api_text_link_file_assign_delete_and_old_data(tmp_path, monkeypatch) -> None:
+    import base64
+    import sqlite3
+
+    from all_tomorrow.console import ideas_intake
+
+    intake_jev(monkeypatch, {"표지": "I-"}, {"지불": "S2"})
+    monkeypatch.setattr(ideas_intake, "fetch_page", lambda url: {"title": "기사", "body": "표지 시장 기사 본문", "note": ""})
+    # a database from before this feature: no materials table, no candidate column
+    old = tmp_path / "ideas"
+    old.mkdir()
+    with sqlite3.connect(old / "ideas.sqlite") as db:
+        db.executescript("""CREATE TABLE ideas (id TEXT PRIMARY KEY, title TEXT NOT NULL, text TEXT NOT NULL,
+            prompt TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+            INSERT INTO ideas VALUES ('I-261001-aaaa','웹소설 표지','표지 생성','p','2026-10-01T00:00:00+00:00','2026-10-01T00:00:00+00:00');""")
+    app = create_app(auth=Auth("owner", "correct horse", "s" * 32), console_data_dir=str(tmp_path))
+    with TestClient(app, base_url="https://testserver") as c:
+        assert c.post("/api/ideas/intake", json={"text": "x"}).status_code == 401
+        c.post("/api/login", json={"username": "owner", "password": "correct horse"})
+        iid = "I-261001-aaaa"
+        assert c.get("/api/ideas").json()[0]["candidate"] is False
+        c.put(f"/api/ideas/{iid}/plan", json={"text": PLAN.replace("{iid}", iid)})
+        md = base64.b64encode("표지 아이디어 메모\n작가 지불 의사".encode()).decode()
+        r = c.post("/api/ideas/intake", json={"text": "https://news.example/a", "files": [
+            {"name": "memo.md", "data": md}, {"name": "pic.png", "data": base64.b64encode(b"\x00\x01").decode()}]})
+        assert r.status_code == 200, r.text
+        added = r.json()["added"]
+        assert [a["kind"] for a in added] == ["url", "file"] and all(a["idea_id"] == iid for a in added)
+        assert added[1]["task_id"] == "S2" and len(r.json()["skipped"]) == 1
+        assert c.post("/api/ideas/intake", json={}).status_code == 422
+        assert c.post("/api/ideas/intake", json={"text": "메모", "idea_id": "I-000000-ffff"}).status_code == 404
+        detail = c.get(f"/api/ideas/{iid}").json()
+        assert {m["kind"] for m in detail["materials"]} == {"url", "file"}
+        assert "https://news.example/a" in detail["brief"] and "memo.md" in detail["brief"]
+        mid = next(m["id"] for m in detail["materials"] if m["kind"] == "file")
+        assert c.put(f"/api/ideas/{iid}/materials/{mid}/subtask", json={"subtask_id": "S1"}).status_code == 200
+        assert c.put(f"/api/ideas/{iid}/materials/{mid}/subtask", json={"subtask_id": "zz"}).status_code == 422
+        assert c.put(f"/api/ideas/{iid}/materials/999/subtask", json={"subtask_id": ""}).status_code == 404
+        assert c.delete(f"/api/ideas/{iid}/materials/{mid}").status_code == 204
+        assert c.delete(f"/api/ideas/{iid}/materials/{mid}").status_code == 404
+        assert c.post(f"/api/ideas/{iid}/adopt").status_code == 200
+        assert c.delete(f"/api/ideas/{iid}").status_code == 204
+        assert c.get("/api/ideas").json() == []

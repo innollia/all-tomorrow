@@ -5,6 +5,10 @@
   GET  /api/ideas/{id}                idea, full prompt, results, brief (markdown)
   POST /api/ideas/{id}/results        {text}: one or more pasted result blocks
   PUT  /api/ideas/{id}/plan           {text}: 자료봉's decomposition answer (replaces; "" clears)
+  POST /api/ideas/intake              {text?, files?[{name,data}], idea_id?}: free material in any shape (see below)
+  PUT  /api/ideas/{id}/materials/{n}/subtask  {subtask_id}: move a free material to a task ("" = free)
+  DELETE /api/ideas/{id}/materials/{n}  one free material
+  POST /api/ideas/{id}/adopt          a new-idea candidate becomes a normal idea
   DELETE /api/ideas/{id}              idea, its results, pastes and brief file
   DELETE /api/ideas/{id}/results/{n}  one result (its raw paste too once nothing else uses it)
 
@@ -15,6 +19,15 @@ the user runs each one in its own 자료봉 session → pastes every result back
 자료봉 cannot see this PC and its sessions cannot talk to each other, so every sub-prompt carries
 the whole idea and ends with a fixed result block (idea ID + subtask ID) that `parse_results`
 reads. No model is called here: the brief is a deterministic grouping of the pasted results.
+
+Free material: the user may also research on their own, with no prompt and no subtasks, and throw the outcome
+in as pasted text (chat logs, notes, article bodies), links (a bare URL is enough; the page text is fetched) or
+files (md, txt, pdf). Without an idea chosen, Jev picks one of the existing ideas (one request, one Choice per
+material); if none fits (or Jev is down) the material starts a new idea candidate. If a saved decomposition has
+tasks, Jev may also put the material on one; otherwise it stays "free material". Nothing is refused because
+sorting failed. Every material keeps its source (kind, link or file name, when it arrived) and reaches the brief
+and the overseer summary next to the systematic results. Filled 자료봉 result blocks pasted this way go through
+the old result path.
 
 State for the overseer: ctx.feature_dir("ideas") holds ideas.sqlite (original pastes and
 parsed results) and briefs/<idea id>.md, rewritten on every change. The brief holds every result
@@ -39,7 +52,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from all_tomorrow.console import ConsoleContext, ideas_jev, jev
+from all_tomorrow.console import ConsoleContext, ideas_intake, ideas_jev, jev
 
 META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사업·프로젝트로 할 만한지 판단할 자료를 모으려 한다.
 지금 할 일은 조사 자체가 아니라, 조사를 나눠 맡길 **자기완결 하위 프롬프트**와 그 작업 경계를 만드는 것이다.
@@ -226,6 +239,11 @@ def paste_residue(raw: str) -> str:
     return "\n".join(p.strip() for p in parts if re.search(r"\w", p))
 
 
+def idea_head(item: dict[str, Any]) -> str:
+    """Text of a new idea candidate: the title and the start of the material that opened it."""
+    return (item["title"] + "\n" + item["body"][:600]).strip()
+
+
 class IdeaStore:
     def __init__(self, base: Path, use_jev: bool = False) -> None:
         self.use_jev = use_jev  # the web app turns Jev on; direct callers (tests, scripts) call nothing
@@ -253,6 +271,14 @@ class IdeaStore:
             if "assigned" not in {row["name"] for row in db.execute("PRAGMA table_info(results)")}:
                 # how the subtask was decided: "ID" (read from the block), "jev:0.93", "user"; "" = unsorted/unlabelled
                 db.execute("ALTER TABLE results ADD COLUMN assigned TEXT NOT NULL DEFAULT ''")
+            if "candidate" not in {row["name"] for row in db.execute("PRAGMA table_info(ideas)")}:
+                # 1 = made by free material that fit no existing idea; the user adopts or deletes it
+                db.execute("ALTER TABLE ideas ADD COLUMN candidate INTEGER NOT NULL DEFAULT 0")
+            # Free material: what the user researched on their own. task_id "" = not on any task.
+            db.execute("""CREATE TABLE IF NOT EXISTS materials (id INTEGER PRIMARY KEY, idea_id TEXT NOT NULL,
+                kind TEXT NOT NULL, label TEXT NOT NULL, url TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL,
+                note TEXT NOT NULL, task_id TEXT NOT NULL, assigned TEXT NOT NULL, file TEXT NOT NULL,
+                created_at TEXT NOT NULL)""")
             # Every saved decomposition stays readable after it is replaced.
             db.execute("""CREATE TABLE IF NOT EXISTS plans (id INTEGER PRIMARY KEY, idea_id TEXT NOT NULL,
                 text TEXT NOT NULL, created_at TEXT NOT NULL)""")
@@ -278,14 +304,14 @@ class IdeaStore:
         values = {"idea_id": idea_id, "title": title, "text": text.strip()}
         return re.sub(r"\{(idea_id|title|text)\}", lambda m: values[m.group(1)], self.meta_prompt())
 
-    def create(self, title: str, text: str) -> str:
+    def create(self, title: str, text: str, candidate: bool = False) -> str:
         idea_id = "I-" + datetime.now().strftime("%y%m%d") + "-" + secrets.token_hex(2)
         title = title.strip() or text.strip().splitlines()[0][:60]
         prompt = self.render_prompt(idea_id, title, text)
         stamp = now()
         with self.db() as db:
-            db.execute("INSERT INTO ideas (id, title, text, prompt, created_at, updated_at) VALUES (?,?,?,?,?,?)",
-                       (idea_id, title, text.strip(), prompt, stamp, stamp))
+            db.execute("INSERT INTO ideas (id, title, text, prompt, created_at, updated_at, candidate) VALUES (?,?,?,?,?,?,?)",
+                       (idea_id, title, text.strip(), prompt, stamp, stamp, int(candidate)))
         self.write_brief(idea_id)
         return idea_id
 
@@ -293,8 +319,9 @@ class IdeaStore:
         """Ideas newest-updated first; statuses count the latest result of each subtask."""
         with self.db() as db:
             ideas = [dict(r) for r in db.execute(
-                "SELECT id, title, created_at, updated_at, plan_at FROM ideas ORDER BY updated_at DESC")]
+                "SELECT id, title, created_at, updated_at, plan_at, candidate FROM ideas ORDER BY updated_at DESC")]
             rows = db.execute("SELECT idea_id, subtask_id, status FROM results ORDER BY id DESC").fetchall()
+            free = {r["idea_id"]: r["n"] for r in db.execute("SELECT idea_id, COUNT(*) AS n FROM materials GROUP BY idea_id")}
         latest: dict[str, dict[str, str]] = {}
         totals: dict[str, int] = {}
         for r in rows:
@@ -303,6 +330,8 @@ class IdeaStore:
         for idea in ideas:
             per = latest.get(idea["id"], {})
             idea["results"] = totals.get(idea["id"], 0)
+            idea["materials"] = free.get(idea["id"], 0)
+            idea["candidate"] = bool(idea["candidate"])
             idea["subtasks"] = len(per)
             idea["status_counts"] = {s: sum(v == s for v in per.values()) for s in (*STATUSES, "")}
         return ideas
@@ -315,8 +344,8 @@ class IdeaStore:
             if i["updated_at"] < cutoff:
                 continue
             c = i["status_counts"]
-            lines.append(f"- {i['id']} {i['title']} · 과제 {i['subtasks']} (완료 {c['완료']}/불완전 {c['불완전']}/실패 {c['실패']}"
-                         f"{'/상태없음 ' + str(c['']) if c[''] else ''}) · 쪼개기 {'있음' if i['plan_at'] else '없음'}"
+            lines.append(f"- {i['id']} {i['title']}{' [새 아이디어 후보]' if i['candidate'] else ''} · 과제 {i['subtasks']} (완료 {c['완료']}/불완전 {c['불완전']}/실패 {c['실패']}"
+                         f"{'/상태없음 ' + str(c['']) if c[''] else ''}) · 자유 자료 {i['materials']}건 · 쪼개기 {'있음' if i['plan_at'] else '없음'}"
                          f" · 갱신 {i['updated_at'][:16]} · 정리본 {self.briefs / (i['id'] + '.md')}")
         return "\n".join(lines) or f"최근 {days}일 아이디어 조사 없음"
 
@@ -328,13 +357,15 @@ class IdeaStore:
             results = db.execute("SELECT * FROM results WHERE idea_id = ? ORDER BY id DESC", (idea_id,)).fetchall()
             pastes = db.execute("SELECT * FROM pastes WHERE idea_id = ? ORDER BY id", (idea_id,)).fetchall()
             plans = db.execute("SELECT * FROM plans WHERE idea_id = ? ORDER BY id DESC", (idea_id,)).fetchall()
+            materials = db.execute("SELECT * FROM materials WHERE idea_id = ? ORDER BY id DESC", (idea_id,)).fetchall()
         seen: set[str] = set()
         decoded = []
         for r in results:  # newest first: the first of each subtask is current, the rest were replaced
             decoded.append({**dict(r), "claims": json.loads(r["claims"]), "latest": r["subtask_id"] not in seen})
             seen.add(r["subtask_id"])
         plan_list = [{**dict(p), "paras": json.loads(p["paras"])} for p in plans]
-        return {**dict(idea), "results": decoded, "pastes": [dict(p) for p in pastes], "plans": plan_list,
+        return {**dict(idea), "candidate": bool(idea["candidate"]), "materials": [dict(m) for m in materials],
+                "results": decoded, "pastes": [dict(p) for p in pastes], "plans": plan_list,
                 "plan_paras": plan_list[0]["paras"] if plan_list and plan_list[0]["text"] == idea["plan"] else [],
                 "tasks": ideas_jev.plan_tasks(idea["plan"])}
 
@@ -391,6 +422,127 @@ class IdeaStore:
         self.write_brief(idea_id)
         return [{**p, "assigned": how} for _, p, how in entries]
 
+    # --- free material -------------------------------------------------------------------------------
+
+    def intake(self, items: list[dict[str, Any]], idea_id: str = "") -> list[dict[str, Any]]:
+        """File free-form items under ideas. `idea_id` given = that idea; else Jev picks among the existing
+        ideas, and an item that fits none (or a Jev failure) opens a new idea candidate. Within an idea, Jev may
+        put the item on a task of the saved decomposition; if not sure the item stays free. Never refuses
+        because of sorting; the only error is nothing usable (ValueError)."""
+        items = [i for i in items if i["body"].strip()]
+        if not items:
+            raise ValueError("넣을 내용이 비어 있다")
+        if idea_id and self.get(idea_id) is None:
+            raise LookupError(idea_id)
+        placed: list[dict[str, Any]] = []   # outcome per item, in order
+        rest: list[tuple[int, dict[str, Any]]] = []
+        for n, item in enumerate(items):
+            placed.append({})
+            # Filled 자료봉 result blocks keep their old path (parsed claims, task from the block's own IDs).
+            if item["kind"] != "url" and looks_like_results(item["body"]):
+                block = next((p["idea_id"] for p in parse_results(item["body"]) if p["idea_id"]), "")
+                target = idea_id or (block if block and self.get(block) else "")
+                if target and (not block or block == target):
+                    added = self.add_slots(target, [item["body"]])
+                    placed[n] = {"idea_id": target, "kind": "result", "title": item["title"], "task_id": added[0]["subtask_id"],
+                                 "assigned": added[0]["assigned"], "note": "", "candidate": False, "placed_by": "user" if idea_id else "id"}
+                    continue
+            rest.append((n, item))
+        # 1) which idea
+        ideas = [{"id": i["id"], "title": i["title"], "text": (self.get(i["id"]) or {}).get("text", "")} for i in self.list()]
+        chosen: list[tuple[str, str]]  # (idea id, how)
+        if idea_id:
+            chosen = [(idea_id, "user")] * len(rest)
+        else:
+            picks: list[str | None] = [None] * len(rest)
+            if rest and ideas and self.use_jev:
+                try:
+                    picks = ideas_jev.choose_ideas(ideas, [i["body"] for _, i in rest])
+                except jev.JevError:
+                    picks = [None] * len(rest)
+            chosen = [(p, "jev") if p else ("", "") for p in picks]
+        # 2) a candidate idea for each item that fit none
+        for k, (n, item) in enumerate(rest):
+            if not chosen[k][0]:
+                chosen[k] = (self.create(item["title"], idea_head(item), candidate=True), "new")
+        # 3) which task, one request per idea
+        by_idea: dict[str, list[int]] = {}
+        for k, (iid, how) in enumerate(chosen):
+            if how != "new":
+                by_idea.setdefault(iid, []).append(k)
+        tasks_of: dict[int, tuple[str, str]] = {}
+        for iid, ks in by_idea.items():
+            tasks = ideas_jev.plan_tasks((self.get(iid) or {}).get("plan", ""))
+            if not (tasks and self.use_jev):
+                continue
+            try:
+                hits = ideas_jev.classify_bodies(tasks, [rest[k][1]["body"] for k in ks])
+            except jev.JevError:
+                continue
+            for k, hit in zip(ks, hits):
+                if hit:
+                    tasks_of[k] = (hit[0], f"jev:{hit[1]:.2f}")
+        for k, (n, item) in enumerate(rest):
+            iid, how = chosen[k]
+            task, assigned = tasks_of.get(k, ("", ""))
+            mid = self.add_material(iid, item, task, assigned)
+            placed[n] = {"idea_id": iid, "material_id": mid, "kind": item["kind"], "title": item["title"], "task_id": task,
+                         "assigned": assigned, "note": item["note"], "candidate": how == "new",
+                         "placed_by": how or "free"}
+        for iid in {p["idea_id"] for p in placed if p}:
+            self.write_brief(iid)
+        for p in placed:
+            p["idea_title"] = (self.get(p["idea_id"]) or {}).get("title", "")
+        return placed
+
+    def add_material(self, idea_id: str, item: dict[str, Any], task_id: str = "", assigned: str = "") -> int:
+        stamp = now()
+        with self.db() as db:
+            mid = db.execute("""INSERT INTO materials (idea_id, kind, label, url, title, body, note, task_id, assigned, file,
+                                created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                             (idea_id, item["kind"], item["label"], item["url"], item["title"], item["body"][:ideas_intake.MAX_BODY],
+                              item["note"], task_id, assigned, "", stamp)).lastrowid
+            if item.get("raw"):  # keep the original (a PDF) next to the data so the overseer can open it
+                folder = self.base / "files"
+                folder.mkdir(exist_ok=True)
+                target = folder / (str(mid) + "-" + re.sub(r"[^\w.-]+", "_", item["label"])[:80])
+                target.write_bytes(item["raw"])
+                db.execute("UPDATE materials SET file = ? WHERE id = ?", (str(target), mid))
+            db.execute("UPDATE ideas SET updated_at = ? WHERE id = ?", (stamp, idea_id))
+        return mid
+
+    def assign_material(self, idea_id: str, material_id: int, task_id: str) -> bool:
+        sid = task_id.strip().upper()
+        if sid and not re.fullmatch(r"S\d{1,2}", sid):
+            raise ValueError("과제 ID는 S1, S2 … 형식이고, 비우면 자유 자료다")
+        with self.db() as db:
+            if not db.execute("SELECT 1 FROM materials WHERE id = ? AND idea_id = ?", (material_id, idea_id)).fetchone():
+                return False
+            db.execute("UPDATE materials SET task_id = ?, assigned = ? WHERE id = ?", (sid, "user" if sid else "", material_id))
+            db.execute("UPDATE ideas SET updated_at = ? WHERE id = ?", (now(), idea_id))
+        self.write_brief(idea_id)
+        return True
+
+    def delete_material(self, idea_id: str, material_id: int) -> bool:
+        with self.db() as db:
+            row = db.execute("SELECT file FROM materials WHERE id = ? AND idea_id = ?", (material_id, idea_id)).fetchone()
+            if row is None:
+                return False
+            db.execute("DELETE FROM materials WHERE id = ?", (material_id,))
+            db.execute("UPDATE ideas SET updated_at = ? WHERE id = ?", (now(), idea_id))
+        if row["file"]:
+            Path(row["file"]).unlink(missing_ok=True)
+        self.write_brief(idea_id)
+        return True
+
+    def adopt(self, idea_id: str) -> bool:
+        with self.db() as db:
+            if not db.execute("SELECT 1 FROM ideas WHERE id = ?", (idea_id,)).fetchone():
+                return False
+            db.execute("UPDATE ideas SET candidate = 0, updated_at = ? WHERE id = ?", (now(), idea_id))
+        self.write_brief(idea_id)
+        return True
+
     def assign_result(self, idea_id: str, result_id: int, subtask_id: str) -> bool:
         """The user picks the task of a result (typically one Jev left unsorted)."""
         sid = subtask_id.strip().upper()
@@ -428,7 +580,9 @@ class IdeaStore:
 
     def delete_idea(self, idea_id: str) -> None:
         with self.db() as db:
-            for table, column in (("results", "idea_id"), ("pastes", "idea_id"), ("plans", "idea_id"), ("ideas", "id")):
+            for f in db.execute("SELECT file FROM materials WHERE idea_id = ? AND file != ''", (idea_id,)).fetchall():
+                Path(f["file"]).unlink(missing_ok=True)
+            for table, column in (("results", "idea_id"), ("pastes", "idea_id"), ("plans", "idea_id"), ("materials", "idea_id"), ("ideas", "id")):
                 db.execute(f"DELETE FROM {table} WHERE {column} = ?", (idea_id,))
         (self.briefs / f"{idea_id}.md").unlink(missing_ok=True)
 
@@ -455,7 +609,9 @@ class IdeaStore:
         order = sorted(latest, key=lambda s: (s == "?", int(s[1:]) if s[1:].isdigit() else 999, s))
         lines = [f"# {idea['title']} ({idea['id']})", "",
                  f"- 만든 때: {idea['created_at']} · 마지막 변경: {idea['updated_at']}",
-                 f"- 결과: 하위과제 {len([s for s in latest if s != '?'])}개 · 붙여넣기 {len(idea['pastes'])}회",
+                 f"- 결과: 하위과제 {len([s for s in latest if s != '?'])}개 · 붙여넣기 {len(idea['pastes'])}회"
+                 f" · 자유 자료 {len(idea['materials'])}건",
+                 *(["- 상태: 새 아이디어 후보 (자유 자료에서 만들어짐, 아직 확정 안 함)"] if idea["candidate"] else []),
                  "", "## 원문", "", idea["text"], "",
                  "## 자료봉 과제 쪼개기 (분석·불확실성·과제 표)", "",
                  *([f"_{idea['plan_at']}_", "", ideas_jev.render_plan(idea["plan"], idea["plan_paras"])]
@@ -478,6 +634,21 @@ class IdeaStore:
         for sid in order:
             r = latest[sid]
             lines += [f"### {heading(r)}", f"_{r['status'] or '상태 표시 없음'} · {r['created_at']}_", "", r["body"], ""]
+        if idea["materials"]:
+            tasks = idea["tasks"]
+            kinds = {"paste": "붙여넣기", "url": "링크", "file": "파일"}
+            lines += ["## 자유 자료 (사용자가 프롬프트 없이 직접 조사해 넣은 것 · 오래된 순)", "",
+                      "| # | 출처 | 받은 때 | 과제 | 제목 |", "|---|---|---|---|---|"]
+            for m in reversed(idea["materials"]):
+                where = f"{m['task_id']} {tasks.get(m['task_id'], {}).get('title', '')}".strip() if m["task_id"] else "자유 자료"
+                lines.append(f"| {m['id']} | {m['label'].replace('|', '/')[:80]} ({kinds.get(m['kind'], m['kind'])}) "
+                             f"| {m['created_at']} | {where} | {m['title'].replace('|', '/')[:60]} |")
+            lines.append("")
+            for m in reversed(idea["materials"]):
+                where = f"{m['task_id']} ({m['assigned']})" if m["task_id"] else "과제 배정 없음 (자유 자료)"
+                src = {"paste": "붙여넣은 글", "url": "링크 " + m["url"], "file": "파일 " + m["label"]}.get(m["kind"], m["kind"])
+                extra = (" · " + m["note"] if m["note"] else "") + (" · 원본 " + m["file"] if m["file"] else "")
+                lines += [f"### 자료 {m['id']} · {m['title']}", f"_{src} · 받은 때 {m['created_at']} · {where}{extra}_", "", m["body"], ""]
         replaced = [r for r in idea["results"] if not r["latest"]]
         if replaced:
             lines += ["## 덮어쓴 이전 결과 (최신 순)", ""]
@@ -523,6 +694,17 @@ class PasteRequest(BaseModel):
     slots: list[str] = Field(default_factory=list, max_length=20)  # one pasted result per slot, any order
 
 
+class IntakeFile(BaseModel):
+    name: str = Field(max_length=300)
+    data: str = Field(max_length=12_000_000)  # base64
+
+
+class IntakeRequest(BaseModel):
+    text: str = Field(default="", max_length=ideas_intake.MAX_BODY)
+    files: list[IntakeFile] = Field(default_factory=list, max_length=10)
+    idea_id: str = Field(default="", max_length=40)
+
+
 class AssignRequest(BaseModel):
     subtask_id: str = Field(max_length=8)
 
@@ -546,6 +728,23 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
         if not body.text.strip():
             raise HTTPException(422, "아이디어 텍스트가 비어 있다")
         return found(store.create(body.title, body.text))
+
+    @router.post("/intake")
+    async def intake(body: IntakeRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        if body.idea_id:
+            found(body.idea_id)
+        items = await asyncio.to_thread(ideas_intake.text_items, body.text) if body.text.strip() else []
+        skipped: list[str] = []
+        for f in body.files:
+            try:
+                items.append(ideas_intake.file_item(f.name, f.data))
+            except ValueError as error:
+                skipped.append(str(error))
+        try:
+            placed = await asyncio.to_thread(store.intake, items, body.idea_id)
+        except ValueError as error:
+            raise HTTPException(422, "; ".join([str(error), *skipped])) from error
+        return {"added": placed, "skipped": skipped}
 
     @router.get("/{idea_id}")
     async def idea(idea_id: str, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
@@ -580,6 +779,26 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
         return {"added": [{"subtask_id": p["subtask_id"], "subtask_title": p["subtask_title"], "status": p["status"],
                            "claims": len(p["claims"]),
                            "assigned": p["assigned"]} for p in parsed]}
+
+    @router.put("/{idea_id}/materials/{material_id}/subtask")
+    async def assign_material(idea_id: str, material_id: int, body: AssignRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        try:
+            if not store.assign_material(idea_id, material_id, body.subtask_id):
+                raise HTTPException(404, "no such material")
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        return {"ok": True}
+
+    @router.delete("/{idea_id}/materials/{material_id}", status_code=204)
+    async def delete_material(idea_id: str, material_id: int, _: str = Depends(ctx.current_user)) -> None:
+        if not store.delete_material(idea_id, material_id):
+            raise HTTPException(404, "no such material")
+
+    @router.post("/{idea_id}/adopt")
+    async def adopt(idea_id: str, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        if not store.adopt(idea_id):
+            raise HTTPException(404, "no such idea")
+        return {"ok": True}
 
     @router.put("/{idea_id}/results/{result_id}/subtask")
     async def assign(idea_id: str, result_id: int, body: AssignRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
