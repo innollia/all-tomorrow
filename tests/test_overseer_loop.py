@@ -197,7 +197,8 @@ def test_wake_gate_uses_idle_only_and_settings_come_from_environment(monkeypatch
         monkeypatch.delenv("ALL_TOMORROW_METACOG_" + name, raising=False)
     config = settings()
     assert config == {"min_interval": 1800, "daily_limit": 24, "idle_seconds": 300, "check_interval": 600}
-    assert wake_gate(30, config)[0] is False and wake_gate(None, config)[0] is False
+    assert wake_gate(30, config)[0] is False
+    assert wake_gate(None, config)[0] is True   # 모르면 다른 조건(변화·간격·상한)만으로 판단
     assert wake_gate(900, config)[0] is True
     monkeypatch.setenv("ALL_TOMORROW_METACOG_MIN_INTERVAL_MINUTES", "45")
     monkeypatch.setenv("ALL_TOMORROW_METACOG_DAILY_LIMIT", "6")

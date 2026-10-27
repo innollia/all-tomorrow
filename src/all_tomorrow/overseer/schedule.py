@@ -15,8 +15,24 @@ def local_idle_seconds() -> float | None:
     return ((ctypes.windll.kernel32.GetTickCount() - info.tick) & 0xffffffff) / 1000
 
 
+def _in_user_session() -> bool:
+    """이 프로세스가 session 0(서비스·S4U)이 아닌 로그인 세션에서 도는지."""
+    if os.name != "nt":
+        return False
+    from ctypes import wintypes
+    session = wintypes.DWORD()
+    kernel = ctypes.windll.kernel32
+    if not kernel.ProcessIdToSessionId(kernel.GetCurrentProcessId(), ctypes.byref(session)):
+        return False
+    return session.value != 0
+
+
 def idle_seconds(base=None) -> float | None:
+    # 이 PC는 WTS LastInputTime이 늘 0이라 WTS만으로는 None이다(2026-10-27 확인).
+    # 예약 작업이 Interactive 로그온(사용자 세션)이면 GetLastInputInfo를 바로 읽을 수 있다.
     value = _session_idle_seconds()
+    if value is None and _in_user_session():
+        value = local_idle_seconds()
     if value is not None or base is None:
         return value
     # 일부 Windows 로컬 세션은 WTS LastInputTime=0이다. 로그인 세션의 별도 관측값을 쓴다.
@@ -104,7 +120,9 @@ def wake_gate(idle: float | None, config: dict | None = None) -> tuple[bool, str
     if need <= 0:
         return True, "PC 사용 여부 무시(설정)"
     if idle is None:
-        return False, "PC 미사용 시간 확인 불가"
+        # 모르면 영영 안 깨어나던 것이 2026-10-26 23:29 이후 멈춤의 원인이었다.
+        # 변화 있음·최소 간격·하루 상한이 모델 호출을 이미 제한하므로 이 조건만 건너뛴다.
+        return True, "PC 미사용 시간 확인 불가(다른 조건으로만 판단)"
     if idle < need:
         return False, "PC 사용 중"
     return True, "PC 미사용"
