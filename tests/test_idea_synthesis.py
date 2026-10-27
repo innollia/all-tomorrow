@@ -131,7 +131,7 @@ def test_appended_text_and_decided_direction_rebuild_the_synthesis(tmp_path, mon
     job = store.synth_job(iid)
     assert job and job["previous"] == ""                                  # 방향이 생기면 처음부터 다시
     prompt = ideas_followup.synth_prompt(store.get(iid), job)
-    assert "완성 프로그램" in prompt and "신규 질문 2,012건" in prompt and "## 정해진 것" in prompt
+    assert "완성 프로그램" in prompt and "신규 질문 2,012건" in prompt and "## 정해진 것" in prompt and "## 사용자 구상" in prompt
     assert "무관" not in prompt and "무관한 분석" not in prompt
     assert store.set_synthesis(iid, "## 한 줄 결론\n둘째 종합", job["sigs"]) and store.synth_job(iid) is None
     assert "새 자료 반영 대기" not in store.brief(iid)
