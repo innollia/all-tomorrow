@@ -154,7 +154,6 @@ META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사�
 """
 
 SHORT = 300         # a material this short is its own summary
-SUMMARY_MAX = 3600  # hard cap on a compressed summary (the prompt asks for at most 3000, see ideas_followup.compress_prompt)
 SYNTH_MAX = 6500    # hard cap on a synthesis in characters (the prompt asks for 5000; Korean is ~3 bytes a character)
 BRIEF_MAX = 32_000  # hard cap on the brief file in bytes
 BRIEF_IDEA = 3000   # characters of the idea text in the brief's '## 아이디어'
@@ -643,8 +642,6 @@ class IdeaStore:
         key = f"M{key}" if isinstance(key, int) else key
         table = "materials" if key.startswith("M") else "results"
         summary = summary.strip()
-        if len(summary) > SUMMARY_MAX:
-            summary = summary[:SUMMARY_MAX].rstrip() + "…"
         with self.db() as db:
             row = db.execute(f"SELECT idea_id FROM {table} WHERE id = ?", (int(key[1:]),)).fetchone()
             if row is None or not summary:

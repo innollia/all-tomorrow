@@ -121,7 +121,7 @@ COMPRESS = """너는 사업 아이디어 조사 자료를 압축하는 담당이
 ## 규칙
 - 웹 검색을 하지 않는다. 파일을 읽거나 고치지 않는다. 아래 글만 보고 답한다. 원문에 없는 것을 지어내지 않는다.
 - 압축본만 답한다. 인사·설명 없이 아래 형식으로만 쓴다.
-- 분량은 원문의 1/5 이하, 최대 {limit}자. 원문이 짧으면 그보다 더 짧게.
+- 글자 수 상한은 없다. 원문보다 짧게, 결정에 쓰일 항목(이름·조건·숫자·출처)을 빠뜨리지 않는 데까지만 줄인다.
 - 숫자·고유명사·날짜는 정확히 옮긴다. 출처(URL·글 이름)가 원문에 있으면 그 항목에 붙인다. 원문에 출처가 없으면 "출처 없음"이라고 적는다.
 - [이미 아는 것]과 겹치는 내용은 "이미 앎" 한 줄로 줄이고, 새 항목으로 풀어 쓰지 않는다.
 
@@ -161,8 +161,6 @@ COMPRESS = """너는 사업 아이디어 조사 자료를 압축하는 담당이
 {body}
 </material>
 """
-COMPRESS_LIMIT = 1500
-COMPRESS_LIMIT_LONG = 3000   # 아주 긴 원문(표가 많은 보고서)은 1/8까지, 이 상한까지
 COMPRESS_INPUT = 100_000
 
 
@@ -178,9 +176,7 @@ def compress_prompt(idea: dict[str, Any], material: dict[str, Any]) -> str:
     if len(body) > COMPRESS_INPUT:
         body = body[:COMPRESS_INPUT * 3 // 4] + "\n…(중간 생략)…\n" + body[-COMPRESS_INPUT // 4:]
         cut = f" 중 앞뒤 {COMPRESS_INPUT}자만 넣음"
-    size = len(material["body"].strip())
-    limit = min(COMPRESS_LIMIT_LONG, max(min(COMPRESS_LIMIT, max(300, size // 5)), size // 8))
-    return COMPRESS.format(limit=limit, context=build_context(others), title=material["title"], label=material["label"],
+    return COMPRESS.format(context=build_context(others), title=material["title"], label=material["label"],
                            note=f" ({material['note']})" if material["note"] else "", size=len(material["body"]), cut=cut, body=body)
 
 
