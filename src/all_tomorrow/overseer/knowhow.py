@@ -1,13 +1,12 @@
-"""Cross-project know-how: cards -> per-project lesson files, a common file, and seeds for new projects.
+"""Cross-project know-how: seed a new project with lessons from the oracle's card DBs.
 
-build: reads the distilled cards (this PC + peers, read-only), keeps solved ones, tags them by
-topic, merges near-duplicate lessons (source card ids are kept) and writes
-``<out>/projects/<project>.md``, ``<out>/common.md`` and ``<out>/index.json``. No model call.
+seed: queries ``cards_fts`` of this PC's overseer.sqlite and the peers' published stores (all
+read-only) with the project kind's words and tags, keeps solved cards, merges near-duplicate lessons
+(source card ids are kept), ranks them by tag match + bm25, optionally asks Jev (one request, one
+question per candidate) whether each applies, and writes ``docs/knowhow.md`` into the project.
+Existing files are never overwritten; AGENTS.md / CLAUDE.md only gets a link line.
 
-seed: picks lessons for a new project from index.json by tag match + FTS relevance, optionally asks
-Jev (one request, one question per candidate) whether each applies, and writes ``docs/knowhow.md``
-into the project. Existing files are never overwritten; AGENTS.md / CLAUDE.md only gets a link line.
-
+Per-project / common lesson files were withdrawn: they duplicated the oracle (``oracle_ask``).
 Every written text passes through the redactor.
 """
 
@@ -30,9 +29,8 @@ from all_tomorrow.overseer.store import default_dir, open_peer, peer_paths
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MARKER = "<!-- all-tomorrow:knowhow-seed -->"
-MAX_PER_PROJECT = 60
-MAX_COMMON = 100
 MIN_SOLUTION = 20
+CANDIDATES = 400          # rows per card DB taken from the FTS query
 SIMILAR = 0.55            # token Jaccard above which two lessons are the same lesson
 JEV_DROP = 0.7            # drop a candidate when Jev says "does not apply" at least this surely
 
@@ -145,24 +143,49 @@ def resolve_project(project: str | None, cwd: str | None, known: set[str]) -> st
     return name
 
 
-def read_cards(base: Path, known: set[str]) -> list[dict]:
-    """Solved cards of this PC and the peers, deduplicated by card id."""
+def _fts_query(words: list[str]) -> str:
+    terms, seen = [], set()
+    for w in words:
+        w = w.strip().lower()
+        if len(w) >= 3 and w not in seen:       # trigram needs 3+ characters
+            seen.add(w)
+            terms.append('"' + w.replace('"', '""') + '"')
+    return " OR ".join(terms)
+
+
+def read_candidates(base: Path, words: list[str], known: set[str]) -> list[dict]:
+    """Solved cards matching any of the words in this PC's and the peers' card DBs (read-only).
+
+    Each card gets ``fts`` (0..1, bm25 normalised per DB, bigger is closer). DBs without cards_fts are skipped."""
+    query = _fts_query(words)
+    if not query:
+        return []
     cards: dict[str, dict] = {}
-    stores = [base / "overseer.sqlite"] + peer_paths(base)
-    for path in stores:
+    for path in [base / "overseer.sqlite"] + peer_paths(base):
         if not path.exists():
             continue
         try:
             con = open_peer(path)
-            rows = con.execute(
-                "select c.card_id, c.project, s.cwd, c.agent, c.problem, c.situation, c.attempts, c.solution, "
-                "c.outcome, coalesce(s.updated_at, c.created_at) from cards c left join sessions s "
-                "on s.source = c.source and s.session_id = c.session_id where c.status != 'retired'").fetchall()
-            con.close()
+            try:
+                if not con.execute("select 1 from sqlite_master where name='cards_fts'").fetchone():
+                    continue
+                rows = con.execute(
+                    "select c.card_id, c.project, s.cwd, c.agent, c.problem, c.situation, c.solution, c.outcome, "
+                    "coalesce(s.updated_at, c.created_at), bm25(cards_fts) as score from cards_fts "
+                    "join cards c using (card_id) left join sessions s on s.source = c.source "
+                    "and s.session_id = c.session_id where cards_fts match ? and c.status != 'retired' "
+                    "order by score limit ?", (query, CANDIDATES)).fetchall()
+            finally:
+                con.close()
         except sqlite3.Error:
             continue
-        for card_id, project, cwd, agent, problem, situation, attempts, solution, outcome, when in rows:
-            if card_id in cards or not is_solved(outcome or "") or len((solution or "").strip()) < MIN_SOLUTION:
+        worst = max((-r[-1] for r in rows), default=1.0) or 1.0
+        for card_id, project, cwd, agent, problem, situation, solution, outcome, when, bm in rows:
+            fts = -bm / worst
+            if card_id in cards:
+                cards[card_id]["fts"] = max(cards[card_id]["fts"], fts)
+                continue
+            if not is_solved(outcome or "") or len((solution or "").strip()) < MIN_SOLUTION:
                 continue
             try:
                 situ = json.loads(situation or "[]")
@@ -171,7 +194,7 @@ def read_cards(base: Path, known: set[str]) -> list[dict]:
             cards[card_id] = {"id": card_id, "project": resolve_project(project, cwd, known), "agent": agent or "",
                               "problem": (problem or "").strip(), "solution": solution.strip(),
                               "situation": [str(x) for x in situ] if isinstance(situ, list) else [],
-                              "date": (when or "")[:10]}
+                              "date": (when or "")[:10], "fts": fts}
     return list(cards.values())
 
 
@@ -215,7 +238,7 @@ def merge_cards(cards: list[dict]) -> list[dict]:
         if target is None:
             lessons.append({"problem": card["problem"], "solution": card["solution"], "tags": set(card["_tags"]),
                             "sources": [card["id"]], "projects": {card["project"]} - {""}, "pool_general": not card["project"],
-                            "date": card["date"], "_toks": toks, "_ptoks": ptoks})
+                            "date": card["date"], "fts": card.get("fts", 0.0), "_toks": toks, "_ptoks": ptoks})
             for w in toks:
                 inverted.setdefault(w, []).append(len(lessons) - 1)
         else:
@@ -223,17 +246,15 @@ def merge_cards(cards: list[dict]) -> list[dict]:
             if card["project"]:
                 target["projects"].add(card["project"])
             target["date"] = max(target["date"], card["date"])
+            target["fts"] = max(target["fts"], card.get("fts", 0.0))
     for lesson in lessons:
         digest = hashlib.sha1(("|".join(sorted(lesson["sources"]))).encode()).hexdigest()[:10]
         lesson["id"] = "L" + digest
         lesson["tags"] = sorted(lesson["tags"])
         lesson["projects"] = sorted(lesson["projects"])
+        lesson["scope"] = "common" if len(lesson["projects"]) >= 2 or not lesson["projects"] else "project"
         del lesson["_toks"], lesson["_ptoks"]
     return lessons
-
-
-def score(lesson: dict) -> float:
-    return len(lesson["sources"]) + 0.5 * len(lesson["projects"]) + (0.001 * int(lesson["date"].replace("-", "") or 0) / 1e4)
 
 
 def primary_topic(lesson: dict) -> str:
@@ -258,69 +279,8 @@ def render_lesson(lesson: dict, redact: Callable[[str], str], *, with_project: b
     return redact(text)
 
 
-def render_file(title: str, intro: str, lessons: list[dict], redact: Callable[[str], str], total: int,
-                with_project: bool = False) -> str:
-    out = [f"# {title}", "", intro, f"교훈 {len(lessons)}개" + (f" (전체 {total}개 중 관찰 횟수 순)" if total > len(lessons) else ""),
-           f"생성: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC · `python -m all_tomorrow.overseer knowhow build`로 갱신 (손으로 고치지 말 것)", ""]
-    groups: dict[str, list[dict]] = {}
-    for lesson in lessons:
-        groups.setdefault(primary_topic(lesson), []).append(lesson)
-    for topic in [*TOPICS, "기타"]:
-        if topic in groups:
-            out += [f"## {topic}", ""] + [render_lesson(item, redact, with_project=with_project) for item in groups[topic]] + [""]
-    return "\n".join(out)
-
-
-def slug(name: str) -> str:
-    return re.sub(r"[^0-9A-Za-z가-힣._-]+", "_", name).strip("_.") or "project"
-
-
-def knowhow_dir() -> Path:
-    return Path(os.environ.get("ALL_TOMORROW_KNOWHOW_DIR") or REPO_ROOT / ".artifacts" / "knowhow")
-
-
 def make_redactor() -> Redactor:
     return Redactor.from_files(default_secret_files(Path.home()))
-
-
-def build(base: Path, out: Path, *, redact: Callable[[str], str] | None = None, known: set[str] | None = None) -> dict:
-    redact = redact or make_redactor()
-    known = known if known is not None else set(known_projects())
-    cards = read_cards(base, known)
-    lessons = merge_cards(cards)
-    common = [l for l in lessons if len(l["projects"]) >= 2 or (not l["projects"] and len(l["sources"]) >= 2)
-              or (not l["projects"] and l["tags"])]
-    common_ids = {l["id"] for l in common}
-    per_project: dict[str, list[dict]] = {}
-    for lesson in lessons:
-        if lesson["id"] not in common_ids:
-            for project in lesson["projects"]:
-                per_project.setdefault(project, []).append(lesson)
-    (out / "projects").mkdir(parents=True, exist_ok=True)
-    for old in (out / "projects").glob("*.md"):
-        old.unlink()
-    files: dict[str, int] = {}
-    for project, items in sorted(per_project.items()):
-        items.sort(key=score, reverse=True)
-        if len(items) < 2:      # one lone lesson is not a bundle
-            continue
-        chosen = items[:MAX_PER_PROJECT]
-        path = out / "projects" / f"{slug(project)}.md"
-        path.write_text(render_file(f"{project} 노하우", "이 프로젝트에서 겪고 푼 문제들. 같은 문제는 합쳤고 출처 카드는 oracle(`oracle_ask`)에서 찾을 수 있다.",
-                                    chosen, redact, len(items)), encoding="utf-8")
-        files[f"projects/{path.name}"] = len(chosen)
-    common.sort(key=score, reverse=True)
-    top = common[:MAX_COMMON]
-    (out / "common.md").write_text(render_file("공통 교훈", "둘 이상의 프로젝트에서 반복되었거나 특정 프로젝트에 매이지 않는 환경·도구 교훈.",
-                                               top, redact, len(common), with_project=True), encoding="utf-8")
-    files["common.md"] = len(top)
-    index = [{k: l[k] for k in ("id", "problem", "solution", "tags", "projects", "sources", "date")}
-             | {"scope": "common" if l["id"] in common_ids else "project"} for l in lessons]
-    for item in index:
-        item["problem"], item["solution"] = redact(item["problem"]), redact(item["solution"])
-    (out / "index.json").write_text(json.dumps({"built": datetime.now(timezone.utc).isoformat(), "lessons": index},
-                                               ensure_ascii=False), encoding="utf-8")
-    return {"cards": len(cards), "lessons": len(lessons), "files": files, "common": len(common), "dir": str(out)}
 
 
 # ---- seeding -------------------------------------------------------------------------------
@@ -328,38 +288,23 @@ def build(base: Path, out: Path, *, redact: Callable[[str], str] | None = None, 
 Asker = Callable[[object, dict], dict]
 
 
-def load_index(out: Path) -> list[dict]:
-    path = out / "index.json"
-    if not path.exists():
-        raise FileNotFoundError(f"{path} 없음: 먼저 `knowhow build`를 실행하세요")
-    return json.loads(path.read_text(encoding="utf-8"))["lessons"]
-
-
-def select(lessons: list[dict], kind: str | None, extra_tags: list[str], limit: int, own_project: str = "") -> list[dict]:
-    """Tag match first, FTS relevance (bm25 over an in-memory trigram index) second."""
+def select(base: Path, kind: str | None, extra_tags: list[str], limit: int, own_project: str = "",
+           known: set[str] | None = None) -> list[dict]:
+    """Candidates straight from the card DBs (cards_fts), then tag match first and bm25 relevance second."""
     spec = KINDS.get(kind or "", {"tags": [], "query": ""})
     wanted = set(spec["tags"]) | set(extra_tags)
-    base = BASE_TAGS
-    con = sqlite3.connect(":memory:")
-    con.execute("create virtual table f using fts5(lid unindexed, body, tokenize='trigram')")
-    con.executemany("insert into f values (?,?)", [(l["id"], l["problem"] + " " + l["solution"]) for l in lessons])
-    relevance: dict[str, float] = {}
-    terms = [w for w in tokens(spec["query"] + " " + " ".join(extra_tags)) if len(w) >= 3]
-    if terms:
-        q = " OR ".join('"' + w.replace('"', '""') + '"' for w in terms)
-        try:
-            rows = con.execute("select lid, bm25(f) from f where f match ?", (q,)).fetchall()
-        except sqlite3.Error:
-            rows = []
-        worst = max((-r[1] for r in rows), default=1.0) or 1.0
-        relevance = {lid: -b / worst for lid, b in rows}      # 0..1, bigger is closer
-    con.close()
+    words = sorted(tokens(spec["query"])) + sorted(wanted)
+    if not words:                      # unknown kind and no tags: the environment lessons every project meets
+        words = sorted(BASE_TAGS)
+    known = known if known is not None else set(known_projects())
+    lessons = merge_cards(read_candidates(base, words, known))
+    base_tags = BASE_TAGS
     ranked = []
     for l in lessons:
         tags = set(l["tags"])
         hit = len(tags & wanted)
-        hit_base = len(tags & base)
-        fts = relevance.get(l["id"], 0.0)
+        hit_base = len(tags & base_tags)
+        fts = l["fts"]
         # An engine/tool lesson of another stack must not ride in on generic words alone.
         foreign = {t for t in tags if TAG_TOPIC.get(t) == "엔진"} - wanted
         if foreign or (hit == 0 and hit_base == 0 and fts < 0.35):
@@ -414,9 +359,11 @@ def default_asker() -> Asker | None:
     return jev.ask if jev.api_key() else None
 
 
-def seed(project: Path, out: Path, *, kind: str | None = None, extra_tags: list[str] | None = None, limit: int = 25,
+def seed(project: Path, *, base: Path | None = None, kind: str | None = None, extra_tags: list[str] | None = None, limit: int = 25,
          use_jev: bool = True, asker: Asker | None = None, redact: Callable[[str], str] | None = None) -> dict:
-    """Write the chosen lessons into the project without overwriting anything existing."""
+    """Write the chosen lessons into the project without overwriting anything existing.
+
+    No matching card means no file: returns ``{"lessons": 0, "skipped": ...}``."""
     redact = redact or make_redactor()
     extra_tags = extra_tags or []
     if not project.is_dir():
@@ -424,7 +371,10 @@ def seed(project: Path, out: Path, *, kind: str | None = None, extra_tags: list[
     kind = kind or detect_kind(project)
     if kind is not None and kind not in KINDS:
         raise ValueError(f"unknown kind {kind!r}; known: {sorted(KINDS)}")
-    lessons = select(load_index(out), kind, extra_tags, limit * 2 if use_jev else limit, own_project=project.name)
+    base = base or default_dir()
+    lessons = select(base, kind, extra_tags, limit * 2 if use_jev else limit, own_project=project.name)
+    if not lessons:
+        return {"kind": kind, "lessons": 0, "skipped": f"맞는 해결 카드 없음({base})"}
     note = "규칙만 사용"
     if use_jev:
         ask = asker or default_asker()
@@ -433,6 +383,8 @@ def seed(project: Path, out: Path, *, kind: str | None = None, extra_tags: list[
         else:
             note = "Jev 키 없음: 규칙만 사용"
     lessons = lessons[:limit]
+    if not lessons:
+        return {"kind": kind, "lessons": 0, "skipped": f"후보 모두 제외됨: {note}", "note": note}
     docs = project / "docs"
     target = docs / "knowhow.md"
     if target.exists() and MARKER not in target.read_text(encoding="utf-8", errors="replace"):
@@ -441,7 +393,7 @@ def seed(project: Path, out: Path, *, kind: str | None = None, extra_tags: list[
     body = [MARKER, f"# {project.name} 시작 노하우", "",
             f"All Tomorrow가 다른 프로젝트·세션에서 풀린 문제 중 이 프로젝트({kind or '종류 미정'})에 맞을 만한 것을 골랐다. "
             "참고용이며 지금 상황에 맞는지는 읽는 쪽이 판단한다. 출처 카드는 `oracle_ask`로 찾는다.",
-            f"선별: 태그 일치 + 전문 검색 관련도, {note}. 생성 {datetime.now(timezone.utc).strftime('%Y-%m-%d')}", ""]
+            f"선별: 신탁 카드 DB 전문 검색 + 태그 일치, {note}. 생성 {datetime.now(timezone.utc).strftime('%Y-%m-%d')}", ""]
     groups: dict[str, list[dict]] = {}
     for lesson in lessons:
         groups.setdefault(primary_topic(lesson), []).append(lesson)
@@ -470,23 +422,17 @@ def _add_link(project: Path, link: str, rel: str) -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="all_tomorrow.overseer knowhow")
-    parser.add_argument("--dir", type=Path, default=None, help="overseer store folder")
-    parser.add_argument("--out", type=Path, default=None, help="knowhow output folder")
+    parser.add_argument("--dir", type=Path, default=None, help="overseer store folder (default: store.default_dir())")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("build", help="cards -> .artifacts/knowhow/projects/*.md, common.md, index.json (no model call)")
-    s = sub.add_parser("seed", help="put suitable lessons into a new project's docs/knowhow.md")
+    s = sub.add_parser("seed", help="put suitable lessons from the oracle's card DBs into a new project's docs/knowhow.md")
     s.add_argument("project", type=Path)
     s.add_argument("--kind", choices=sorted(KINDS), default=None, help="default: guessed from the files")
     s.add_argument("--tag", action="append", default=[], help="extra stack tag, e.g. docker")
     s.add_argument("--limit", type=int, default=25)
     s.add_argument("--no-jev", action="store_true")
     args = parser.parse_args(argv)
-    out = args.out or knowhow_dir()
-    if args.cmd == "build":
-        result = build(args.dir or default_dir(), out)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0
-    result = seed(args.project, out, kind=args.kind, extra_tags=args.tag, limit=args.limit, use_jev=not args.no_jev)
+    result = seed(args.project, base=args.dir, kind=args.kind, extra_tags=args.tag, limit=args.limit,
+                  use_jev=not args.no_jev)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 

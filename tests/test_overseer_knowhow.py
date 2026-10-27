@@ -1,4 +1,4 @@
-import json
+import sqlite3
 
 from all_tomorrow.overseer import distill, knowhow
 from all_tomorrow.overseer.redact import Redactor
@@ -26,7 +26,7 @@ def _store(tmp_path):
     store = SessionStore(tmp_path / "overseer.sqlite")
     distill.ensure_schema(store.con)
     for source, sid, project, card in CARDS:
-        s = Session(source, sid, cwd=f"C:\projects\{project}", agent=source)
+        s = Session(source, sid, cwd=rf"C:\projects\{project}", agent=source)
         s.lines = ["[U] x"]
         store.put(s, "fp", lambda t: t)
         store.commit()
@@ -36,46 +36,51 @@ def _store(tmp_path):
     return tmp_path
 
 
-def test_build_merges_duplicates_keeps_sources_and_masks_secrets(tmp_path) -> None:
+def test_select_queries_card_db_merges_duplicates_and_skips_unsolved(tmp_path) -> None:
     base = _store(tmp_path / "ov")
-    out = tmp_path / "kh"
-    result = knowhow.build(base, out, redact=Redactor({SECRET}), known={"alpha", "beta"})
-    assert result["cards"] == 5 and result["lessons"] == 4          # unsolved/empty-solution card skipped, godot pair merged
-    text = (out / "common.md").read_text(encoding="utf-8") + (out / "projects" / "alpha.md").read_text(encoding="utf-8") \
-        if (out / "projects" / "alpha.md").exists() else (out / "common.md").read_text(encoding="utf-8")
-    assert SECRET not in text and SECRET not in (out / "index.json").read_text(encoding="utf-8")
-    lessons = {l["id"]: l for l in json.loads((out / "index.json").read_text(encoding="utf-8"))["lessons"]}
-    merged = [l for l in lessons.values() if len(l["sources"]) == 2]
-    assert len(merged) == 1 and merged[0]["projects"] == ["alpha", "beta"] and merged[0]["scope"] == "common"
-    assert "출처 카드" in (out / "common.md").read_text(encoding="utf-8")
+    lessons = knowhow.select(base, "godot-game", [], 10, known={"alpha", "beta"})
+    merged = [l for l in lessons if "autoload" in l["solution"]]
+    assert len(merged) == 1 and len(merged[0]["sources"]) == 2              # godot pair merged, both card ids kept
+    assert merged[0]["projects"] == ["alpha", "beta"] and merged[0]["scope"] == "common" and merged[0]["fts"] > 0
+    assert not any("unity" in l["problem"] for l in lessons)                # other engine's lesson stays out
+    assert not any("pygame" in l["problem"] for l in lessons)               # unsolved card skipped
 
 
-def test_seed_picks_by_stack_never_overwrites_and_links(tmp_path) -> None:
+def test_seed_picks_by_stack_never_overwrites_links_and_masks_secrets(tmp_path) -> None:
     base = _store(tmp_path / "ov")
-    out = tmp_path / "kh"
-    knowhow.build(base, out, redact=Redactor(), known={"alpha", "beta"})
     project = tmp_path / "newgame"
     project.mkdir()
     (project / "project.godot").write_text("", encoding="utf-8")
     (project / "AGENTS.md").write_text("# mine\n", encoding="utf-8")
     (project / "docs").mkdir()
     (project / "docs" / "knowhow.md").write_text("my own notes", encoding="utf-8")
-    result = knowhow.seed(project, out, use_jev=False, redact=Redactor())
-    assert result["kind"] == "godot-game" and result["file"].endswith("knowhow-seed.md")
+    result = knowhow.seed(project, base=base, use_jev=False, redact=Redactor({SECRET}))
+    assert result["kind"] == "godot-game" and result["file"].endswith("knowhow-seed.md") and result["lessons"] >= 1
     assert (project / "docs" / "knowhow.md").read_text(encoding="utf-8") == "my own notes"
     seed_text = (project / "docs" / "knowhow-seed.md").read_text(encoding="utf-8")
     assert "autoload" in seed_text and "unity" not in seed_text.lower()       # other engine's lesson stays out
+    assert SECRET not in seed_text and "출처 카드" in seed_text
     agents = (project / "AGENTS.md").read_text(encoding="utf-8")
     assert agents.startswith("# mine") and "docs/knowhow-seed.md" in agents
-    knowhow.seed(project, out, use_jev=False, redact=Redactor())               # idempotent link
+    knowhow.seed(project, base=base, use_jev=False, redact=Redactor())       # idempotent link
     assert (project / "AGENTS.md").read_text(encoding="utf-8").count("knowhow-seed.md") == 2   # link text + target, once
+
+
+def test_seed_without_cards_writes_nothing(tmp_path) -> None:
+    empty = tmp_path / "ov"
+    empty.mkdir()
+    sqlite3.connect(empty / "overseer.sqlite").execute("create table cards (card_id text)").connection.close()  # no cards_fts
+    project = tmp_path / "p"
+    project.mkdir()
+    result = knowhow.seed(project, base=empty, kind="python-service", use_jev=False, redact=Redactor())
+    assert result["lessons"] == 0 and "skipped" in result
+    assert not (project / "docs").exists() and not (project / "AGENTS.md").exists()
 
 
 def test_jev_filter_drops_not_applicable_and_survives_failure(tmp_path) -> None:
     base = _store(tmp_path / "ov")
-    out = tmp_path / "kh"
-    knowhow.build(base, out, redact=Redactor(), known={"alpha", "beta"})
-    lessons = knowhow.load_index(out)
+    lessons = knowhow.select(base, None, ["godot", "unity", "sqlite", "python"], 10, known={"alpha", "beta"})
+    assert lessons
     calls = []
 
     def ask(state, questions):

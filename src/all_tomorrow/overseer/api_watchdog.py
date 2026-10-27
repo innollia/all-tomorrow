@@ -79,16 +79,37 @@ def record(base: Path, event: str, **details) -> None:
             log.error("API watchdog record failed: %s", type(error).__name__)
 
 
+def wake_session(base: Path, task: str, wake=None) -> str:
+    """사람 없이 도는 관제(메타인지 세션)를 깨운다. 실패해도 감시는 계속한다."""
+    from all_tomorrow.overseer import metacog_session
+    try:
+        return (wake or metacog_session.wake)(base, metacog_session.Incident(
+            fingerprint=metacog_session.fingerprint("api", "restart_blocked"), source="api_watchdog",
+            title="중앙 API 재기동 한도 도달",
+            detail=("헬스 검사 연속 실패로 1시간 재기동 3회 한도에 닿았다. api-watchdog.json의 blocked를 지우기 전에는 "
+                    f"감시가 재시작하지 않는다. 예약 작업 {task}, 기록 api-watchdog.jsonl·api.log."),
+            facts={"server_id": "api", "task": task}))
+    except Exception as error:
+        log.error("metacog wake failed: %s", type(error).__name__)
+        return "error"
+
+
 def check_once(base: Path, *, task="AllTomorrow-DP7-api", probe=healthy,
-               recover=restart, diagnostics=diagnose, now=None) -> str:
+               recover=restart, diagnostics=diagnose, now=None, wake=None) -> str:
     now = time.time() if now is None else now
     path = base / "api-watchdog.json"
     state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     if state.get("blocked"):
+        wake_session(base, task, wake)   # 앞서 다른 세션이 돌아 미뤄졌으면 다시 시도(같은 지문은 한 번만)
         return "blocked"  # 관제가 상태 파일을 지우기 전에는 재시작하지 않는다.
     if probe():
         state["failures"] = 0
         save(path, state)
+        try:
+            from all_tomorrow.overseer import metacog_session
+            metacog_session.resolve(base, "api")
+        except Exception as error:
+            log.error("metacog resolve failed: %s", type(error).__name__)
         return "healthy"
     state["failures"] = state.get("failures", 0) + 1
     attempts = [at for at in state.get("attempts", []) if now - at < 3600]
@@ -104,6 +125,7 @@ def check_once(base: Path, *, task="AllTomorrow-DP7-api", probe=healthy,
         state["blocked"] = True
         save(path, state)
         record(base, "restart_blocked")
+        wake_session(base, task, wake)
         return "blocked"
     # 실패한 재시작도 횟수에 포함한다. 중간에 죽어도 재시도 폭주하지 않는다.
     attempts.append(now)

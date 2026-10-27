@@ -4,11 +4,16 @@
 
 ## 메타인지와의 관계
 
+- **메타인지 = 사용자 없이 도는 관제.** 이 문서를 그대로 지침으로 받는 헤드리스 Claude Code 세션(`claude -p`, 작업 폴더 `C:\projects`)이다. 무거운 코딩·조사는 all-tomorrow MCP `dispatch_task`로 Codex에 맡기고 `get_run`으로 확인한다. 막히면 `oracle_ask`. 노션은 `control-brief.md`로 읽기만 한다. 사람이 없으므로 도구는 허용 목록뿐이고, 아래 "먼저 묻는 일"(사용자 자료 삭제, 권한·비용 확대, 팀 저장소 push, 비밀값 출력, 방향 선택)은 하지 않고 일지·보고의 "물을 것"에 남긴다. 모델은 기본값(최상위 고가 모델 지정 금지), 한 번에 시간·턴 상한이 있다.
+- 지금(1단계) 깨우는 계기는 서버 감시가 스스로 못 고친 이상뿐이다: autostart 서버를 3번 켜도 실패해 재시도를 멈췄을 때, API 감시가 재기동 한도에 닿았을 때. 같은 이상(지문 = 서버 id + 오류 종류)은 한 번만 깨우고, 서버가 살아나 상태가 바뀐 뒤에만 다시 깨운다. 디스코드 보고도 같은 규칙. 코드는 `src/all_tomorrow/overseer/metacog_session.py`, 동작은 `docs/dp7-loop.md`.
+- **관제는 메타인지를 감사한다.** 대화 전과 판단 전에 `metacog-journal.md` 맨 위 세션 기록(본 것·한 것·결과·남은 것·물을 것, 턴·시간)을 읽고, 실제로 고쳐졌는지 확인한다. 틀린 수리는 되돌리고, 지침이 모자라 생긴 실수면 이 문서를 고친다(메타인지는 다음 깨어남부터 그 지침을 따른다). "물을 것"은 관제가 사용자에게 가져간다. 세션 트랜스크립트는 기존 수집 경로로 신탁 카드가 된다.
+- 옛 판정기(예약 작업 AllTomorrow-DP7-overseer 안의 `metacog.wake`: 스냅샷을 읽고 관찰 JSON을 쓰는 한 번짜리 판단, 유일한 행동이 All Tomorrow 코드 사본을 고치는 Work)는 2026-10-27부터 `metacog.paused`로 멈춰 있다. 사흘 562회 깨어남에 산출 0이었다. 은퇴는 다음 단계. 아래 줄은 그 옛 경로의 설명이다.
 - 메타인지 루프(예약 작업 AllTomorrow-DP7-overseer, PC 미사용 때 10분마다 확인하고 변화가 있을 때만 모델 호출, 최소 30분·하루 24회)는 관제가 없어도 혼자 관찰하고 판단한다. 결과는 `~/.all-tomorrow/overseer/metacog-journal.md`(일지)와 `metacog-notes.md`(메타인지가 매번 통째로 고쳐 쓰는 가설·기준)에 남는다. 자세한 동작은 `docs/dp7-loop.md`.
 - 관제는 이 둘을 자기 기억으로 쓴다. 사용자와 대화하기 전과 판단하기 전에 읽는다.
 - 메타인지의 제안(propose)은 관제가 사용자에게 가져가고, 사용자가 정하면 관제가 실행한다.
 - 관제가 대화에서 알게 된 방향이나 결정은 `~/.all-tomorrow/overseer/direction-notes.md`에 날짜 제목과 함께 덧붙인다. 메타인지는 이 파일과 `direction.md`(사용자 원문)를 읽기만 하고 고치지 않으며, 바뀌면 다음 확인 때 깨어난다. `metacog-notes.md`에는 적지 않는다(메타인지가 매번 덮어써 10/25 방향이 지워졌다).
-- 메타인지를 멈추려면 `~/.all-tomorrow/overseer/metacog.paused` 파일을 만들고, 다시 켜려면 지운다. 정지 중에도 `metacog --force`는 실행된다.
+- 헤드리스 메타인지 세션을 멈추려면 `~/.all-tomorrow/overseer/metacog-session.paused`를 만든다(이상은 기록만 하고 깨우지 않는다).
+- 옛 메타인지를 멈추려면 `~/.all-tomorrow/overseer/metacog.paused` 파일을 만들고, 다시 켜려면 지운다. 정지 중에도 `metacog --force`는 실행된다.
 - 메타인지가 만든 All Tomorrow 자체 Work가 쌓이면 지우지 말고 `loop.close_self_work(..., apply=True)`로 CANCELLED 처리한다.
 - 필요하면 관제가 메타인지를 바로 깨운다: `metacog --force`.
 

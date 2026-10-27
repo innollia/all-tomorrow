@@ -133,8 +133,8 @@ def register_project(project_id: str, path: str, name: str | None = None, notes:
                      seed_knowhow: bool = True, kind: str | None = None) -> dict[str, Any]:
     """Add or update a managed project. path must be an existing absolute directory.
 
-    A project that is new to the registry also gets docs/knowhow.md with lessons picked from other
-    projects (kind: godot-game, python-service, ...; guessed from the files when omitted). Nothing existing is overwritten."""
+    A project that is new to the registry also gets docs/knowhow.md with lessons picked from the
+    oracle's card DBs (kind: godot-game, python-service, ...; guessed from the files when omitted). Nothing existing is overwritten."""
     resolved = Path(path)
     if not resolved.is_absolute() or not resolved.is_dir():
         raise ValueError("path must be an existing absolute directory")
@@ -146,8 +146,8 @@ def register_project(project_id: str, path: str, name: str | None = None, notes:
     if is_new and seed_knowhow:
         from all_tomorrow.overseer import knowhow
         try:
-            result["knowhow"] = knowhow.seed(resolved, knowhow.knowhow_dir(), kind=kind)
-        except Exception as error:   # a missing index or unknown kind must not block registering
+            result["knowhow"] = knowhow.seed(resolved, kind=kind)
+        except Exception as error:   # a missing card DB or unknown kind must not block registering
             result["knowhow"] = {"skipped": f"{type(error).__name__}: {str(error)[:200]}"}
     return result
 
