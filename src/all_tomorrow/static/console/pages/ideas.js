@@ -12,8 +12,11 @@
     get(id) { try { return localStorage.getItem(draftKey(id)) || ""; } catch { return ""; } },
     set(id, v) { try { v ? localStorage.setItem(draftKey(id), v) : localStorage.removeItem(draftKey(id)); } catch {} },
   };
+  const SLOTS = 7;  // result boxes: 3-5 tasks by default, plus retries and cross-checks
+  const slotKey = n => current && current.id + ":paste" + n;
   const DRAFTED = { "idea-title": () => "new-title", "idea-text": () => "new-text",
-    "idea-plan-text": () => current && current.id + ":plan", "idea-paste-text": () => current && current.id + ":paste" };
+    "idea-plan-text": () => current && current.id + ":plan" };
+  for (let n = 0; n < SLOTS; n++) DRAFTED["idea-slot-" + n] = () => slotKey(n);
 
   AT.pages["/ideas"] = async () => {
     const ideas = await api("/api/ideas");
@@ -40,10 +43,21 @@
     const claim = c => `<div class="small" style="margin-top:6px"><b>${esc(c.id)}</b> ${esc(c.claim)}
       ${c.kind ? `<span class="pill">${esc(c.kind)}</span>` : ""}
       <div class="mute">${/^https?:\/\//.test(c.source) ? `<a href="${esc(c.source)}" target="_blank" rel="noopener">${esc(c.source)}</a>` : esc(c.source) || '<span style="color:var(--bad)">출처 없음</span>'}${c.quote ? ` — ${esc(c.quote)}` : ""}</div></div>`;
+    // Paragraphs Jev judged to be the researcher's own opinion or chatter are folded, never removed.
+    const planView = idea => (idea.plan_paras || []).some(p => !p.keep)
+      ? idea.plan_paras.map(p => p.keep ? `<pre class="small" style="white-space:pre-wrap">${esc(p.text)}</pre>`
+        : `<details style="opacity:.75"><summary class="small mute">접힘 · 과제 정의·조사 지시가 아닌 글 (p=${Number(p.p).toFixed(2)}) · ${esc(p.text.replace(/\s+/g, " ").slice(0, 50))}…</summary><pre class="small" style="white-space:pre-wrap">${esc(p.text)}</pre></details>`).join("")
+      : `<pre class="small" style="white-space:pre-wrap">${esc(idea.plan)}</pre>`;
+    // A result Jev could not place (or one placed wrongly) gets a task picker; the plan's task list fills it.
+    const assignSelect = (r, idea) => {
+      const ids = Object.keys(idea.tasks || {});
+      if (!ids.length || !(r.subtask_id === "?" || (r.assigned || "").startsWith("jev:"))) return "";
+      return `<select data-iassign="${r.id}" aria-label="과제 고르기"><option value="">${r.subtask_id === "?" ? "미분류 · 과제 고르기" : "과제 바꾸기"}</option>${ids.map(t => `<option value="${esc(t)}">${esc(t)} ${esc(idea.tasks[t].title)}</option>`).join("")}</select>`;
+    };
     const results = i.results.map(r => `<div style="display:block">
-      <div class="row"><b>${esc(r.subtask_id)}</b><span class="pill"${r.latest ? "" : ' style="opacity:.6"'}>${r.latest ? "최신" : "이전(덮어씀)"}</span><span style="flex:1">${esc(r.subtask_title || (r.subtask_id === "?" ? "형식 밖 결과" : ""))}</span>
+      <div class="row"><b>${esc(r.subtask_id)}</b>${r.assigned ? `<span class="pill small" title="과제를 정한 방법">${esc(r.assigned === "ID" ? "ID로 확인" : r.assigned.startsWith("jev:") ? "Jev " + r.assigned.slice(4) : "직접 고름")}</span>` : ""}<span class="pill"${r.latest ? "" : ' style="opacity:.6"'}>${r.latest ? "최신" : "이전(덮어씀)"}</span><span style="flex:1">${esc(r.subtask_title || (r.subtask_id === "?" ? "형식 밖 결과" : ""))}</span>
         <span class="pill"${r.status && r.status !== "완료" ? ' style="color:var(--warn)"' : ""}>${esc(r.status || "상태 없음")}</span>
-        <span class="small mute">주장 ${r.claims.length} · 출처 없음 ${r.claims.filter(c => !c.source).length}</span><span class="small mute">${ago(r.created_at)}</span><button class="danger" data-idel-result="${r.id}">삭제</button></div>
+        <span class="small mute">주장 ${r.claims.length} · 출처 없음 ${r.claims.filter(c => !c.source).length}</span><span class="small mute">${ago(r.created_at)}</span>${assignSelect(r, i)}<button class="danger" data-idel-result="${r.id}">삭제</button></div>
       ${r.claims.map(claim).join("")}
       <details><summary>본문 ${r.body.length}자</summary><pre class="small" style="white-space:pre-wrap">${esc(r.body)}</pre></details></div>`);
     return `<div class="row" style="justify-content:space-between"><h1>${esc(i.title)}</h1><button class="danger" data-idel-idea="1">아이디어 삭제</button></div>
@@ -53,11 +67,12 @@
       <div class="row" style="margin-bottom:8px"><button class="primary" data-icopy="prompt">전체 프롬프트 복사</button><span class="small mute">자료봉이 하위 프롬프트 S1…Sn을 돌려준다 → 각각 새 세션에 붙여 병렬로 돌린다</span></div>
       <details><summary>프롬프트 보기 (${i.prompt.length}자)</summary><pre class="small" style="white-space:pre-wrap">${esc(i.prompt)}</pre></details>
       <h2>2-1 · 자료봉의 과제 쪼개기 답</h2>
-      ${i.plan ? `<details${i.results.length ? "" : " open"}><summary>저장됨 · ${ago(i.plan_at)} · ${i.plan.length}자</summary><pre class="small" style="white-space:pre-wrap">${esc(i.plan)}</pre></details>${i.plans.slice(1).map(o => `<details><summary>이전 쪼개기 · ${ago(o.created_at)} · ${o.text.length}자</summary><pre class="small" style="white-space:pre-wrap">${esc(o.text)}</pre></details>`).join("")}` : '<div class="small mute">자료봉이 돌려준 분석·불확실성·과제 표(하위 프롬프트 포함 전체)를 붙여넣어 두면 정리본에 같이 들어간다</div>'}
+      ${i.plan ? `<details${i.results.length ? "" : " open"}><summary>저장됨 · ${ago(i.plan_at)} · ${i.plan.length}자</summary>${planView(i)}</details>${i.plans.slice(1).map(o => `<details><summary>이전 쪼개기 · ${ago(o.created_at)} · ${o.text.length}자</summary><pre class="small" style="white-space:pre-wrap">${esc(o.text)}</pre></details>`).join("")}` : '<div class="small mute">자료봉이 돌려준 분석·불확실성·과제 표(하위 프롬프트 포함 전체)를 붙여넣어 두면 정리본에 같이 들어간다</div>'}
       <form id="idea-plan" style="margin-top:8px"><textarea id="idea-plan-text" rows="8" placeholder="자료봉 답 전체 붙여넣기 (저장하면 이전 것을 바꾼다)">${esc(draft.get(i.id + ":plan") || i.plan)}</textarea>
         <div class="row" style="margin-top:8px"><button>${i.plan ? "바꿔 저장" : "저장"}</button><span class="small mute">비우고 저장하면 지운다 · 하위과제 결과(=== 자료봉 결과 ===)는 3번 칸에</span></div></form>
       <h2>3 · 결과 붙여넣기</h2>
-      <form id="idea-paste"><textarea id="idea-paste-text" rows="8" placeholder="=== 자료봉 결과 === … === 끝 === 블록. 여러 개를 한꺼번에 붙여도 된다">${esc(draft.get(i.id + ":paste"))}</textarea>
+      <div class="small mute" style="margin-bottom:6px">칸마다 결과 하나씩, 아무 순서로 붙인다. 블록에 과제 ID가 있으면 그대로 쓰고, 없으면 Jev가 위 과제 쪼개기의 과제 중 어느 것인지 가른다(확실하지 않으면 미분류 → 4번에서 직접 고른다).</div>
+      <form id="idea-paste">${Array.from({ length: SLOTS }, (_, n) => `<textarea id="idea-slot-${n}" rows="4" placeholder="결과 ${n + 1}" style="margin-bottom:6px">${esc(draft.get(slotKey(n)))}</textarea>`).join("")}
         <div class="row" style="margin-top:8px"><button class="primary">결과 저장</button></div></form>
       <h2>4 · 결과 (${i.results.length}, 덮어쓴 것 포함 · 최신 순)</h2>${list(results)}
       <h2>5 · 관제용 정리본</h2>
@@ -89,6 +104,13 @@
       }
     } catch (err) { toast("실패: " + err.message); }
   });
+  view.addEventListener("change", async e => {
+    const sel = e.target.closest("select[data-iassign]"); if (!sel || !current || !sel.value) return;
+    try {
+      await api(`/api/ideas/${encodeURIComponent(current.id)}/results/${sel.dataset.iassign}/subtask`, { subtask_id: sel.value }, "PUT");
+      toast("과제 " + sel.value + "로 정함"); AT.render();
+    } catch (err) { toast("실패: " + err.message); }
+  });
   view.addEventListener("input", e => {
     const key = DRAFTED[e.target.id]?.(); if (key) draft.set(key, e.target.value);
   });
@@ -108,10 +130,12 @@
       catch (err) { toast("실패: " + err.message); }
     } else if (e.target.id === "idea-paste" && current) {
       e.preventDefault();
-      const text = $("#idea-paste-text").value.trim(); if (!text) return;
+      const slots = Array.from({ length: SLOTS }, (_, n) => $("#idea-slot-" + n).value.trim()).filter(Boolean);
+      if (!slots.length) return;
       try {
-        const r = await api(`/api/ideas/${encodeURIComponent(current.id)}/results`, { text });
-        draft.set(current.id + ":paste", ""); toast("저장: " + r.added.map(a => a.subtask_id || "?").join(", ")); AT.render();
+        const r = await api(`/api/ideas/${encodeURIComponent(current.id)}/results`, { slots });
+        for (let n = 0; n < SLOTS; n++) draft.set(slotKey(n), "");
+        toast("저장: " + r.added.map(a => a.subtask_id || "?").join(", ")); AT.render();
       } catch (err) { toast("실패: " + err.message); }
     }
   });

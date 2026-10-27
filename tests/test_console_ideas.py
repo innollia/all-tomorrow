@@ -48,8 +48,8 @@ def test_idea_desk_flow_prompt_paste_list_and_brief(tmp_path) -> None:
         assert other.status_code == 422
         paste = result(iid, "S1", "기존 서비스", "옛 결과") + "\n" + result(iid, "S2", "수요", "수요 있음")
         assert c.post(f"/api/ideas/{iid}/results", json={"text": paste}).json()["added"] == [
-            {"subtask_id": "S1", "subtask_title": "기존 서비스", "status": "완료", "claims": 2},
-            {"subtask_id": "S2", "subtask_title": "수요", "status": "완료", "claims": 2}]
+            {"subtask_id": "S1", "subtask_title": "기존 서비스", "status": "완료", "claims": 2, "assigned": "ID"},
+            {"subtask_id": "S2", "subtask_title": "수요", "status": "완료", "claims": 2, "assigned": "ID"}]
         c.post(f"/api/ideas/{iid}/results", json={"text": result(iid, "S1", "기존 서비스", "새 결과", "불완전")})
 
         listed = c.get("/api/ideas").json()
@@ -201,3 +201,149 @@ def test_plan_api_rejects_result_blocks(tmp_path) -> None:
         r = c.put(f"/api/ideas/{iid}/plan", json={"text": result(iid, "S1", "a", "b")})
         assert r.status_code == 422 and "결과 붙여넣기" in r.json()["detail"]
         assert c.put(f"/api/ideas/{iid}/plan", json={"text": ""}).status_code == 200
+
+
+# --- Jev (faked): sorting pasted results onto tasks, folding the researcher's own paragraphs ---
+
+PLAN = """## 1. 아이디어 분석
+웹소설 표지를 자동으로 만드는 도구이고 고객은 작가다.
+
+정말 훌륭한 아이디어네요! 개인적으로 저는 이런 시장이 정말 흥미롭다고 생각하고, 응원합니다. 꼭 성공하시길 바라요.
+
+## 과제 표
+| ID | 제목 |
+|---|---|
+| S1 | 기존 서비스 |
+| S2 | 수요 |
+
+### S1 · 기존 서비스 · 독립
+```
+기존 표지 생성 서비스를 조사하라. 아이디어 ID: {iid}
+```
+
+### S2 · 수요 · 현장검증
+```
+작가들의 지불 의사를 조사하라.
+```
+"""
+
+
+class FakeJev:
+    """Stands in for api.typesafe.ai: chooses by keyword, and says the chatter is not needed."""
+
+    def __init__(self) -> None:
+        self.requests: list[tuple[object, dict]] = []
+
+    def __call__(self, state, questions, timeout=90):
+        self.requests.append((state, questions))
+        answers = {}
+        for name, q in questions.items():
+            if q["type"] == "choice":
+                want = "S2" if "지불" in q["instructions"] else "S1" if "표지 서비스" in q["instructions"] else None
+                names = list(q["criteria"])
+                probs = {n: (0.9 if want and n.startswith(want) else 0.1 if want else 1 / len(names)) for n in names}
+                answers[name] = {"type": "choice", "choice": max(probs, key=probs.get), "probabilities": probs}
+            else:
+                chatter = "응원합니다" in q["instructions"]
+                answers[name] = {"type": "noul", "noul": 0.04 if chatter else 0.95}
+        return answers
+
+
+@pytest.fixture
+def fake_jev(monkeypatch):
+    from all_tomorrow.console import jev
+
+    fake = FakeJev()
+    monkeypatch.setattr(jev, "ask", fake)
+    return fake
+
+
+def test_jev_sorts_unlabelled_slots_with_one_choice_per_slot(tmp_path, fake_jev) -> None:
+    from all_tomorrow.console.ideas import IdeaStore
+
+    store = IdeaStore(tmp_path / "ideas", use_jev=True)
+    iid = store.create("t", "웹소설 표지")
+    store.set_plan(iid, PLAN.replace("{iid}", iid))
+    fake_jev.requests.clear()
+    labelled = result(iid, "S3", "가격", "라벨 있는 결과")
+    added = store.add_slots(iid, ["작가들이 돈을 낼지 지불 의사를 조사한 결과 ...", labelled,
+                                  "기존 표지 서비스 비교 결과 ...", "무슨 얘기인지 모르는 잡담"])
+    assert [(a["subtask_id"], a["assigned"][:3]) for a in added] == [("S2", "jev"), ("S3", "ID"), ("S1", "jev"), ("", "")]
+    assert len(fake_jev.requests) == 1  # one request, labelled block not asked
+    state, questions = fake_jev.requests[0]
+    assert [q["type"] for q in questions.values()] == ["choice"] * 3
+    assert all("S1 기존 서비스" in q["criteria"] and "S2 수요" in q["criteria"] for q in questions.values())
+    results = {r["body"][:3]: r for r in store.get(iid)["results"]}
+    assert results["무슨 "]["subtask_id"] == "?" and results["작가들"]["subtask_title"] == "수요"
+    assert store.assign_result(iid, results["무슨 "]["id"], "s4") and not store.assign_result(iid, 9999, "S1")
+    with pytest.raises(ValueError):
+        store.assign_result(iid, results["무슨 "]["id"], "아무거나")
+    assert {r["id"]: r["assigned"] for r in store.get(iid)["results"]}[results["무슨 "]["id"]] == "user"
+
+
+def test_labelled_slots_never_call_jev_and_failure_keeps_old_behaviour(tmp_path, fake_jev, monkeypatch) -> None:
+    from all_tomorrow.console import jev
+    from all_tomorrow.console.ideas import IdeaStore
+
+    store = IdeaStore(tmp_path / "ideas", use_jev=True)
+    iid = store.create("t", "웹소설 표지")
+    store.set_plan(iid, PLAN.replace("{iid}", iid))
+    fake_jev.requests.clear()
+    store.add_slots(iid, [result(iid, "S1", "a", "x"), result(iid, "S2", "b", "y")])
+    assert fake_jev.requests == []
+
+    def down(*_a, **_k):
+        raise jev.JevError("Jev HTTP 500")
+
+    monkeypatch.setattr(jev, "ask", down)
+    added = store.add_slots(iid, ["그냥 글. 과제 S2 이야기", "아무 글"])
+    assert [(a["subtask_id"], a["assigned"]) for a in added] == [("S2", ""), ("", "")]  # old loose reading, else unsorted
+    store.set_plan(iid, PLAN.replace("{iid}", iid) + "\n\n덧붙임 문단입니다. 이것은 충분히 긴 문단이다.")
+    assert store.get(iid)["plan_paras"] == [] and "접음" not in store.brief(iid)
+
+
+def test_jev_folds_researcher_chatter_in_plan_but_keeps_it(tmp_path, fake_jev) -> None:
+    from all_tomorrow.console.ideas import IdeaStore
+
+    store = IdeaStore(tmp_path / "ideas", use_jev=True)
+    iid = store.create("t", "웹소설 표지")
+    plan = PLAN.replace("{iid}", iid)
+    store.set_plan(iid, plan)
+    _, questions = fake_jev.requests[0]
+    assert all(q["type"] == "noul" for q in questions.values())
+    assert not any("기존 표지 생성 서비스를 조사하라" in q["instructions"] for q in questions.values())  # fenced sub-prompts are not asked
+    idea = store.get(iid)
+    assert idea["plan"] == plan.strip()  # original text untouched
+    assert [p["text"] for p in idea["plan_paras"] if not p["keep"]] == [
+        "정말 훌륭한 아이디어네요! 개인적으로 저는 이런 시장이 정말 흥미롭다고 생각하고, 응원합니다. 꼭 성공하시길 바라요."]
+    assert "".join(p["text"] for p in idea["plan_paras"]).count("기존 표지 생성 서비스를 조사하라") == 1
+    brief = store.brief(iid)
+    assert "<details><summary>접음" in brief and brief.count("응원합니다") == 1
+    assert brief.index("접음") < brief.index("응원합니다")
+    assert set(idea["tasks"]) == {"S1", "S2"} and idea["tasks"]["S2"]["title"] == "수요"
+
+
+def test_split_paragraphs_keeps_fences_whole() -> None:
+    from all_tomorrow.console.ideas_jev import split_paragraphs
+
+    prose = "서른 글자를 넘기기 위해 조금 길게 쓴 본문 문단이다 정말로 그렇다."
+    paras = split_paragraphs("## 제목\n짧음\n\n" + prose + "\n\n```\n빈 줄이\n\n있는 하위 프롬프트\n```\n\n| a | b |\n|---|---|")
+    assert [p["ask"] for p in paras] == [False, True, False, False]  # heading, prose, fenced sub-prompt, table
+    assert "빈 줄이" in paras[2]["text"] and "있는 하위 프롬프트" in paras[2]["text"]
+
+
+def test_api_accepts_slots_and_assignment(tmp_path, fake_jev) -> None:
+    app = create_app(auth=Auth("owner", "correct horse", "s" * 32), console_data_dir=str(tmp_path))
+    with TestClient(app, base_url="https://testserver") as c:
+        c.post("/api/login", json={"username": "owner", "password": "correct horse"})
+        iid = c.post("/api/ideas", json={"text": "아이디어"}).json()["id"]
+        assert c.put(f"/api/ideas/{iid}/plan", json={"text": PLAN.replace("{iid}", iid)}).status_code == 200
+        added = c.post(f"/api/ideas/{iid}/results", json={"slots": ["지불 의사 조사", "", "정체불명"]}).json()["added"]
+        assert [a["subtask_id"] for a in added] == ["S2", ""]
+        detail = c.get(f"/api/ideas/{iid}").json()
+        rid = next(r["id"] for r in detail["results"] if r["subtask_id"] == "?")
+        assert c.put(f"/api/ideas/{iid}/results/{rid}/subtask", json={"subtask_id": "S1"}).status_code == 200
+        assert c.put(f"/api/ideas/{iid}/results/{rid}/subtask", json={"subtask_id": "zz"}).status_code == 422
+        assert c.put(f"/api/ideas/{iid}/results/999/subtask", json={"subtask_id": "S1"}).status_code == 404
+        assert {r["subtask_id"] for r in c.get(f"/api/ideas/{iid}").json()["results"]} == {"S1", "S2"}
+        assert c.post(f"/api/ideas/{iid}/results", json={}).status_code == 422

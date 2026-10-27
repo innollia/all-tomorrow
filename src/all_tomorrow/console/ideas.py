@@ -24,6 +24,7 @@ full raw pastes stay in the database. A prompt.md in that directory replaces the
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -38,7 +39,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from all_tomorrow.console import ConsoleContext
+from all_tomorrow.console import ConsoleContext, ideas_jev, jev
 
 META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사업·프로젝트로 할 만한지 판단할 자료를 모으려 한다.
 지금 할 일은 조사 자체가 아니라, 조사를 나눠 맡길 **자기완결 하위 프롬프트**와 그 작업 경계를 만드는 것이다.
@@ -226,7 +227,8 @@ def paste_residue(raw: str) -> str:
 
 
 class IdeaStore:
-    def __init__(self, base: Path) -> None:
+    def __init__(self, base: Path, use_jev: bool = False) -> None:
+        self.use_jev = use_jev  # the web app turns Jev on; direct callers (tests, scripts) call nothing
         self.base = base.resolve()
         self.db_path = self.base / "ideas.sqlite"
         self.briefs = self.base / "briefs"
@@ -248,9 +250,15 @@ class IdeaStore:
                 # 자료봉's decomposition answer (analysis, uncertainties, task table), pasted back as-is.
                 db.execute("ALTER TABLE ideas ADD COLUMN plan TEXT NOT NULL DEFAULT ''")
                 db.execute("ALTER TABLE ideas ADD COLUMN plan_at TEXT NOT NULL DEFAULT ''")
+            if "assigned" not in {row["name"] for row in db.execute("PRAGMA table_info(results)")}:
+                # how the subtask was decided: "ID" (read from the block), "jev:0.93", "user"; "" = unsorted/unlabelled
+                db.execute("ALTER TABLE results ADD COLUMN assigned TEXT NOT NULL DEFAULT ''")
             # Every saved decomposition stays readable after it is replaced.
             db.execute("""CREATE TABLE IF NOT EXISTS plans (id INTEGER PRIMARY KEY, idea_id TEXT NOT NULL,
                 text TEXT NOT NULL, created_at TEXT NOT NULL)""")
+            if "paras" not in {row["name"] for row in db.execute("PRAGMA table_info(plans)")}:
+                # Jev's paragraph filter: [{text, p, keep}]; "[]" = not filtered (the raw text is still in `text`)
+                db.execute("ALTER TABLE plans ADD COLUMN paras TEXT NOT NULL DEFAULT '[]'")
 
     @contextmanager
     def db(self) -> Iterator[sqlite3.Connection]:
@@ -266,11 +274,14 @@ class IdeaStore:
         custom = self.base / "prompt.md"
         return custom.read_text(encoding="utf-8") if custom.exists() else META_PROMPT
 
+    def render_prompt(self, idea_id: str, title: str, text: str) -> str:
+        values = {"idea_id": idea_id, "title": title, "text": text.strip()}
+        return re.sub(r"\{(idea_id|title|text)\}", lambda m: values[m.group(1)], self.meta_prompt())
+
     def create(self, title: str, text: str) -> str:
         idea_id = "I-" + datetime.now().strftime("%y%m%d") + "-" + secrets.token_hex(2)
         title = title.strip() or text.strip().splitlines()[0][:60]
-        values = {"idea_id": idea_id, "title": title, "text": text.strip()}
-        prompt = re.sub(r"\{(idea_id|title|text)\}", lambda m: values[m.group(1)], self.meta_prompt())
+        prompt = self.render_prompt(idea_id, title, text)
         stamp = now()
         with self.db() as db:
             db.execute("INSERT INTO ideas (id, title, text, prompt, created_at, updated_at) VALUES (?,?,?,?,?,?)",
@@ -322,36 +333,97 @@ class IdeaStore:
         for r in results:  # newest first: the first of each subtask is current, the rest were replaced
             decoded.append({**dict(r), "claims": json.loads(r["claims"]), "latest": r["subtask_id"] not in seen})
             seen.add(r["subtask_id"])
-        return {**dict(idea), "results": decoded, "pastes": [dict(p) for p in pastes], "plans": [dict(p) for p in plans]}
+        plan_list = [{**dict(p), "paras": json.loads(p["paras"])} for p in plans]
+        return {**dict(idea), "results": decoded, "pastes": [dict(p) for p in pastes], "plans": plan_list,
+                "plan_paras": plan_list[0]["paras"] if plan_list and plan_list[0]["text"] == idea["plan"] else [],
+                "tasks": ideas_jev.plan_tasks(idea["plan"])}
 
     def add_results(self, idea_id: str, raw: str) -> list[dict[str, Any]]:
-        parsed = parse_results(raw)
-        if not parsed:
+        return self.add_slots(idea_id, [raw])
+
+    def add_slots(self, idea_id: str, raws: list[str]) -> list[dict[str, Any]]:
+        """Save pasted slots (one paste each). Blocks whose task is certain from their own ID labels are
+        taken as they are; the rest are put to Jev together with the task list of the saved decomposition."""
+        entries: list[tuple[str, dict[str, Any], str]] = []  # (raw, parsed block, how the subtask was decided)
+        for raw in raws:
+            if not raw.strip():
+                continue
+            framed = bool(BLOCK.search(normalize(raw)))
+            for p in parse_results(raw):
+                if not framed and not TASK_ID.search(p["body"]):
+                    p = {**p, "loose": p["subtask_id"], "subtask_id": ""}  # a stray "S3" in free text is no label
+                entries.append((raw, p, "ID" if p["subtask_id"] else ""))
+        if not entries:
             raise ValueError("붙여넣은 내용이 비어 있다")
-        wrong = sorted({p["idea_id"] for p in parsed if p["idea_id"] and p["idea_id"] != idea_id})
+        wrong = sorted({p["idea_id"] for _, p, _ in entries if p["idea_id"] and p["idea_id"] != idea_id})
         if wrong:
             raise ValueError(f"다른 아이디어의 결과다: {', '.join(wrong)} (이 화면은 {idea_id})")
+        pending = [n for n, (_, _, how) in enumerate(entries) if not how]
+        picked = None  # Jev's answers; None = Jev not used or failed, then the old loose reading stands
+        if pending and self.use_jev:
+            tasks = ideas_jev.plan_tasks((self.get(idea_id) or {}).get("plan", ""))
+            try:
+                if tasks:
+                    picked = ideas_jev.classify_bodies(tasks, [entries[n][1]["body"] for n in pending])
+            except jev.JevError:
+                picked = None
+        for k, n in enumerate(pending):
+            raw, p, _ = entries[n]
+            if picked is not None:
+                hit = picked[k]
+                title = p["subtask_title"] or (tasks[hit[0]]["title"] if hit else "")
+                entries[n] = (raw, {**p, "subtask_id": hit[0] if hit else "", "subtask_title": title},
+                              f"jev:{hit[1]:.2f}" if hit else "")
+            elif p.get("loose"):
+                entries[n] = (raw, {**p, "subtask_id": p["loose"]}, "")
         stamp = now()
         with self.db() as db:
-            paste_id = db.execute("INSERT INTO pastes (idea_id, raw, created_at) VALUES (?,?,?)",
-                                  (idea_id, raw, stamp)).lastrowid
-            for p in parsed:
+            paste_ids: dict[str, int] = {}
+            for raw, p, how in entries:
+                if raw not in paste_ids:
+                    paste_ids[raw] = db.execute("INSERT INTO pastes (idea_id, raw, created_at) VALUES (?,?,?)",
+                                                (idea_id, raw, stamp)).lastrowid
                 db.execute("""INSERT INTO results (idea_id, paste_id, subtask_id, subtask_title, body, created_at,
-                              status, claims) VALUES (?,?,?,?,?,?,?,?)""",
-                           (idea_id, paste_id, p["subtask_id"] or "?", p["subtask_title"], p["body"], stamp,
-                            p["status"], json.dumps(p["claims"], ensure_ascii=False)))
+                              status, claims, assigned) VALUES (?,?,?,?,?,?,?,?,?)""",
+                           (idea_id, paste_ids[raw], p["subtask_id"] or "?", p["subtask_title"], p["body"], stamp,
+                            p["status"], json.dumps(p["claims"], ensure_ascii=False), how))
             db.execute("UPDATE ideas SET updated_at = ? WHERE id = ?", (stamp, idea_id))
         self.write_brief(idea_id)
-        return parsed
+        return [{**p, "assigned": how} for _, p, how in entries]
+
+    def assign_result(self, idea_id: str, result_id: int, subtask_id: str) -> bool:
+        """The user picks the task of a result (typically one Jev left unsorted)."""
+        sid = subtask_id.strip().upper()
+        if not re.fullmatch(r"S\d{1,2}|\?", sid):
+            raise ValueError("과제 ID는 S1, S2 … 형식이다")
+        tasks = ideas_jev.plan_tasks((self.get(idea_id) or {}).get("plan", ""))
+        with self.db() as db:
+            row = db.execute("SELECT subtask_title FROM results WHERE id = ? AND idea_id = ?", (result_id, idea_id)).fetchone()
+            if row is None:
+                return False
+            title = row["subtask_title"] or (tasks.get(sid, {}).get("title", "") if sid != "?" else "")
+            db.execute("UPDATE results SET subtask_id = ?, subtask_title = ?, assigned = ? WHERE id = ?",
+                       (sid, title, "user" if sid != "?" else "", result_id))
+            db.execute("UPDATE ideas SET updated_at = ? WHERE id = ?", (now(), idea_id))
+        self.write_brief(idea_id)
+        return True
 
     def set_plan(self, idea_id: str, text: str) -> None:
         if looks_like_results(text):
             raise ValueError("자료봉 결과 블록이다. 과제 쪼개기 칸이 아니라 '결과 붙여넣기'에 넣는다")
+        paras: list[dict[str, Any]] = []
+        if self.use_jev and text.strip():
+            idea = self.get(idea_id) or {}
+            try:  # Jev failing leaves the plan unfiltered, as before
+                paras = ideas_jev.judge_paragraphs(idea.get("title", ""), idea.get("text", ""), text.strip())
+            except jev.JevError:
+                paras = []
         stamp = now()
         with self.db() as db:
             db.execute("UPDATE ideas SET plan = ?, plan_at = ?, updated_at = ? WHERE id = ?",
                        (text.strip(), stamp, stamp, idea_id))
-            db.execute("INSERT INTO plans (idea_id, text, created_at) VALUES (?,?,?)", (idea_id, text.strip(), stamp))
+            db.execute("INSERT INTO plans (idea_id, text, created_at, paras) VALUES (?,?,?,?)",
+                       (idea_id, text.strip(), stamp, json.dumps(paras, ensure_ascii=False)))
         self.write_brief(idea_id)
 
     def delete_idea(self, idea_id: str) -> None:
@@ -386,7 +458,8 @@ class IdeaStore:
                  f"- 결과: 하위과제 {len([s for s in latest if s != '?'])}개 · 붙여넣기 {len(idea['pastes'])}회",
                  "", "## 원문", "", idea["text"], "",
                  "## 자료봉 과제 쪼개기 (분석·불확실성·과제 표)", "",
-                 *([f"_{idea['plan_at']}_", "", idea["plan"]] if idea["plan"] else ["아직 붙여넣지 않음."]), "",
+                 *([f"_{idea['plan_at']}_", "", ideas_jev.render_plan(idea["plan"], idea["plan_paras"])]
+                   if idea["plan"] else ["아직 붙여넣지 않음."]), "",
                  "## 정리본 (하위과제별 최신 결과)", ""]
         if not order:
             lines += ["아직 결과 없음.", ""]
@@ -446,11 +519,16 @@ class PlanRequest(BaseModel):
 
 
 class PasteRequest(BaseModel):
-    text: str = Field(min_length=1, max_length=500_000)
+    text: str = Field(default="", max_length=500_000)
+    slots: list[str] = Field(default_factory=list, max_length=20)  # one pasted result per slot, any order
+
+
+class AssignRequest(BaseModel):
+    subtask_id: str = Field(max_length=8)
 
 
 def build_router(ctx: ConsoleContext) -> APIRouter:
-    store = IdeaStore(ctx.feature_dir("ideas"))
+    store = IdeaStore(ctx.feature_dir("ideas"), use_jev=True)
     router = APIRouter(prefix="/api/ideas")
 
     def found(idea_id: str) -> dict[str, Any]:
@@ -477,7 +555,7 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
     async def plan(idea_id: str, body: PlanRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
         found(idea_id)
         try:
-            store.set_plan(idea_id, body.text)
+            await asyncio.to_thread(store.set_plan, idea_id, body.text)
         except ValueError as error:
             raise HTTPException(422, str(error)) from error
         return {"ok": True}
@@ -496,10 +574,20 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
     async def results(idea_id: str, body: PasteRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
         found(idea_id)
         try:
-            parsed = store.add_results(idea_id, body.text)
+            parsed = await asyncio.to_thread(store.add_slots, idea_id, [*body.slots, *([body.text] if body.text.strip() else [])])
         except ValueError as error:
             raise HTTPException(422, str(error)) from error
         return {"added": [{"subtask_id": p["subtask_id"], "subtask_title": p["subtask_title"], "status": p["status"],
-                           "claims": len(p["claims"])} for p in parsed]}
+                           "claims": len(p["claims"]),
+                           "assigned": p["assigned"]} for p in parsed]}
+
+    @router.put("/{idea_id}/results/{result_id}/subtask")
+    async def assign(idea_id: str, result_id: int, body: AssignRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        try:
+            if not store.assign_result(idea_id, result_id, body.subtask_id):
+                raise HTTPException(404, "no such result")
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        return {"ok": True}
 
     return router
