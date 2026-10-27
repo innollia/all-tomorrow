@@ -36,6 +36,8 @@
 
 이식(843abc2)이 저장 위치를 `.artifacts/idea-factory.sqlite`에서 `.artifacts/console/factory/idea-factory.sqlite`로 바꾸면서 기존 데이터를 옮기지 않아, 콘솔 통제면·기획안·직원이 빈 DB(2026-10-20 생성)를 보였다. 옛 DB(주제 9·아이디어 45·기획안 1·직원 6·이벤트 343)를 sqlite backup으로 새 위치에 복사했다. 빈 DB는 같은 폴더에 `*.empty-20261025`로, 옛 DB는 원래 자리에 그대로 둔다.
 
+**DBOS DB는 옮기지 않기로 했다 (2026-10-27 확인).** 현재 코드는 `idea-factory-dbos.sqlite`를 저장소 DB 옆(`dbos_url()`, 기본 `.artifacts/console/factory/`)에서 찾고, 환경변수 `IDEA_FACTORY_DBOS_URL`이 있으면 그것을 쓴다. 새 위치에는 아직 dbos 파일이 없다(DBOS는 공장을 실제로 돌릴 때 만든다). 옛 `.artifacts/idea-factory-dbos.sqlite`의 workflow 9개는 SUCCESS 7·CANCELLED 2이고 PENDING(진행 중)은 0이라, 복구가 이어받을 일이 없다. 모두 2026-10-19 개발 중 실행분이며 결과는 이미 복사한 `idea-factory.sqlite`에 들어 있다. 그래서 복사하지 않고 옛 파일은 그대로 둔다. 과거 실행 기록(실행 저널)이 필요해지면 그 파일을 새 폴더로 복사하면 된다. 콘솔 API 재시작은 필요 없었다.
+
 ## 1. 완료된 상태
 
 사용자가 웹에서 주제 하나를 던지면 다음이 무인으로 일어난다.

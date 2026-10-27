@@ -364,7 +364,7 @@
       "id": "snowday",
       "name": "Caddy + Snow Day",
       "host_id": "all-tomorrow-node",
-      "description": "Snow Day ?? ?",
+      "description": "Snow Day 웹 서비스. 소스: 로컬 C:/projects/snowday-orig, 개인 비공개 저장소 github.com/innollia/snowday(remote personal). 배포는 zip으로 all-tomorrow-node에 올린다",
       "project": "Snow Day",
       "execution": "systemd",
       "ports": [
