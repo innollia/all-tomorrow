@@ -105,6 +105,13 @@ async def serve(component: str, base: Path):
                         research = await asyncio.to_thread(idle_research.tick, base, idle)
                         if research in {"started", "finished", "failed"}:
                             log.info("유휴 조사: %s", research)
+                        # 압축·종합은 몇 초짜리라, 도는 동안은 5초마다 확인해 끝나면 바로 다음 것을 잇는다.
+                        for _ in range(11):
+                            if research not in {"compress", "synth", "finished"} and not await asyncio.to_thread(
+                                    idle_research.short_job_active):
+                                break
+                            await asyncio.sleep(5)
+                            research = await asyncio.to_thread(idle_research.tick, base, idle)
                     except Exception as error:   # 조사 실패가 아래 Work 실행을 막지 않게 한다
                         log.warning("유휴 조사 점검 실패: %s: %s", type(error).__name__, str(error)[:200])
                     if not paused and idle is not None and idle >= 300:

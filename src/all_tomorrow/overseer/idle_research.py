@@ -30,6 +30,8 @@ PAGES = "pages"            # 조사 중 크롬으로 읽은 로그인 페이지 
 COMPRESS_RETRY = 1800      # 압축·종합이 실패하면 30분 뒤 다시, 같은 입력으로 3번 실패하면 그만둔다
 COMPRESS_TRIES = 3
 RETRY_AFTER = 6 * 3600
+# 압축·종합은 웹도 MCP도 쓰지 않고 글만 줄인다. 사용자 설정의 xhigh 추론이면 하나에 2~3분, medium이면 10초 안팎(2026-10-27 실측).
+SHORT_EFFORT = "medium"
 PROMPT = """너는 All Tomorrow의 유휴 조사 담당이다. 사용자가 정해 둔 주제를 웹 검색으로 조사해 한국어 보고서 하나로 답한다.
 사용자는 지금 자리에 없다. 묻지 말고 끝까지 조사한다.
 
@@ -218,6 +220,17 @@ def next_synth(folder: Path, runs: list[dict], now: float) -> dict | None:
     return None
 
 
+def short_job_args() -> list[str]:
+    """압축·종합용 Codex 인자: 모든 MCP를 끄고 추론을 낮춘다."""
+    from all_tomorrow.adapters import chrome_pages
+    return [*chrome_pages.research_mcp_args(keep=frozenset()), "-c", f'model_reasoning_effort="{SHORT_EFFORT}"']
+
+
+def short_job_active(folder: Path | None = None) -> bool:
+    """압축이나 종합이 도는 중인가. 실행기는 그동안 1분이 아니라 몇 초마다 확인해 끝나면 바로 다음 것을 잇는다."""
+    return any(r.get("status") == "RUNNING" and r.get("kind") in ("compress", "synth") for r in load_runs(folder or research_dir()))
+
+
 def _start_synth(folder: Path, job: dict, runs: list[dict], now: float, start: Callable[..., dict], cfg: dict) -> str:
     from all_tomorrow.adapters import chrome_pages
     from all_tomorrow.console import ideas_followup
@@ -231,7 +244,7 @@ def _start_synth(folder: Path, job: dict, runs: list[dict], now: float, start: C
     try:
         meta = start("all-tomorrow", "codex", ideas_followup.synth_prompt(idea, job),
                      worker_options={"timeout_seconds": min(cfg["timeout"], 900)},
-                     argv_suffix=chrome_pages.research_mcp_args())
+                     argv_suffix=short_job_args())
     except Exception as error:
         run.update(status="FAILED", error=type(error).__name__ + ": " + str(error)[:200], finished=now)
         runs.append(run)
@@ -262,7 +275,7 @@ def _start_compress(folder: Path, item: dict, runs: list[dict], now: float, star
     try:
         meta = start("all-tomorrow", "codex", ideas_followup.compress_prompt(idea, material),
                      worker_options={"timeout_seconds": min(cfg["timeout"], 900)},
-                     argv_suffix=chrome_pages.research_mcp_args())
+                     argv_suffix=short_job_args())
     except Exception as error:
         run.update(status="FAILED", error=type(error).__name__ + ": " + str(error)[:200], finished=now)
         runs.append(run)

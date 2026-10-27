@@ -263,7 +263,7 @@ RESEARCH_MCP_KEEP = {"node_repl", "chrome_pages"}
 CODEX_CONFIG = Path.home() / ".codex" / "config.toml"
 
 
-def research_mcp_args(config: Path | None = None) -> list[str]:
+def research_mcp_args(config: Path | None = None, keep: frozenset[str] | set[str] = RESEARCH_MCP_KEEP) -> list[str]:
     import tomllib
     try:
         servers = tomllib.loads((config or CODEX_CONFIG).read_text(encoding="utf-8")).get("mcp_servers", {})
@@ -271,7 +271,7 @@ def research_mcp_args(config: Path | None = None) -> list[str]:
         return []
     args: list[str] = []
     for name in servers:
-        if name not in RESEARCH_MCP_KEEP and re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        if name not in keep and re.fullmatch(r"[A-Za-z0-9_-]+", name):
             args += ["-c", f"mcp_servers.{name}.enabled=false"]
     return args
 
