@@ -6,7 +6,9 @@
   실패 뒤 6시간이 지났거나, '지금 돌리기'를 눌렀으면 차례다. 반복 주제는 지난 결과를 들려 보내 바뀐 것 위주로 쓰게 한다.
 - 조건: PC 미사용 10분 이상('지금 돌리기'는 무시), Codex 사용량 창이 모두 80% 미만, 하루 8회, research.paused 없음.
 - Codex는 웹 검색을 켜고(-c web_search="live") 그 주제의 프로젝트 폴더에서 돈다. 파일은 고치지 않게 한다.
-- 자유 자료는 원문을 보관만 하고, 저장되면 압축 작업(kind=compress)을 먼저 띄운다(PC 사용 여부·하루 횟수와 무관, 웹 검색 없음).
+- 자유 자료와 하위 과제 결과는 원문을 보관만 하고, 저장되면 압축 작업(kind=compress)을 먼저 띄운다(PC 사용 여부·하루 횟수와 무관, 웹 검색 없음).
+- 압축할 것이 없으면 종합 작업(kind=synth): 아이디어 하나의 종합본(정리본의 본문)을 이전 종합본 + 새 압축본으로 다시 만든다.
+  원문은 넣지 않는다. 압축과 같은 조건·같은 Codex read-only 경로다.
 - 결과는 results/<실행 id>.md로 남기고, 끝날 때 보고 1건을 낸다.
 - 아이디어에 연결된 주제(idea_id, 아이디어 화면의 '추가 조사')는 돌릴 때 아이디어 맥락을 붙이고, 끝나면 결과를 그 아이디어의 자유 자료로 넣는다.
 """
@@ -24,7 +26,7 @@ from all_tomorrow.console.research import RESULTS, load_runs, load_topics, resea
 log = logging.getLogger(__name__)
 
 PAUSE = "research.paused"
-COMPRESS_RETRY = 1800      # 압축이 실패한 자료는 30분 뒤 다시, 3번 실패하면 그만둔다
+COMPRESS_RETRY = 1800      # 압축·종합이 실패하면 30분 뒤 다시, 같은 입력으로 3번 실패하면 그만둔다
 COMPRESS_TRIES = 3
 RETRY_AFTER = 6 * 3600
 PROMPT = """너는 All Tomorrow의 유휴 조사 담당이다. 사용자가 정해 둔 주제를 웹 검색으로 조사해 한국어 보고서 하나로 답한다.
@@ -136,18 +138,63 @@ def _file_material(folder: Path, run: dict, output: str) -> str:
         return " (아이디어 자료로 넣기는 실패했습니다)"
 
 
+def _run_item(run: dict) -> str:
+    """압축 실행이 맡은 것: "M<id>"(자유 자료) 또는 "R<id>"(하위 과제 결과). 예전 실행은 material_id만 있다."""
+    return run.get("item") or f"M{run.get('material_id')}"
+
+
+def _blocked(mine: list[dict], now: float) -> bool:
+    failed = [r for r in mine if r.get("status") != "SUCCESS"]
+    return len(failed) >= COMPRESS_TRIES or bool(failed and now - failed[-1]["started"] < COMPRESS_RETRY)
+
+
 def next_compress(folder: Path, runs: list[dict], now: float) -> dict | None:
-    """압축을 기다리는 자료 하나(오래된 것부터). 방금 실패한 것·세 번 실패한 것은 건너뛴다."""
+    """압축을 기다리는 것 하나(오래된 것부터). 방금 실패한 것·세 번 실패한 것은 건너뛴다."""
     from all_tomorrow.console.ideas import IdeaStore
     if not (folder.parent / "ideas" / "ideas.sqlite").is_file():
         return None
     for item in IdeaStore(folder.parent / "ideas").pending_summaries():
-        mine = [r for r in runs if r.get("kind") == "compress" and r.get("material_id") == item["id"]]
-        failed = [r for r in mine if r.get("status") != "SUCCESS"]
-        if len(failed) >= COMPRESS_TRIES or (failed and now - failed[-1]["started"] < COMPRESS_RETRY):
-            continue
-        return item
+        if not _blocked([r for r in runs if r.get("kind") == "compress" and _run_item(r) == item["key"]], now):
+            return item
     return None
+
+
+def next_synth(folder: Path, runs: list[dict], now: float) -> dict | None:
+    """종합이 밀린 아이디어 하나의 일감(IdeaStore.synth_job). 같은 입력으로 방금·세 번 실패한 것은 건너뛴다."""
+    from all_tomorrow.console.ideas import IdeaStore
+    if not (folder.parent / "ideas" / "ideas.sqlite").is_file():
+        return None
+    store = IdeaStore(folder.parent / "ideas")
+    for idea_id in store.pending_syntheses():
+        job = store.synth_job(idea_id)
+        if job and not _blocked([r for r in runs if r.get("kind") == "synth" and r.get("idea_id") == idea_id
+                                 and r.get("sigs") == job["sigs"]], now):
+            return job
+    return None
+
+
+def _start_synth(folder: Path, job: dict, runs: list[dict], now: float, start: Callable[..., dict], cfg: dict) -> str:
+    from all_tomorrow.console import ideas_followup
+    from all_tomorrow.console.ideas import IdeaStore
+    idea = IdeaStore(folder.parent / "ideas").get(job["idea_id"])
+    if idea is None:
+        return "none"
+    run = {"id": "RS-" + time.strftime("%y%m%d-%H%M%S", time.localtime(now)), "kind": "synth", "idea_id": job["idea_id"],
+           "sigs": job["sigs"], "incremental": bool(job["previous"]), "title": "종합: " + idea["title"][:40],
+           "project_id": "all-tomorrow", "started": now, "status": "RUNNING"}
+    try:
+        meta = start("all-tomorrow", "codex", ideas_followup.synth_prompt(idea, job),
+                     worker_options={"timeout_seconds": min(cfg["timeout"], 900), "sandbox": "read-only"})
+    except Exception as error:
+        run.update(status="FAILED", error=type(error).__name__ + ": " + str(error)[:200], finished=now)
+        runs.append(run)
+        save_runs(folder, runs)
+        return "failed"
+    run["run_id"] = meta["run_id"]
+    runs.append(run)
+    save_runs(folder, runs)
+    log.info("아이디어 종합 시작: %s (%s)", idea["title"][:30], meta["run_id"])
+    return "synth"
 
 
 def _start_compress(folder: Path, item: dict, runs: list[dict], now: float, start: Callable[..., dict], cfg: dict) -> str:
@@ -156,12 +203,14 @@ def _start_compress(folder: Path, item: dict, runs: list[dict], now: float, star
     from all_tomorrow.console import ideas_followup
     from all_tomorrow.console.ideas import IdeaStore
     store = IdeaStore(folder.parent / "ideas")
-    idea, material = store.get(item["idea_id"]), store.material(item["id"])
+    idea, material = store.get(item["idea_id"]), store.item(item["key"])
     if idea is None or material is None:
         return "none"
-    run = {"id": "RC-" + time.strftime("%y%m%d-%H%M%S", time.localtime(now)) + f"-{item['id']}", "kind": "compress",
-           "idea_id": item["idea_id"], "material_id": item["id"], "title": "압축: " + item["title"][:40],
+    run = {"id": "RC-" + time.strftime("%y%m%d-%H%M%S", time.localtime(now)) + f"-{item['key']}", "kind": "compress",
+           "idea_id": item["idea_id"], "item": item["key"], "title": "압축: " + item["title"][:40],
            "project_id": "all-tomorrow", "started": now, "status": "RUNNING"}
+    if item["key"].startswith("M"):
+        run["material_id"] = item["id"]
     try:
         meta = start("all-tomorrow", "codex", ideas_followup.compress_prompt(idea, material),
                      worker_options={"timeout_seconds": min(cfg["timeout"], 900), "sandbox": "read-only"})
@@ -173,7 +222,7 @@ def _start_compress(folder: Path, item: dict, runs: list[dict], now: float, star
     run["run_id"] = meta["run_id"]
     runs.append(run)
     save_runs(folder, runs)
-    log.info("자료 압축 시작: %s (%s)", item["title"][:30], meta["run_id"])
+    log.info("압축 시작: %s %s (%s)", item["key"], item["title"][:30], meta["run_id"])
     return "compress"
 
 
@@ -182,8 +231,19 @@ def _finish_compress(folder: Path, run: dict, output: str | None) -> None:
     if not output:
         return
     try:
-        if not IdeaStore(folder.parent / "ideas").set_summary(run["material_id"], output):
+        if not IdeaStore(folder.parent / "ideas").set_summary(_run_item(run), output):
             run["status"], run["error"] = "FAILED", "자료가 없거나 압축본이 비었다"
+    except Exception as error:
+        run["status"], run["error"] = "FAILED", type(error).__name__
+
+
+def _finish_synth(folder: Path, run: dict, output: str | None) -> None:
+    from all_tomorrow.console.ideas import IdeaStore
+    if not output:
+        return
+    try:
+        if not IdeaStore(folder.parent / "ideas").set_synthesis(run["idea_id"], output, run["sigs"]):
+            run["status"], run["error"] = "FAILED", "아이디어가 없거나 종합본이 비었다"
     except Exception as error:
         run["status"], run["error"] = "FAILED", type(error).__name__
 
@@ -196,8 +256,11 @@ def _finish(folder: Path, run: dict, info: dict, base: Path) -> None:
     output = payload.get("output") if status == "SUCCESS" else None
     run["status"] = status if output else ("FAILED" if status == "SUCCESS" else status)
     run["finished"] = time.time()
-    if run.get("kind") == "compress":   # 결과 파일·보고 없이 압축본만 아이디어에 넣는다
-        _finish_compress(folder, run, output)
+    if run.get("kind") in ("compress", "synth"):   # 결과 파일·보고 없이 압축본·종합본만 아이디어에 넣는다
+        if run["kind"] == "compress":
+            _finish_compress(folder, run, output)
+        else:
+            _finish_synth(folder, run, output)
         if run["status"] != "SUCCESS":
             run.setdefault("error", str((result.get("error") or info.get("stderr_tail") or status))[:300])
         return
@@ -241,12 +304,18 @@ def tick(base: Path, idle: float | None, *, now: float | None = None,
     if (base / PAUSE).exists():
         return "paused"
     cfg = settings()
-    job = next_compress(folder, runs, now)     # 짧은 일이라 PC가 쉬는지·하루 횟수와 상관없이 주제보다 먼저
+    # 압축·종합은 짧은 일이라 PC가 쉬는지·하루 횟수와 상관없이 주제보다 먼저. 종합은 압축할 것이 없을 때만.
+    job = next_compress(folder, runs, now)
     if job and quota_ok(base, cfg["max_percent"], now)[0]:
         started = _start_compress(folder, job, runs, now, start, cfg)
         if started != "none":
             return started
-    if len([r for r in runs if now - r["started"] < 86400 and r.get("kind") != "compress"]) >= cfg["daily"]:
+    synth = None if job else next_synth(folder, runs, now)
+    if synth and quota_ok(base, cfg["max_percent"], now)[0]:
+        started = _start_synth(folder, synth, runs, now, start, cfg)
+        if started != "none":
+            return started
+    if len([r for r in runs if now - r["started"] < 86400 and r.get("kind") not in ("compress", "synth")]) >= cfg["daily"]:
         return "budget"
     idle_ok = idle is not None and idle >= cfg["idle_seconds"]
     topic = next((t for t in load_topics(folder) if due(t, runs, now, idle_ok)), None)

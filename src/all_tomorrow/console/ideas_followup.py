@@ -1,10 +1,12 @@
 """아이디어 '추가 조사': 사용자가 대충 쓴 짧은 요청을 그 아이디어의 맥락과 함께 완전한 조사 요청으로 만든다.
 
-모델을 따로 부르지 않는다. 맥락(원문, 과제와 결과 요지, 자유 자료, 이미 답이 나온 것과 빈 곳)을 붙이고,
+모델을 따로 부르지 않는다. 맥락(원문, 과제 현황, 종합본 — 없으면 압축본)을 붙이고,
 "짧은 요청을 이 아이디어 맥락에서 풀고, 푼 조사 질문을 결과 맨 위에 적어라"를 조사하는 쪽(자료봉 GPT 또는 Codex)에게 맡긴다.
 
 - mode "paste": 자료봉(GPT)에 붙일 글. 결과는 사용자가 '자료 넣기'로 되붙인다.
 - mode "codex": 조사 목록의 Codex 실행기가 쓰는 글. 결과는 실행기가 자유 자료로 넣는다(overseer.idle_research).
+
+압축(compress_prompt)과 종합(synth_prompt)도 여기서 만든다. 어느 쪽에도 결과·자료 원문은 압축할 그 하나 말고는 들어가지 않는다.
 """
 from __future__ import annotations
 
@@ -15,8 +17,6 @@ from all_tomorrow.console import ideas_jev
 
 LABEL = "Codex 추가 조사"
 MAX_CONTEXT = 14_000
-SECTION = re.compile(r"^#{1,6}\s*결론[^\n]*\n(.*?)(?=^#{1,6}\s|\Z)", re.S | re.M)
-MISSING = re.compile(r"^#{1,6}\s*빠진 것[^\n]*\n(.*?)(?=^#{1,6}\s|\Z)", re.S | re.M)
 
 RULES = {
     "codex": """- 사용자는 지금 자리에 없다. 되묻지 말고 가장 그럴듯한 해석으로 끝까지 조사한다.
@@ -59,46 +59,39 @@ def _clip(text: str, n: int) -> str:
     return text if len(text) <= n else text[:n].rstrip() + "…"
 
 
-def conclusion(body: str, n: int = 320) -> str:
-    m = SECTION.search(body)
-    return _clip(m.group(1) if m else body, n)
-
-
-def gaps(body: str, n: int = 200) -> str:
-    m = MISSING.search(body)
-    return _clip(m.group(1), n) if m else ""
-
-
-def build_context(idea: dict[str, Any]) -> str:
-    """원문, 쪼개기 과제별 현황(답이 나온 것/빈 곳), 자유 자료. 길면 끝을 줄인다."""
+def build_context(idea: dict[str, Any], synth: bool = True) -> str:
+    """원문, 쪼개기 과제별 현황, 그리고 종합본. 종합본이 아직 없으면 압축본(결과·자유 자료).
+    결과 본문·자료 원문은 넣지 않는다. 길면 끝을 줄인다. synth=False는 종합을 새로 만들 때(종합본은 따로 붙는다)."""
     latest: dict[str, dict[str, Any]] = {}
     for r in idea["results"]:                      # 최신이 앞이므로 처음 나온 것이 현재 결과
         latest.setdefault(r["subtask_id"], r)
     tasks = idea.get("tasks") or ideas_jev.plan_tasks(idea.get("plan", ""))
-    answered, open_, extra = [], [], []
+    status = []
     for sid in sorted({*tasks, *latest}, key=lambda s: (s == "?", int(s[1:]) if s[1:].isdigit() else 999)):
         title = (tasks.get(sid, {}).get("title") or (latest.get(sid) or {}).get("subtask_title") or "").strip()
         r = latest.get(sid)
         if r is None:
-            open_.append(f"- {sid} {title}: 아직 결과 없음")
-        elif r["status"] == "완료":
-            answered.append(f"- {sid} {title} [완료, 주장 {len(r['claims'])}개]: {conclusion(r['body'])}")
+            status.append(f"- {sid} {title}: 아직 결과 없음")
         else:
-            why = gaps(r["body"])
-            line = f"- {sid} {title} [{r['status'] or '상태 표시 없음'}]: {conclusion(r['body'], 200)}"
-            (open_ if sid != "?" else extra).append(line + (f" / 빠진 것: {why}" if why else ""))
+            status.append(f"- {sid} {title} [R{r['id']} · {r['status'] or '상태 표시 없음'} · 주장 {len(r['claims'])}개]")
     parts = [f"제목: {idea['title']} ({idea['id']})", "", "### 원문", _clip(idea["text"], 3000)]
     if idea.get("plan") and not tasks:
         parts += ["", "### 과제 쪼개기 요지", _clip(idea["plan"], 1500)]
-    parts += ["", "### 이미 답이 나온 것", *(answered or ["- 아직 없음"]),
-              "", "### 빈 곳·불완전한 것", *(open_ or ["- (쪼개기 과제 중 비어 있는 것 없음)"]), *extra]
-    mats = idea["materials"]
-    if mats:
-        parts += ["", "### 사용자가 직접 모은 자유 자료 (오래된 순)"]
-        for m in reversed(mats):
-            note = f" ({_clip(m['note'], 100)})" if m["note"] else ""
-            # 원문은 읽히지 않는다. 압축본만, 아직이면 제목·출처 한 줄만.
-            parts.append(f"- {m['title'][:60]} · {m['label'][:50]}{note}: " + (_clip(m["summary"], 700) if m["summary"] else "(압축 대기)"))
+    parts += ["", "### 과제 현황", *(status or ["- 아직 과제·결과 없음"])]
+    if synth and idea.get("synth"):
+        parts += ["", "### 지금까지의 종합 (R=하위 과제 결과, M=자유 자료)", idea["synth"]]
+    elif synth:
+        # 종합 전: 압축본만, 아직이면 제목 한 줄만. 원문은 읽히지 않는다.
+        answered = [f"- R{r['id']} {sid}: " + (_clip(r["summary"], 700) if r["summary"] else "(압축 대기)")
+                    for sid, r in latest.items()]
+        if answered:
+            parts += ["", "### 하위 과제 결과 (압축본)", *answered]
+        if idea["materials"]:
+            parts += ["", "### 사용자가 직접 모은 자유 자료 (오래된 순, 압축본)"]
+            for m in reversed(idea["materials"]):
+                note = f" ({_clip(m['note'], 100)})" if m["note"] else ""
+                parts.append(f"- M{m['id']} {m['title'][:60]} · {m['label'][:50]}{note}: "
+                             + (_clip(m["summary"], 700) if m["summary"] else "(압축 대기)"))
     text = "\n".join(parts)
     return text if len(text) <= MAX_CONTEXT else text[:MAX_CONTEXT].rstrip() + "\n…(맥락이 길어 여기서 줄임)"
 
@@ -119,7 +112,8 @@ def material_item(request: str, output: str, run_id: str) -> dict[str, Any]:
             "body": output.strip(), "note": f"요청 원문: {_clip(request, 300)} · 실행 {run_id}"}
 
 
-COMPRESS = """너는 사업 아이디어 조사 자료를 압축하는 담당이다. 아래 [새 자료]는 사용자가 직접 조사해 모은 원문이다.
+COMPRESS = """너는 사업 아이디어 조사 자료를 압축하는 담당이다. 아래 [새 자료]는 이 아이디어에 대해 조사된 원문이다
+(자료봉 하위 과제 결과이거나 사용자가 직접 모은 자료).
 이 원문은 보관만 하고, 이후 관제와 다른 모델은 네가 쓴 압축본만 읽는다. 압축본이 틀리거나 부풀면 이후 판단이 전부 틀어진다.
 
 ## 규칙
@@ -130,6 +124,8 @@ COMPRESS = """너는 사업 아이디어 조사 자료를 압축하는 담당이
 - [이미 아는 것]과 겹치는 내용은 "이미 앎" 한 줄로 줄이고, 새 항목으로 풀어 쓰지 않는다.
 
 ## 형식 (이 제목 그대로)
+## 과제의 답
+(하위 과제 결과일 때만: 그 과제 질문에 대한 답 1~2줄과 확신도 높음/중간/낮음. 자유 자료면 "해당 없음")
 ## 새로 더해진 것
 (이 아이디어에 새로 들어온 사실·숫자·주장. 불릿, 항목마다 출처)
 ## 이미 앎
@@ -155,9 +151,12 @@ COMPRESS_INPUT = 100_000
 
 
 def compress_prompt(idea: dict[str, Any], material: dict[str, Any]) -> str:
-    """보관된 원문 하나를 압축하라는 Codex 요청. 그 아이디어의 지금 정리본(압축본들)을 '이미 아는 것'으로 붙인다.
-    자기 자신은 맥락에서 뺀다."""
-    others = {**idea, "materials": [m for m in idea["materials"] if m["id"] != material["id"]]}
+    """보관된 원문 하나(자유 자료 또는 하위 과제 결과, IdeaStore.item 모양)를 압축하라는 Codex 요청.
+    그 아이디어의 지금 종합본(없으면 압축본들)을 '이미 아는 것'으로 붙인다. 자기 자신은 맥락에서 뺀다."""
+    if material.get("kind") == "result":
+        others = {**idea, "results": [r for r in idea["results"] if r["id"] != material["id"]]}
+    else:
+        others = {**idea, "materials": [m for m in idea["materials"] if m["id"] != material["id"]]}
     body = material["body"].strip()
     cut = ""
     if len(body) > COMPRESS_INPUT:
@@ -166,3 +165,54 @@ def compress_prompt(idea: dict[str, Any], material: dict[str, Any]) -> str:
     limit = min(COMPRESS_LIMIT, max(300, len(material["body"].strip()) // 5))
     return COMPRESS.format(limit=limit, context=build_context(others), title=material["title"], label=material["label"],
                            note=f" ({material['note']})" if material["note"] else "", size=len(material["body"]), cut=cut, body=body)
+
+
+SYNTH = """너는 사업 아이디어 조사를 정리하는 담당이다. 새로 조사하지 않는다. 이미 조사된 것을 아이디어 하나의 짧은 종합본으로 묶는다.
+관제와 다른 모델은 이 종합본만 읽는다. 원문은 보관만 한다. 종합본이 틀리거나 부풀면 이후 판단이 전부 틀어진다.
+
+## 규칙
+- 웹 검색을 하지 않는다. 파일을 읽거나 고치지 않는다. 아래 글만 보고 답한다. 없는 것을 지어내지 않는다.
+- 종합본만 답한다. 인사·설명 없이 아래 형식으로만 쓴다. 전체 {limit}자 이하. 넘치면 덜 중요한 주장부터 뺀다.
+- 출처는 입력의 id로 적는다: R<번호>=하위 과제 결과, M<번호>=자유 자료. 예: [R3, M2]. URL은 꼭 필요한 한두 개만.
+- 서로 다른 입력에서 같은 주장은 한 줄로 합치고 id를 모두 단다. 같은 말을 두 번 쓰지 않는다.
+- 숫자·고유명사·날짜는 입력 그대로 옮긴다. 확인된 것과 추정을 구분한다.
+{mode}
+
+## 형식 (이 제목 그대로, 이 순서)
+## 한 줄 결론
+## 질문별 답
+(과제마다 한 줄: "- S1 과제 제목: 답 · 확신도 높음/중간/낮음 · [R…]". 결과가 없는 과제는 "아직 결과 없음")
+## 주장
+(합친 주장 목록. "- 주장 [R1, R4, M2]". 추정이면 끝에 (추정))
+## 어긋나는 주장
+(입력끼리 부딪치는 것과 각각의 id. 없으면 "없음")
+## 빈 곳
+(아직 모르는 것)
+## 다음에 조사할 것
+(가장 값진 것부터 3~5개)
+## 우리에게 주는 뜻
+(1~3줄)
+
+[아이디어]
+{context}
+{previous}
+[{new_label}]
+{new}
+"""
+SYNTH_LIMIT = 3000
+
+
+def synth_prompt(idea: dict[str, Any], job: dict[str, Any]) -> str:
+    """종합본을 만들라는 Codex 요청(IdeaStore.synth_job). 이전 종합본이 있으면 그것과 새 압축본만, 없으면 압축본 전부.
+    결과 본문·자료 원문은 넣지 않는다."""
+    new = "\n\n".join(f"### {i['label']}\n{i['summary']}" for i in job["new"])
+    if job["previous"]:
+        mode = ("- [이전 종합본]을 바탕으로 [새 압축본]을 더해 고쳐 쓴다. 새 압축본이 이전 종합과 겹치면 id만 덧붙이고, "
+                "부딪치면 어긋나는 주장에 올린다. 이전 종합본의 내용은 근거 없이 지우지 않는다.")
+        previous = f"\n[이전 종합본]\n{job['previous']}\n"
+        label = "새 압축본"
+    else:
+        mode = "- 아래 [압축본]이 이 아이디어에 대해 조사된 것 전부다."
+        previous, label = "", "압축본"
+    return SYNTH.format(limit=SYNTH_LIMIT, mode=mode, context=build_context(idea, synth=False),
+                        previous=previous, new_label=label, new=new)

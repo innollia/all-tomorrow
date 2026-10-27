@@ -18,7 +18,7 @@ the user runs each one in its own 자료봉 session → pastes every result back
 
 자료봉 cannot see this PC and its sessions cannot talk to each other, so every sub-prompt carries
 the whole idea and ends with a fixed result block (idea ID + subtask ID) that `parse_results`
-reads. No model is called here: the brief is a deterministic grouping of the pasted results.
+reads. No model is called while pasting: originals are stored, and the brief is built from short versions only.
 
 Free material: the user may also research on their own, with no prompt and no subtasks, and throw the outcome
 in as pasted text (chat logs, notes, article bodies), links (a bare URL is enough; the page text is fetched) or
@@ -29,11 +29,17 @@ sorting failed. Every material keeps its source (kind, link or file name, when i
 and the overseer summary next to the systematic results. Filled 자료봉 result blocks pasted this way go through
 the old result path.
 
-State for the overseer: ctx.feature_dir("ideas") holds ideas.sqlite (original pastes and
-parsed results) and briefs/<idea id>.md, rewritten on every change. The brief holds every result
-body exactly once (latest per subtask, then replaced ones); raw pastes appear there only as what the
-parser did not keep (block headers, text outside blocks), since their bodies are already above. The
-full raw pastes stay in the database. A prompt.md in that directory replaces the built-in meta-prompt.
+State for the overseer: ctx.feature_dir("ideas") holds ideas.sqlite (original pastes, parsed results, materials)
+and two files per idea, rewritten on every change:
+- briefs/<idea id>.md: the brief, a short synthesis (target 10KB, hard cap BRIEF_MAX bytes). It is what the overseer
+  and every model read: task table, the synthesis Codex made from compressed versions (one-line conclusion, answer and
+  confidence per task, merged claims with result ids, conflicts, gaps, next research, what it means for us) and a
+  one-line list of every result and material.
+- raw/<idea id>.md: the originals (result bodies, replaced results, decompositions, material bodies, paste residue),
+  kept for people only. Nothing feeds it to a model.
+Compression and synthesis run in overseer.idle_research (Codex, read-only): each long result or material is
+compressed once (`summary`), then the synthesis is rebuilt from the previous synthesis plus the new compressed
+versions; originals are never fed in again. A prompt.md in that directory replaces the built-in meta-prompt.
 """
 from __future__ import annotations
 
@@ -148,6 +154,8 @@ META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사�
 
 SHORT = 300         # a material this short is its own summary
 SUMMARY_MAX = 1800  # hard cap on a compressed summary (the prompt asks for 1500 or 1/5 of the original)
+SYNTH_MAX = 4500    # hard cap on a synthesis in characters (the prompt asks for 3000; Korean is ~3 bytes a character)
+BRIEF_MAX = 15_000  # hard cap on the brief file in bytes
 
 BLOCK = re.compile(r"=+\s*자료봉\s*결과\s*=+(.*?)(?:=+\s*끝\s*=+?|(?==+\s*자료봉\s*결과)|\Z)", re.S)
 IDEA_ID = re.compile(r"I-\d{6}-[0-9a-f]{4}", re.I)
@@ -243,6 +251,19 @@ def paste_residue(raw: str) -> str:
     return "\n".join(p.strip() for p in parts if re.search(r"\w", p))
 
 
+def one_line(synth: str, n: int = 200) -> str:
+    """The "한 줄 결론" of a synthesis, for list lines."""
+    m = re.search(r"^#{1,6}\s*한 줄 결론[^\n]*\n(.*?)(?=^#{1,6}\s|\Z)", synth, re.S | re.M)
+    text = re.sub(r"\s+", " ", m.group(1) if m else "").strip()
+    return text if len(text) <= n else text[:n].rstrip() + "…"
+
+
+def fit_bytes(text: str, limit: int) -> str:
+    """Cut `text` to at most `limit` UTF-8 bytes on a character boundary."""
+    data = text.encode("utf-8")
+    return text if len(data) <= limit else data[:max(0, limit)].decode("utf-8", "ignore").rstrip()
+
+
 def idea_head(item: dict[str, Any]) -> str:
     """Text of a new idea candidate: the title and the start of the material that opened it."""
     return (item["title"] + "\n" + item["body"][:600]).strip()
@@ -255,6 +276,8 @@ class IdeaStore:
         self.db_path = self.base / "ideas.sqlite"
         self.briefs = self.base / "briefs"
         self.briefs.mkdir(parents=True, exist_ok=True)
+        self.raws = self.base / "raw"
+        self.raws.mkdir(exist_ok=True)
         with self.db() as db:
             db.executescript("""
               CREATE TABLE IF NOT EXISTS ideas (id TEXT PRIMARY KEY, title TEXT NOT NULL, text TEXT NOT NULL,
@@ -288,6 +311,15 @@ class IdeaStore:
                 # read `summary` alone (made by Codex, see overseer.idle_research). "" = not compressed yet.
                 db.execute("ALTER TABLE materials ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
                 db.execute("ALTER TABLE materials ADD COLUMN summary_at TEXT NOT NULL DEFAULT ''")
+            if "summary" not in {row["name"] for row in db.execute("PRAGMA table_info(results)")}:
+                # like materials: `body` is kept, the synthesis reads `summary` ("" = waiting for Codex)
+                db.execute("ALTER TABLE results ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
+                db.execute("ALTER TABLE results ADD COLUMN summary_at TEXT NOT NULL DEFAULT ''")
+            if "synth" not in {row["name"] for row in db.execute("PRAGMA table_info(ideas)")}:
+                # the synthesis and the input signatures folded into it; see synth_job
+                db.execute("ALTER TABLE ideas ADD COLUMN synth TEXT NOT NULL DEFAULT ''")
+                db.execute("ALTER TABLE ideas ADD COLUMN synth_at TEXT NOT NULL DEFAULT ''")
+                db.execute("ALTER TABLE ideas ADD COLUMN synth_keys TEXT NOT NULL DEFAULT '[]'")
             # Every saved decomposition stays readable after it is replaced.
             db.execute("""CREATE TABLE IF NOT EXISTS plans (id INTEGER PRIMARY KEY, idea_id TEXT NOT NULL,
                 text TEXT NOT NULL, created_at TEXT NOT NULL)""")
@@ -331,8 +363,10 @@ class IdeaStore:
                 "SELECT id, title, created_at, updated_at, plan_at, candidate FROM ideas ORDER BY updated_at DESC")]
             rows = db.execute("SELECT idea_id, subtask_id, status FROM results ORDER BY id DESC").fetchall()
             free = {r["idea_id"]: r["n"] for r in db.execute("SELECT idea_id, COUNT(*) AS n FROM materials GROUP BY idea_id")}
-            waiting = {r["idea_id"]: r["n"] for r in db.execute(
-                "SELECT idea_id, COUNT(*) AS n FROM materials WHERE summary = '' GROUP BY idea_id")}
+            synth = {r["id"]: r["synth_at"] for r in db.execute("SELECT id, synth_at FROM ideas")}
+        waiting: dict[str, int] = {}
+        for item in self.pending_summaries():
+            waiting[item["idea_id"]] = waiting.get(item["idea_id"], 0) + 1
         latest: dict[str, dict[str, str]] = {}
         totals: dict[str, int] = {}
         for r in rows:
@@ -343,6 +377,7 @@ class IdeaStore:
             idea["results"] = totals.get(idea["id"], 0)
             idea["materials"] = free.get(idea["id"], 0)
             idea["pending"] = waiting.get(idea["id"], 0)
+            idea["synth_at"] = synth.get(idea["id"], "")
             idea["candidate"] = bool(idea["candidate"])
             idea["subtasks"] = len(per)
             idea["status_counts"] = {s: sum(v == s for v in per.values()) for s in (*STATUSES, "")}
@@ -358,7 +393,9 @@ class IdeaStore:
             c = i["status_counts"]
             lines.append(f"- {i['id']} {i['title']}{' [새 아이디어 후보]' if i['candidate'] else ''} · 과제 {i['subtasks']} (완료 {c['완료']}/불완전 {c['불완전']}/실패 {c['실패']}"
                          f"{'/상태없음 ' + str(c['']) if c[''] else ''}) · 자유 자료 {i['materials']}건{' (압축 대기 ' + str(i['pending']) + '건)' if i['pending'] else ''} · 쪼개기 {'있음' if i['plan_at'] else '없음'}"
-                         f" · 갱신 {i['updated_at'][:16]} · 정리본 {self.briefs / (i['id'] + '.md')}")
+                         f" · 종합 {i['synth_at'][:16] or '아직'} · 갱신 {i['updated_at'][:16]} · 정리본 {self.briefs / (i['id'] + '.md')}")
+            if i["synth_at"] and (head := one_line((self.get(i["id"]) or {}).get("synth", ""))):
+                lines.append(f"  결론: {head}")
         return "\n".join(lines) or f"최근 {days}일 아이디어 조사 없음"
 
     def get(self, idea_id: str) -> dict[str, Any] | None:
@@ -376,7 +413,8 @@ class IdeaStore:
             decoded.append({**dict(r), "claims": json.loads(r["claims"]), "latest": r["subtask_id"] not in seen})
             seen.add(r["subtask_id"])
         plan_list = [{**dict(p), "paras": json.loads(p["paras"])} for p in plans]
-        return {**dict(idea), "candidate": bool(idea["candidate"]), "materials": [dict(m) for m in materials],
+        return {**dict(idea), "candidate": bool(idea["candidate"]), "synth_keys": json.loads(idea["synth_keys"]),
+                "materials": [dict(m) for m in materials],
                 "results": decoded, "pastes": [dict(p) for p in pastes], "plans": plan_list,
                 "plan_paras": plan_list[0]["paras"] if plan_list and plan_list[0]["text"] == idea["plan"] else [],
                 "tasks": ideas_jev.plan_tasks(idea["plan"])}
@@ -423,10 +461,11 @@ class IdeaStore:
                 if raw not in paste_ids:
                     paste_ids[raw] = db.execute("INSERT INTO pastes (idea_id, raw, created_at) VALUES (?,?,?)",
                                                 (idea_id, raw, stamp)).lastrowid
+                short = p["body"] if len(p["body"]) <= SHORT else ""   # like a material: a short one is its own summary
                 db.execute("""INSERT INTO results (idea_id, paste_id, subtask_id, subtask_title, body, created_at,
-                              status, claims, assigned) VALUES (?,?,?,?,?,?,?,?,?)""",
+                              status, claims, assigned, summary, summary_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                            (idea_id, paste_ids[raw], p["subtask_id"] or "?", p["subtask_title"], p["body"], stamp,
-                            p["status"], json.dumps(p["claims"], ensure_ascii=False), how))
+                            p["status"], json.dumps(p["claims"], ensure_ascii=False), how, short, stamp if short else ""))
             db.execute("UPDATE ideas SET updated_at = ? WHERE id = ?", (stamp, idea_id))
         self.write_brief(idea_id)
         return [{**p, "assigned": how} for _, p, how in entries]
@@ -526,25 +565,112 @@ class IdeaStore:
         return mid
 
     def pending_summaries(self) -> list[dict[str, Any]]:
-        """Materials still waiting for compression, oldest first."""
+        """Items still waiting for compression, oldest first: materials and the current result of each task
+        (a replaced result is never compressed). key = "M<id>" or "R<id>"."""
         with self.db() as db:
-            return [dict(r) for r in db.execute("SELECT id, idea_id, title FROM materials WHERE summary = '' ORDER BY id")]
+            mats = [{**dict(r), "key": f"M{r['id']}", "kind": "material"} for r in db.execute(
+                "SELECT id, idea_id, title, created_at FROM materials WHERE summary = ''")]
+            rows = db.execute("SELECT id, idea_id, subtask_id, subtask_title, summary, created_at FROM results ORDER BY id DESC").fetchall()
+        seen: set[tuple[str, str]] = set()
+        results = []
+        for r in rows:
+            if (r["idea_id"], r["subtask_id"]) in seen:
+                continue
+            seen.add((r["idea_id"], r["subtask_id"]))
+            if not r["summary"]:
+                results.append({"id": r["id"], "idea_id": r["idea_id"], "created_at": r["created_at"], "key": f"R{r['id']}",
+                                "kind": "result", "title": f"{r['subtask_id']} {r['subtask_title']}".strip()})
+        return sorted(mats + results, key=lambda i: (i["created_at"], i["key"]))
+
+    def item(self, key: str | int) -> dict[str, Any] | None:
+        """A material or result in one shape for compression: id, key, kind, idea_id, title, label, note, body."""
+        key = f"M{key}" if isinstance(key, int) else key
+        if key.startswith("M"):
+            found = self.material(int(key[1:]))
+            return {**found, "key": key, "kind": "material"} if found else None
+        with self.db() as db:
+            r = db.execute("SELECT * FROM results WHERE id = ?", (int(key[1:]),)).fetchone()
+        if r is None:
+            return None
+        return {"id": r["id"], "key": key, "kind": "result", "idea_id": r["idea_id"], "body": r["body"],
+                "title": f"{r['subtask_id']} {r['subtask_title']}".strip(), "note": f"상태 {r['status'] or '표시 없음'}",
+                "label": f"자료봉 하위 과제 결과 {key}"}
 
     def material(self, material_id: int) -> dict[str, Any] | None:
         with self.db() as db:
             row = db.execute("SELECT * FROM materials WHERE id = ?", (material_id,)).fetchone()
         return dict(row) if row else None
 
-    def set_summary(self, material_id: int, summary: str) -> bool:
+    def set_summary(self, key: str | int, summary: str) -> bool:
+        """Store the compressed version of a material (id or "M<id>") or a result ("R<id>")."""
+        key = f"M{key}" if isinstance(key, int) else key
+        table = "materials" if key.startswith("M") else "results"
         summary = summary.strip()
         if len(summary) > SUMMARY_MAX:
             summary = summary[:SUMMARY_MAX].rstrip() + "…"
         with self.db() as db:
-            row = db.execute("SELECT idea_id FROM materials WHERE id = ?", (material_id,)).fetchone()
+            row = db.execute(f"SELECT idea_id FROM {table} WHERE id = ?", (int(key[1:]),)).fetchone()
             if row is None or not summary:
                 return False
-            db.execute("UPDATE materials SET summary = ?, summary_at = ? WHERE id = ?", (summary, now(), material_id))
+            db.execute(f"UPDATE {table} SET summary = ?, summary_at = ? WHERE id = ?", (summary, now(), int(key[1:])))
         self.write_brief(row["idea_id"])
+        return True
+
+    # --- synthesis -----------------------------------------------------------------------------------
+
+    @staticmethod
+    def synth_inputs(idea: dict[str, Any]) -> list[dict[str, Any]]:
+        """Compressed versions the synthesis is made of: the current result of each task and every material.
+        `sig` changes whenever an input would read differently (new summary, other task)."""
+        out = []
+        for r in reversed(idea["results"]):
+            if r["latest"] and r["summary"]:
+                title = r["subtask_title"] or ("형식 밖 결과" if r["subtask_id"] == "?" else "")
+                out.append({"key": f"R{r['id']}", "sig": f"R{r['id']}:{r['subtask_id']}@{r['summary_at']}", "summary": r["summary"],
+                            "label": f"R{r['id']} · 과제 {r['subtask_id']} {title} · 상태 {r['status'] or '표시 없음'}"})
+        for m in reversed(idea["materials"]):
+            if m["summary"]:
+                out.append({"key": f"M{m['id']}", "sig": f"M{m['id']}:{m['task_id']}@{m['summary_at']}", "summary": m["summary"],
+                            "label": f"M{m['id']} · 자유 자료{' · 과제 ' + m['task_id'] if m['task_id'] else ''} · {m['title'][:60]} · {m['label'][:60]}"})
+        return out
+
+    def synth_job(self, idea_id: str) -> dict[str, Any] | None:
+        """What a new synthesis needs, or None when it is current. Incremental (previous synthesis + only the new
+        compressed versions) while every folded input is still there; otherwise rebuilt from all compressed versions.
+        Originals are never part of it."""
+        idea = self.get(idea_id)
+        if idea is None:
+            return None
+        inputs = self.synth_inputs(idea)
+        sigs = [i["sig"] for i in inputs]
+        folded = set(idea["synth_keys"])
+        if set(sigs) == folded:
+            return None
+        if not inputs:   # everything it was made of is gone
+            with self.db() as db:
+                db.execute("UPDATE ideas SET synth = '', synth_at = '', synth_keys = '[]' WHERE id = ?", (idea_id,))
+            self.write_brief(idea_id)
+            return None
+        incremental = bool(idea["synth"]) and folded <= set(sigs)
+        return {"idea_id": idea_id, "sigs": sigs, "previous": idea["synth"] if incremental else "",
+                "new": [i for i in inputs if i["sig"] not in folded] if incremental else inputs}
+
+    def pending_syntheses(self) -> list[str]:
+        """Ideas whose synthesis is behind their compressed versions, least recently changed first."""
+        with self.db() as db:
+            ids = [r["id"] for r in db.execute("SELECT id FROM ideas ORDER BY updated_at")]
+        return [i for i in ids if self.synth_job(i)]
+
+    def set_synthesis(self, idea_id: str, text: str, sigs: list[str]) -> bool:
+        text = text.strip()
+        if len(text) > SYNTH_MAX:
+            text = text[:SYNTH_MAX].rstrip() + "\n…(종합본이 길어 여기서 줄임)"
+        with self.db() as db:
+            if not text or not db.execute("SELECT 1 FROM ideas WHERE id = ?", (idea_id,)).fetchone():
+                return False
+            db.execute("UPDATE ideas SET synth = ?, synth_at = ?, synth_keys = ? WHERE id = ?",
+                       (text, now(), json.dumps(sigs, ensure_ascii=False), idea_id))
+        self.write_brief(idea_id)
         return True
 
     def move_material(self, idea_id: str, material_id: int, to_id: str) -> bool:
@@ -643,6 +769,7 @@ class IdeaStore:
             for table, column in (("results", "idea_id"), ("pastes", "idea_id"), ("plans", "idea_id"), ("materials", "idea_id"), ("ideas", "id")):
                 db.execute(f"DELETE FROM {table} WHERE {column} = ?", (idea_id,))
         (self.briefs / f"{idea_id}.md").unlink(missing_ok=True)
+        (self.raws / f"{idea_id}.md").unlink(missing_ok=True)
 
     def delete_result(self, idea_id: str, result_id: int) -> bool:
         """Drop one result; its raw paste goes too once no result from that paste is left."""
@@ -658,6 +785,69 @@ class IdeaStore:
         return True
 
     def brief(self, idea_id: str) -> str:
+        """The short brief every reader gets (overseer, follow-up prompts, Codex). Never holds an original."""
+        idea = self.get(idea_id)
+        if idea is None:
+            return ""
+        latest: dict[str, dict[str, Any]] = {}
+        for r in idea["results"]:  # newest first, so the first per subtask wins
+            latest.setdefault(r["subtask_id"], r)
+        tasks = idea["tasks"]
+        order = sorted({*tasks, *latest}, key=lambda s: (s == "?", int(s[1:]) if s[1:].isdigit() else 999, s))
+        inputs = self.synth_inputs(idea)
+        waiting = sum(1 for p in self.pending_summaries() if p["idea_id"] == idea_id)
+        behind = {i["sig"] for i in inputs} != set(idea["synth_keys"])
+        state = (f"종합 {idea['synth_at'][:16]}" if idea["synth"] else "종합 아직 없음") + (
+            f" · 압축 대기 {waiting}건" if waiting else "") + (" · 새 자료 반영 대기" if idea["synth"] and behind else "")
+        text = idea["text"].strip()
+        head = [f"# {idea['title']} ({idea['id']})", "",
+                f"- 만든 때 {idea['created_at'][:16]} · 마지막 변경 {idea['updated_at'][:16]} · {state}",
+                f"- 결과: 하위과제 {len([s for s in latest if s != '?'])}개 · 붙여넣기 {len(idea['pastes'])}회 · 자유 자료 {len(idea['materials'])}건",
+                *(["- 상태: 새 아이디어 후보 (자유 자료에서 만들어짐, 아직 확정 안 함)"] if idea["candidate"] else []),
+                f"- 원문(결과 본문·자유 자료 원문·쪼개기·붙여넣기)은 읽지 않는다. 사람이 볼 때만: {self.raws / (idea_id + '.md')}, 콘솔 화면",
+                "", "## 아이디어", "", text if len(text) <= 1200 else text[:1200].rstrip() + " …(원문은 원문 모음에)", "",
+                "## 과제", ""]
+        if not order:
+            head += ["아직 과제도 결과도 없음.", ""]
+        else:
+            head += ["| 과제 | 상태 | 주장 | 출처 없음 | 추정 | 결과 |", "|---|---|---|---|---|---|"]
+            for sid in order:
+                r = latest.get(sid)
+                title = (r and r["subtask_title"]) or tasks.get(sid, {}).get("title", "") or ("형식 밖 결과" if sid == "?" else "")
+                if r is None:
+                    head.append(f"| {sid} {title} | 결과 없음 | | | | |")
+                    continue
+                claims = r["claims"]
+                head.append(f"| {sid} {title} | {r['status'] or '표시 없음'} | {len(claims)} | "
+                            f"{sum(not c['source'] for c in claims)} | {sum(c['kind'] == '추정' for c in claims)} | R{r['id']} |")
+            head.append("")
+        kinds = {"paste": "붙여넣기", "url": "링크", "file": "파일"}
+        tail = ["## 자료 목록 (출처 id · 원문은 원문 모음에)", ""]
+        for sid in order:
+            if r := latest.get(sid):
+                tail.append(f"- R{r['id']} · 과제 {sid} 결과 · {r['created_at'][:16]} · {'압축됨' if r['summary'] else '압축 대기'}")
+        for m in reversed(idea["materials"]):
+            where = f"과제 {m['task_id']}" if m["task_id"] else "자유 자료"
+            src = "링크 " + m["url"] if m["kind"] == "url" else f"{m['label'][:50]} ({kinds.get(m['kind'], m['kind'])})"
+            tail.append(f"- M{m['id']} · {where} · {m['title'][:60]} · {src} · 받은 때 {m['created_at'][:16]} · "
+                        f"{'압축됨' if m['summary'] else '압축 대기'}")
+        if len(tail) == 2:
+            tail.append("- 아직 없음")
+        if idea["synth"]:
+            body = ["## 종합", "", idea["synth"]]
+        else:   # until Codex makes the first synthesis: the compressed versions as they are, still no original
+            body = ["## 종합", "", "아직 종합 전이다. Codex가 압축본으로 곧 만든다. 그때까지 압축본을 그대로 둔다.", ""]
+            for i in inputs:
+                body += [f"### {i['label']}", "", i["summary"], ""]
+        head_text, tail_text = "\n".join(head) + "\n", "\n" + "\n".join(tail) + "\n"
+        room = BRIEF_MAX - len((head_text + tail_text).encode("utf-8")) - 200
+        body_text = "\n".join(body)
+        if len(body_text.encode("utf-8")) > room:
+            body_text = fit_bytes(body_text, room) + "\n…(정리본 상한에 걸려 여기서 줄임)"
+        return fit_bytes(head_text + body_text + "\n" + tail_text, BRIEF_MAX)
+
+    def raw(self, idea_id: str) -> str:
+        """Every original, for people: kept next to the brief, never handed to a model."""
         idea = self.get(idea_id)
         if idea is None:
             return ""
@@ -665,7 +855,8 @@ class IdeaStore:
         for r in idea["results"]:  # newest first, so the first per subtask wins
             latest.setdefault(r["subtask_id"], r)
         order = sorted(latest, key=lambda s: (s == "?", int(s[1:]) if s[1:].isdigit() else 999, s))
-        lines = [f"# {idea['title']} ({idea['id']})", "",
+        lines = [f"# 원문 모음: {idea['title']} ({idea['id']})", "",
+                 f"정리본(모델·관제가 읽는 것): {self.briefs / (idea_id + '.md')}", "",
                  f"- 만든 때: {idea['created_at']} · 마지막 변경: {idea['updated_at']}",
                  f"- 결과: 하위과제 {len([s for s in latest if s != '?'])}개 · 붙여넣기 {len(idea['pastes'])}회"
                  f" · 자유 자료 {len(idea['materials'])}건",
@@ -674,28 +865,21 @@ class IdeaStore:
                  "## 자료봉 과제 쪼개기 (분석·불확실성·과제 표)", "",
                  *([f"_{idea['plan_at']}_", "", ideas_jev.render_plan(idea["plan"], idea["plan_paras"])]
                    if idea["plan"] else ["아직 붙여넣지 않음."]), "",
-                 "## 정리본 (하위과제별 최신 결과)", ""]
+                 "## 하위과제별 최신 결과 (원문)", ""]
         if not order:
             lines += ["아직 결과 없음.", ""]
-        else:
-            lines += ["| 과제 | 상태 | 주장 | 출처 없음 | 추정 |", "|---|---|---|---|---|"]
-            for sid in order:
-                r = latest[sid]
-                claims = r["claims"]
-                lines.append(f"| {sid} {r['subtask_title']} | {r['status'] or '표시 없음'} | {len(claims)} | "
-                             f"{sum(not c['source'] for c in claims)} | {sum(c['kind'] == '추정' for c in claims)} |")
-            lines.append("")
+
         def heading(r: dict[str, Any]) -> str:
             title = r["subtask_title"] or ("형식 밖 결과" if r["subtask_id"] == "?" else "")
             return f"{r['subtask_id']} · {title}".rstrip(" ·")
 
         for sid in order:
             r = latest[sid]
-            lines += [f"### {heading(r)}", f"_{r['status'] or '상태 표시 없음'} · {r['created_at']}_", "", r["body"], ""]
+            lines += [f"### R{r['id']} · {heading(r)}", f"_{r['status'] or '상태 표시 없음'} · {r['created_at']}_", "", r["body"], ""]
         if idea["materials"]:
             tasks = idea["tasks"]
             kinds = {"paste": "붙여넣기", "url": "링크", "file": "파일"}
-            lines += ["## 자유 자료 (사용자가 프롬프트 없이 직접 조사해 넣은 것 · 오래된 순 · 압축본만, 원문은 콘솔에서)", "",
+            lines += ["## 자유 자료 (사용자가 프롬프트 없이 직접 조사해 넣은 것 · 오래된 순 · 원문)", "",
                       "| # | 출처 | 받은 때 | 과제 | 제목 |", "|---|---|---|---|---|"]
             for m in reversed(idea["materials"]):
                 where = f"{m['task_id']} {tasks.get(m['task_id'], {}).get('title', '')}".strip() if m["task_id"] else "자유 자료"
@@ -706,13 +890,13 @@ class IdeaStore:
                 where = f"{m['task_id']} ({m['assigned']})" if m["task_id"] else "과제 배정 없음 (자유 자료)"
                 src = {"paste": "붙여넣은 글", "url": "링크 " + m["url"], "file": "파일 " + m["label"]}.get(m["kind"], m["kind"])
                 extra = (" · " + m["note"] if m["note"] else "") + (" · 원본 " + m["file"] if m["file"] else "")
-                lines += [f"### 자료 {m['id']} · {m['title']}", f"_{src} · 받은 때 {m['created_at']} · {where}{extra}_", "",
-                          m["summary"] or f"(압축 대기 · 원문 {len(m['body'])}자는 콘솔에서 본다)", ""]
+                lines += [f"### M{m['id']} · {m['title']}", f"_{src} · 받은 때 {m['created_at']} · {where}{extra}_", "",
+                          m["body"], ""]
         replaced = [r for r in idea["results"] if not r["latest"]]
         if replaced:
             lines += ["## 덮어쓴 이전 결과 (최신 순)", ""]
             for r in replaced:
-                lines += [f"<details><summary>{heading(r)} · {r['status'] or '상태 표시 없음'} · {r['created_at']}</summary>",
+                lines += [f"<details><summary>R{r['id']} · {heading(r)} · {r['status'] or '상태 표시 없음'} · {r['created_at']}</summary>",
                           "", r["body"], "", "</details>", ""]
         bodies = {r["body"] for r in idea["results"]}
         if len(idea["plans"]) > 1:
@@ -732,11 +916,12 @@ class IdeaStore:
         return "\n".join(lines)
 
     def write_brief(self, idea_id: str) -> None:
-        text = self.brief(idea_id)
-        target = self.briefs / f"{idea_id}.md"
-        tmp = target.with_suffix(".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, target)
+        """Rewrite both files: the brief readers get and the originals kept beside it."""
+        for folder, text in ((self.briefs, self.brief(idea_id)), (self.raws, self.raw(idea_id))):
+            target = folder / f"{idea_id}.md"
+            tmp = target.with_suffix(".tmp")
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, target)
 
 
 class IdeaRequest(BaseModel):
@@ -817,6 +1002,7 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
     @router.get("/{idea_id}")
     async def idea(idea_id: str, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
         return {**found(idea_id), "brief": store.brief(idea_id), "brief_path": str(store.briefs / f"{idea_id}.md"),
+                "raw_path": str(store.raws / f"{idea_id}.md"),
                 "followups": research.followups(idea_id)}
 
     @router.post("/{idea_id}/followup/prompt")

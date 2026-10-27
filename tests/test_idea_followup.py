@@ -114,7 +114,14 @@ def test_followup_runs_in_codex_then_material_is_compressed(env) -> None:
     brief = store.brief(iid)
     assert "월 9달러부터" in brief and "원문표식ZZ" not in brief and "압축 대기" not in brief
     assert "압축 대기" not in store.recent_summary() and "원문표식ZZ" not in store.recent_summary()
-    assert tick(idle=None, now=NOW + 90) == "idle"                      # 더 할 일 없음
+    # 압축이 끝나면 종합: 압축본만 넣는다
+    assert tick(idle=None, now=NOW + 90) == "synth"
+    stask, skw = calls[2]
+    assert "월 9달러부터" in stask and "원문표식ZZ" not in stask and skw["worker_options"]["sandbox"] == "read-only"
+    results["run3"] = {"status": "SUCCESS", "result": {"payload": {"output": "## 한 줄 결론\n가격 9달러대가 기준이다 [M1]"}}}
+    assert tick(idle=None, now=NOW + 100) == "finished"
+    assert "가격 9달러대가 기준이다" in store.brief(iid) and "결론: 가격 9달러대" in store.recent_summary()
+    assert tick(idle=None, now=NOW + 110) == "idle"                     # 더 할 일 없음
 
 
 def test_compress_failure_retries_then_gives_up(env) -> None:

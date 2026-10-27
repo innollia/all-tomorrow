@@ -1,5 +1,5 @@
 "use strict";
-// Idea desk: 아이디어 원문 → 자료봉용 전체 프롬프트(복사) → 하위 결과 붙여넣기 → 결과 목록·관제용 정리본.
+// Idea desk: 아이디어 원문 → 자료봉용 전체 프롬프트(복사) → 하위 결과 붙여넣기 → 결과 목록·관제용 정리본(짧은 종합본).
 // API: /api/ideas/* (console/ideas.py). 자유 자료(intake)만 서버가 Jev로 아이디어·과제를 가른다.
 (() => {
   const { $, view, esc, api, toast, ago, list } = AT;
@@ -58,6 +58,7 @@
       <span class="small mute mono">${esc(i.id)} · 만든 날 ${day(i.created_at)}</span>
       ${i.candidate ? '<span class="pill" style="color:var(--warn)">후보</span>' : ""}<span class="pill">과제 ${i.subtasks}${i.plan_at ? "" : " · 쪼개기 없음"}</span>${i.materials ? `<span class="pill">자유 자료 ${i.materials}</span>` : ""}
       <span class="pill">완료 ${c["완료"]} · 불완전 ${c["불완전"]} · 실패 ${c["실패"]}${c[""] ? " · 상태없음 " + c[""] : ""}</span>
+      ${i.pending ? `<span class="pill" style="color:var(--warn)">압축 대기 ${i.pending}</span>` : ""}<span class="pill">${i.synth_at ? "종합 " + ago(i.synth_at) : "종합 전"}</span>
       <span class="small mute">결과 ${i.results}개 · 갱신 ${ago(i.updated_at)}</span></div>`;
     });
     return `<h1>아이디어 조사</h1>
@@ -92,8 +93,9 @@
       <div class="row"><b>${esc(r.subtask_id)}</b>${r.assigned ? `<span class="pill small" title="과제를 정한 방법">${esc(r.assigned === "ID" ? "ID로 확인" : r.assigned.startsWith("jev:") ? "Jev " + r.assigned.slice(4) : "직접 고름")}</span>` : ""}<span class="pill"${r.latest ? "" : ' style="opacity:.6"'}>${r.latest ? "최신" : "이전(덮어씀)"}</span><span style="flex:1">${esc(r.subtask_title || (r.subtask_id === "?" ? "형식 밖 결과" : ""))}</span>
         <span class="pill"${r.status && r.status !== "완료" ? ' style="color:var(--warn)"' : ""}>${esc(r.status || "상태 없음")}</span>
         <span class="small mute">주장 ${r.claims.length} · 출처 없음 ${r.claims.filter(c => !c.source).length}</span><span class="small mute">${ago(r.created_at)}</span>${assignSelect(r, i)}<button class="danger" data-idel-result="${r.id}">삭제</button></div>
-      ${r.claims.map(claim).join("")}
-      <details><summary>본문 ${r.body.length}자</summary><pre class="small" style="white-space:pre-wrap">${esc(r.body)}</pre></details></div>`);
+      ${r.latest ? (r.summary ? `<pre class="small" style="white-space:pre-wrap">${esc(r.summary)}</pre>` : '<div class="small mute">압축 대기 · 곧 Codex가 짧게 정리한다</div>') : ""}
+      <details><summary>주장 ${r.claims.length}개</summary>${r.claims.map(claim).join("")}</details>
+      <details><summary>원문 ${r.body.length.toLocaleString()}자 (보관용)</summary><pre class="small" style="white-space:pre-wrap">${esc(r.body)}</pre></details></div>`);
     const taskName = m => m.task_id ? `${esc(m.task_id)} ${esc((i.tasks[m.task_id] || {}).title || "")}` : "자유 자료";
     const kindName = { paste: "붙여넣기", url: "링크", file: "파일" };
     const mats = i.materials.map(m => `<div style="display:block"><div class="row" style="flex-wrap:wrap">
@@ -112,9 +114,14 @@
       const link = r && r.result_file ? ` · <a href="#/research-run/${encodeURIComponent(r.id)}">결과 보기</a>` : r && r.error ? ` · <span class="mute">${esc(r.error.slice(0, 60))}</span>` : "";
       return `<div style="display:block"><div class="small" style="white-space:pre-wrap">${esc(t.ask)}</div><div class="small mute">${state}${link} · ${ago(new Date((r ? r.started : t.created) * 1000))}${r && r.material_id ? " · 자유 자료로 들어감" : ""}</div></div>`;
     });
+    // 정리본의 본문: Codex가 압축본으로 만든 종합. 원문은 아래 자료·결과에서 펼쳐 본다.
+    const waiting = i.materials.filter(m => !m.summary).length + i.results.filter(r => r.latest && !r.summary).length;
+    const synthCard = `<div class="card" style="margin-bottom:16px"><div class="t">종합 ${i.synth_at ? `<span class="small mute">${ago(i.synth_at)}</span>` : ""}${waiting ? ` <span class="pill" style="color:var(--warn)">압축 대기 ${waiting}</span>` : ""}</div>
+      ${i.synth ? `<pre class="small" style="white-space:pre-wrap;margin-top:8px">${esc(i.synth)}</pre>` : '<div class="small mute" style="margin-top:8px">아직 종합 전. 결과·자료가 압축되면 Codex가 이 아이디어 하나의 짧은 종합본을 만든다.</div>'}</div>`;
     return `<div class="row" style="justify-content:space-between"><h1>${esc(i.title)}</h1><button class="danger" data-idel-idea="1" style="min-height:44px">삭제</button></div>
       <div class="sub mono">${esc(i.id)} · ${ago(i.created_at)} 생성</div>
       ${i.candidate ? `<div class="card" style="margin-bottom:12px"><span class="small">새 아이디어 후보. 맞으면 확정하고, 아니면 삭제한다.</span> <button data-iadopt="1" style="min-height:44px">아이디어로 확정</button></div>` : ""}
+      ${synthCard}
       ${intakeForm([], i.id)}
       <div class="card" style="margin-bottom:16px">
         <div class="t">추가 조사</div>
@@ -124,6 +131,7 @@
         ${fuLines.length ? `<div class="small mute" style="margin-top:8px">조사 이력</div>${list(fuLines)}` : ""}</div>
       <h2>자료 (${i.materials.length})</h2>${list(mats)}
       <div class="row" style="margin-top:12px;flex-wrap:wrap"><button class="primary" data-icopy="overseer" style="min-height:44px">관제에게 가져가기</button><button data-icopy="brief" style="min-height:44px">정리본 복사</button><span class="small mute mono">${esc(i.brief_path)}</span></div>
+      <div class="small mute mono" style="margin-top:4px">원문 모음: ${esc(i.raw_path)}</div>
       <details style="margin-top:20px"><summary style="min-height:44px"><b>자료봉 흐름</b> · 프롬프트 · 쪼개기 · 결과 붙여넣기 (결과 ${i.results.length})</summary>
       <h2>원문</h2><textarea rows="6" readonly style="font-size:16px">${esc(i.text)}</textarea>
       <h2>자료봉에게 줄 전체 프롬프트</h2>

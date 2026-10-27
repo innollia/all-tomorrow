@@ -60,10 +60,12 @@ def test_idea_desk_flow_prompt_paste_list_and_brief(tmp_path) -> None:
         detail = c.get(f"/api/ideas/{iid}").json()
         assert len(detail["pastes"]) == 2
         brief = detail["brief"]
-        current = brief.split("## 덮어쓴 이전 결과")[0]
+        raw = (tmp_path / "ideas" / "raw" / f"{iid}.md").read_text(encoding="utf-8")
+        assert detail["raw_path"].endswith(f"{iid}.md")
+        current = raw.split("## 덮어쓴 이전 결과")[0]
         assert "새 결과" in current and "옛 결과" not in current
-        assert brief.count("옛 결과") == 1  # replaced results stay, once
-        assert "| S1 기존 서비스 | 불완전 | 2 | 1 | 1 |" in brief
+        assert raw.count("옛 결과") == 1  # replaced results stay in the originals, once
+        assert "| S1 기존 서비스 | 불완전 | 2 | 1 | 1 |" in brief and "옛 결과" not in brief
         assert detail["results"][0]["claims"][0]["source"] == "https://example.com/a"
         assert c.get("/api/ideas/I-nope").status_code == 404
 
@@ -80,7 +82,8 @@ def test_plan_paste_and_deletes(tmp_path) -> None:
         assert c.put(f"/api/ideas/{iid}/plan", json={"text": "## 과제 표\n| S1 | 기존 서비스 | 독립 |"}).status_code == 200
         detail = c.get(f"/api/ideas/{iid}").json()
         assert detail["plan"].startswith("## 과제 표") and detail["plan_at"]
-        assert "| S1 | 기존 서비스 | 독립 |" in detail["brief"].split("## 정리본")[0]
+        raw = (tmp_path / "ideas" / "raw" / f"{iid}.md").read_text(encoding="utf-8")
+        assert "| S1 | 기존 서비스 | 독립 |" in raw.split("## 하위과제별")[0]
 
         c.post(f"/api/ideas/{iid}/results", json={"text": result(iid, "S1", "a", "첫째")})
         c.post(f"/api/ideas/{iid}/results", json={"text": result(iid, "S2", "b", "둘째")})
@@ -95,6 +98,7 @@ def test_plan_paste_and_deletes(tmp_path) -> None:
         assert c.get(f"/api/ideas/{iid}").status_code == 404
         assert c.get("/api/ideas").json() == []
     assert not (tmp_path / "ideas" / "briefs" / f"{iid}.md").exists()
+    assert not (tmp_path / "ideas" / "raw" / f"{iid}.md").exists()
 
 
 def test_history_status_counts_and_overseer_summary(tmp_path) -> None:
@@ -112,7 +116,7 @@ def test_history_status_counts_and_overseer_summary(tmp_path) -> None:
     assert [p["text"] for p in idea["plans"]] == ["둘째 쪼개기", "첫 쪼개기"]
     assert [(r["subtask_id"], r["status"], r["latest"]) for r in idea["results"]] == [
         ("S2", "불완전", True), ("S1", "완료", True), ("S1", "실패", False)]
-    assert "첫 쪼개기" in store.brief(iid)  # replaced decompositions stay in the brief
+    assert "첫 쪼개기" in store.raw(iid) and "첫 쪼개기" not in store.brief(iid)  # replaced decompositions stay in the originals
     listed = store.list()[0]
     assert listed["subtasks"] == 2 and listed["results"] == 3
     assert listed["status_counts"] == {"완료": 1, "불완전": 1, "실패": 0, "": 0}
@@ -183,7 +187,7 @@ def test_brief_holds_each_result_once_and_plan_box_refuses_results(tmp_path) -> 
     with store.db() as db:
         db.execute("INSERT INTO plans (idea_id, text, created_at) VALUES (?,?,?)", (iid, paste, "2026-10-25T01:18:23+00:00"))
     store.set_plan(iid, ".")
-    brief = store.brief(iid)
+    brief = store.raw(iid)
     for body in ("첫본문", "둘본문", "새본문"):
         assert brief.count(body) == 1, body
     assert "잘못 넣은 기록" in brief and "머리말 밖 메모" in brief and "하위과제 ID: S2" in brief
@@ -193,7 +197,7 @@ def test_brief_holds_each_result_once_and_plan_box_refuses_results(tmp_path) -> 
         store.set_plan(iid, paste)
     store.set_plan(iid, "## 과제 표\n" + META_PROMPT)  # a decomposition quoting the empty template is fine
     store.set_plan(iid, "")
-    assert store.get(iid)["plan"] == "" and "아직 붙여넣지 않음" in store.brief(iid)
+    assert store.get(iid)["plan"] == "" and "아직 붙여넣지 않음" in store.raw(iid)
 
 
 def test_plan_api_rejects_result_blocks(tmp_path) -> None:
@@ -303,7 +307,7 @@ def test_labelled_slots_never_call_jev_and_failure_keeps_old_behaviour(tmp_path,
     added = store.add_slots(iid, ["그냥 글. 과제 S2 이야기", "아무 글"])
     assert [(a["subtask_id"], a["assigned"]) for a in added] == [("S2", ""), ("", "")]  # old loose reading, else unsorted
     store.set_plan(iid, PLAN.replace("{iid}", iid) + "\n\n덧붙임 문단입니다. 이것은 충분히 긴 문단이다.")
-    assert store.get(iid)["plan_paras"] == [] and "접음" not in store.brief(iid)
+    assert store.get(iid)["plan_paras"] == [] and "접음" not in store.raw(iid)
 
 
 def test_jev_folds_researcher_chatter_in_plan_but_keeps_it(tmp_path, fake_jev) -> None:
@@ -321,7 +325,7 @@ def test_jev_folds_researcher_chatter_in_plan_but_keeps_it(tmp_path, fake_jev) -
     assert [p["text"] for p in idea["plan_paras"] if not p["keep"]] == [
         "정말 훌륭한 아이디어네요! 개인적으로 저는 이런 시장이 정말 흥미롭다고 생각하고, 응원합니다. 꼭 성공하시길 바라요."]
     assert "".join(p["text"] for p in idea["plan_paras"]).count("기존 표지 생성 서비스를 조사하라") == 1
-    brief = store.brief(iid)
+    brief = store.raw(iid)
     assert "<details><summary>접음" in brief and brief.count("응원합니다") == 1
     assert brief.index("접음") < brief.index("응원합니다")
     assert set(idea["tasks"]) == {"S1", "S2"} and idea["tasks"]["S2"]["title"] == "수요"
@@ -443,9 +447,11 @@ def test_intake_picks_idea_then_task_and_falls_back_to_candidate_or_free(tmp_pat
 
     detail = store.get(cover)
     assert [m["task_id"] for m in detail["materials"]] == ["S2", ""] or sorted(m["task_id"] for m in detail["materials"]) == ["", "S2"]
-    brief = store.brief(cover)
+    brief = store.raw(cover)
     assert "## 자유 자료" in brief and "지불 메모" in brief and "링크 https://x.example/p" in brief
     assert "S2 수요" in brief and "받은 때" in brief and "자유 자료 2건" in brief
+    brief = store.brief(cover)   # short materials are their own summaries, so they reach the brief too
+    assert "지불 메모" in brief and "링크 https://x.example/p" in brief and "과제 S2" in brief
     listed = {i["id"]: i for i in store.list()}
     assert listed[cover]["materials"] == 2 and listed[out[2]["idea_id"]]["candidate"] is True
     summary = store.recent_summary()
