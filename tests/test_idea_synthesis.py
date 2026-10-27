@@ -95,3 +95,17 @@ def test_tick_compresses_results_then_synthesizes_and_retries_failed_synthesis(e
     results["run3"] = ok("## 한 줄 결론\n작은 시장 [R1]")
     assert tick(idle=None, now=NOW + 2000) == "finished"
     assert store.get(iid)["synth"].startswith("## 한 줄 결론") and tick(idle=None, now=NOW + 2010) == "idle"
+
+
+def test_prompts_filter_the_researchers_opinions_and_never_ask_for_ours(tmp_path) -> None:
+    """조사 에이전트는 사실에 자기 평가·권고를 섞는다. 압축이 그걸 걸러 내고, 어느 지시문도 의견 칸을 두지 않는다."""
+    store = IdeaStore(tmp_path / "ideas")
+    iid = store.create("t", "본문")
+    store.add_results(iid, block(iid, "S1", LONG))
+    item = store.item(store.pending_summaries()[0]["key"])
+    compress = ideas_followup.compress_prompt(store.get(iid), item)
+    assert "검열" in compress and "## 뺀 의견" in compress
+    synth = ideas_followup.synth_prompt(store.get(iid), {"previous": "", "new": [], "sigs": []})
+    followup = ideas_followup.build_prompt(store.get(iid), "경쟁사 더", "codex")
+    for prompt in (compress, synth, followup):
+        assert "우리에게 주는 뜻" not in prompt and "다음에 조사할 것" not in prompt and "바뀌는 판단" not in prompt
