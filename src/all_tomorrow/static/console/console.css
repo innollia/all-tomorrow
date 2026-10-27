@@ -100,3 +100,4 @@ th{color:var(--mute);font-weight:400;font-size:12px;border-top:0}
 select{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;max-width:100%}
 @media (max-width:767px){.idea-two{grid-template-columns:1fr}}
 .idea-h{font-size:15px}
+.pill-btn{min-height:32px;padding:4px 10px;font-size:12px;background:transparent}.pill-btn:hover{background:rgba(255,200,0,.08)}

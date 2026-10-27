@@ -222,3 +222,37 @@ def test_failed_collection_report_is_not_filed_as_material(env) -> None:
     run = load_runs(folder)[0]
     assert run["status"] == "SUCCESS" and run["material_skipped"] == "collection_failed" and "material_id" not in run
     assert store.get(iid)["materials"] == []
+
+
+def test_compress_now_jumps_the_queue_even_while_research_runs(env) -> None:
+    """'지금 압축'을 누른 자료는 오래된 것보다 먼저, 긴 조사가 도는 중에도 바로 압축한다."""
+    from all_tomorrow.console.research import ResearchStore
+    base, folder, ideas_dir, calls, results, tick = env
+    store = IdeaStore(ideas_dir)
+    iid = store.create("a", "b")
+    ResearchStore(folder).create_followup(iid, "경쟁사 더")
+    assert tick(idle=None) == "started"                                  # 긴 조사가 돈다
+    old = store.add_material(iid, {"kind": "paste", "label": "붙여넣기", "url": "", "title": "옛 자료", "body": "옛것 " + RAW, "note": ""})
+    new = store.add_material(iid, {"kind": "paste", "label": "붙여넣기", "url": "", "title": "새 자료", "body": "새것표식 " + RAW, "note": ""})
+    assert tick(idle=None, now=NOW + 10) == "running"                    # 누르기 전에는 조사가 끝나기를 기다린다
+    keys = [p["key"] for p in store.pending_summaries()]
+    assert store.rush(keys[-1]) and not store.rush("M999")
+    assert tick(idle=None, now=NOW + 20) == "compress" and "새것표식" in calls[-1][0]
+    assert tick(idle=None, now=NOW + 30) == "running"                    # 압축 하나가 돌면 더 끼우지 않는다
+    results["run2"] = {"status": "SUCCESS", "result": {"payload": {"output": "## 새로 더해진 것\n- 새것"}}}
+    assert tick(idle=None, now=NOW + 40) == "finished"
+    assert store.item(keys[-1]) and [p["key"] for p in store.pending_summaries()] == keys[:-1]
+    assert tick(idle=None, now=NOW + 50) == "running"                    # 누르지 않은 옛 자료는 조사 뒤 차례
+    assert old and new
+
+
+def test_compress_now_api_shows_requested_then_running(tmp_path) -> None:
+    c = login(tmp_path)
+    iid = make_idea(c)
+    c.post("/api/ideas/intake", json={"text": "원문표식ZZ " + RAW, "idea_id": iid})
+    m = c.get(f"/api/ideas/{iid}").json()["materials"][0]
+    assert c.get(f"/api/ideas/{iid}").json()["compressing"] == {}
+    assert c.post(f"/api/ideas/{iid}/compress/M{m['id']}", json={}).json() == {"queued": f"M{m['id']}"}
+    assert c.get(f"/api/ideas/{iid}").json()["compressing"] == {f"M{m['id']}": "queued"}
+    assert c.post(f"/api/ideas/{iid}/compress/M99999", json={}).status_code == 404
+    assert c.post(f"/api/ideas/{iid}/compress/x", json={}).status_code == 404

@@ -60,7 +60,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from all_tomorrow.console import ConsoleContext, ideas_followup, ideas_intake, ideas_jev, jev
-from all_tomorrow.console.research import ResearchStore
+from all_tomorrow.console.research import ResearchStore, load_runs
 
 META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사업·프로젝트로 할 만한지 판단할 자료를 모으려 한다.
 지금 할 일은 조사 자체가 아니라, 조사를 나눠 맡길 **자기완결 하위 프롬프트**와 그 작업 경계를 만드는 것이다.
@@ -599,6 +599,26 @@ class IdeaStore:
                                 "kind": "result", "title": f"{r['subtask_id']} {r['subtask_title']}".strip()})
         return sorted(mats + results, key=lambda i: (i["created_at"], i["key"]))
 
+    def rush(self, key: str) -> bool:
+        """The user pressed '지금 압축': overseer.idle_research compresses this one next, even while a long research
+        run is going. Only the API writes rush.json; the executor reads it. False when it is not waiting."""
+        if key not in {p["key"] for p in self.pending_summaries()}:
+            return False
+        now_ = datetime.now(UTC).timestamp()
+        keep = {k: t for k, t in self.rushed().items() if now_ - t < 86400 and k != key}
+        path = self.base / "rush.json"
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({**keep, key: now_}), encoding="utf-8")
+        os.replace(tmp, path)
+        return True
+
+    def rushed(self) -> dict[str, float]:
+        """'지금 압축'을 누른 것: key → 누른 때(epoch)."""
+        try:
+            return {str(k): float(v) for k, v in json.loads((self.base / "rush.json").read_text(encoding="utf-8")).items()}
+        except (OSError, ValueError, AttributeError):
+            return {}
+
     def item(self, key: str | int) -> dict[str, Any] | None:
         """A material or result in one shape for compression: id, key, kind, idea_id, title, label, note, body."""
         key = f"M{key}" if isinstance(key, int) else key
@@ -1028,6 +1048,17 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
             raise HTTPException(422, "아이디어 텍스트가 비어 있다")
         return found(store.create(body.title, body.text))
 
+    @router.post("/{idea_id}/compress/{key}")
+    async def compress_now(idea_id: str, key: str, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        """'지금 압축': 차례를 기다리지 않고 1분 안에 Codex 압축을 시작하게 한다."""
+        found(idea_id)
+        item = store.item(key) if re.fullmatch(r"[MR]\d+", key) else None
+        if item is None or item["idea_id"] != idea_id:
+            raise HTTPException(404, "no such material")
+        if not store.rush(key):
+            raise HTTPException(409, "이미 압축됐다")
+        return {"queued": key}
+
     @router.post("/intake")
     async def intake(body: IntakeRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
         if body.idea_id:
@@ -1047,7 +1078,13 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
 
     @router.get("/{idea_id}")
     async def idea(idea_id: str, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        runs = [r for r in load_runs(research.folder) if r.get("kind") == "compress"]
+        item = lambda r: r.get("item") or f"M{r.get('material_id')}"
+        # 누른 뒤 아직 시도 전이면 '요청됨', 도는 중이면 '압축 중'. 시도가 실패하면 다시 누를 수 있게 둘 다 아니다.
+        compressing = {k: "queued" for k, t in store.rushed().items() if not any(item(r) == k and r["started"] >= t for r in runs)}
+        compressing |= {item(r): "running" for r in runs if r.get("status") == "RUNNING"}
         return {**found(idea_id), "brief": store.brief(idea_id), "brief_path": str(store.briefs / f"{idea_id}.md"),
+                "compressing": compressing,
                 "raw_path": str(store.raws / f"{idea_id}.md"),
                 "followups": research.followups(idea_id)}
 

@@ -187,13 +187,19 @@ def _blocked(mine: list[dict], now: float) -> bool:
     return len(tries) >= COMPRESS_TRIES or bool(failed and now - failed[-1]["started"] < COMPRESS_RETRY)
 
 
-def next_compress(folder: Path, runs: list[dict], now: float) -> dict | None:
-    """압축을 기다리는 것 하나(오래된 것부터). 방금 실패한 것·세 번 실패한 것은 건너뛴다."""
+def next_compress(folder: Path, runs: list[dict], now: float, rushed_only: bool = False) -> dict | None:
+    """압축을 기다리는 것 하나. 사용자가 '지금 압축'을 누른 것이 먼저(누른 순), 그다음 오래된 것부터.
+    누른 뒤 아직 시도하지 않은 것은 실패 대기와 횟수를 무시한다. 방금 실패한 것·세 번 실패한 것은 건너뛴다."""
     from all_tomorrow.console.ideas import IdeaStore
     if not (folder.parent / "ideas" / "ideas.sqlite").is_file():
         return None
-    for item in IdeaStore(folder.parent / "ideas").pending_summaries():
-        if not _blocked([r for r in runs if r.get("kind") == "compress" and _run_item(r) == item["key"]], now):
+    store = IdeaStore(folder.parent / "ideas")
+    rush = store.rushed()
+    for item in sorted(store.pending_summaries(), key=lambda i: (i["key"] not in rush, rush.get(i["key"], 0))):
+        mine = [r for r in runs if r.get("kind") == "compress" and _run_item(r) == item["key"]]
+        if item["key"] in rush and not any(r["started"] >= rush[item["key"]] for r in mine):
+            return item
+        if not rushed_only and not _blocked(mine, now):
             return item
     return None
 
@@ -333,20 +339,30 @@ def tick(base: Path, idle: float | None, *, now: float | None = None,
         # @mcp.tool로 감싼 get_run 대신 같은 일을 하는 read_run을 직접 부른다.
         read = read or (lambda run_id: mcp_server.read_run(mcp_server.RUNS_DIR / run_id))
     runs = load_runs(folder)
-    active = next((r for r in runs if r.get("status") == "RUNNING"), None)
-    if active:
+    finished = False
+    for active in [r for r in runs if r.get("status") == "RUNNING"]:
         try:
             info = read(active["run_id"])
         except (OSError, ValueError):
             info = {"status": "LOST"}
-        if info.get("status") == "RUNNING":
-            return "running"
-        _finish(folder, active, info, base)
+        if info.get("status") != "RUNNING":
+            _finish(folder, active, info, base)
+            finished = True
+    if finished:
         save_runs(folder, runs)
         return "finished"
+    running = [r for r in runs if r.get("status") == "RUNNING"]
+    cfg = settings()
+    # '지금 압축'을 누른 것은 조사가 오래 돌거나 멈춰 있어도 바로 시작한다(압축은 짧고 웹 검색이 없다).
+    rushed = None if any(r.get("kind") in ("compress", "synth") for r in running) else next_compress(folder, runs, now, True)
+    if rushed and quota_ok(base, cfg["max_percent"], now)[0]:
+        started = _start_compress(folder, rushed, runs, now, start, cfg)
+        if started != "none":
+            return started
+    if running:
+        return "running"
     if (base / PAUSE).exists():
         return "paused"
-    cfg = settings()
     # 압축·종합은 짧은 일이라 PC가 쉬는지·하루 횟수와 상관없이 주제보다 먼저. 종합은 압축할 것이 없을 때만.
     job = next_compress(folder, runs, now)
     if job and quota_ok(base, cfg["max_percent"], now)[0]:

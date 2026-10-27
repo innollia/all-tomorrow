@@ -84,11 +84,16 @@
       if (!ids.length || !(r.subtask_id === "?" || (r.assigned || "").startsWith("jev:"))) return "";
       return `<select data-iassign="${r.id}" aria-label="과제 고르기"><option value="">${r.subtask_id === "?" ? "미분류 · 과제 고르기" : "과제 바꾸기"}</option>${ids.map(t => `<option value="${esc(t)}">${esc(t)} ${esc(idea.tasks[t].title)}</option>`).join("")}</select>`;
     };
+    // 압축 대기인 것은 눌러서 차례를 건너뛸 수 있다. 실행기가 1분 안에 집어 간다.
+    const cstate = key => (i.compressing || {})[key];
+    const compressPill = key => cstate(key) === "running" ? '<span class="pill warn">압축 중</span>'
+      : cstate(key) === "queued" ? '<span class="pill warn">압축 요청됨</span>'
+      : `<button class="pill warn pill-btn" data-icompress="${key}" title="차례를 기다리지 않고 지금 압축한다">압축 대기 · 지금 압축</button>`;
     const results = i.results.map(r => `<details class="idea-item"${r.latest ? "" : ' style="opacity:.6"'}><summary><span class="row">
       <b>${esc(r.subtask_id)}</b>${r.assigned ? `<span class="pill small" title="과제를 정한 방법">${esc(r.assigned === "ID" ? "ID로 확인" : r.assigned.startsWith("jev:") ? "Jev " + r.assigned.slice(4) : "직접 고름")}</span>` : ""}${r.latest ? "" : '<span class="pill">이전(덮어씀)</span>'}<span style="flex:1">${esc(r.subtask_title || (r.subtask_id === "?" ? "형식 밖 결과" : ""))}</span>
         ${r.status === "완료" ? "" : `<span class="pill warn">${esc(r.status || "상태 없음")}</span>`}
         <span class="small mute">${ago(r.created_at)}</span></span></summary>
-      ${r.latest ? (r.summary ? `<pre class="small idea-text">${md(r.summary)}</pre>` : '<div class="small mute">압축 대기 · 곧 Codex가 짧게 정리한다</div>') : ""}
+      ${r.latest ? (r.summary ? `<pre class="small idea-text">${md(r.summary)}</pre>` : `<div class="row small mute">${compressPill("R" + r.id)}<span>곧 Codex가 짧게 정리한다</span></div>`) : ""}
       <details><summary>주장 ${r.claims.length}개 · 출처 없음 ${r.claims.filter(c => !c.source).length}</summary>${r.claims.map(claim).join("")}</details>
       <details><summary>원문 ${r.body.length.toLocaleString()}자 (보관용)</summary><pre class="small idea-text">${esc(r.body)}</pre></details>
       <div class="row idea-actions">${assignSelect(r, i)}<button class="danger" data-idel-result="${r.id}">결과 삭제</button></div></details>`);
@@ -96,7 +101,7 @@
     const kindName = { paste: "붙여넣기", url: "링크", file: "파일" };
     const mats = i.materials.map(m => `<details class="idea-item"><summary><span class="row">
       <span style="flex:1;min-width:160px">${esc(m.title)}</span><span class="pill">${kindName[m.kind] || esc(m.kind)}</span>${m.task_id ? `<span class="pill">${taskName(m)}</span>` : ""}
-      ${m.summary ? "" : '<span class="pill warn">압축 대기</span>'}<span class="small mute">${ago(m.created_at)}</span></span></summary>
+      ${m.summary ? "" : compressPill("M" + m.id)}<span class="small mute">${ago(m.created_at)}</span></span></summary>
       ${m.url ? `<div class="small mute"><a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.url)}</a></div>` : m.note ? `<div class="small mute">${esc(m.note)}</div>` : ""}
       ${m.summary ? `<pre class="small idea-text">${md(m.summary)}</pre>` : '<div class="small mute">곧 Codex가 짧게 정리한다. 종합·관제는 정리된 것만 읽는다.</div>'}
       <details><summary>원문 ${m.body.length.toLocaleString()}자 (보관용)</summary><pre class="small idea-text">${esc(m.body)}</pre></details>
@@ -152,6 +157,23 @@
       <button class="danger" data-idel-idea="1" style="margin-top:12px">아이디어 삭제</button>`;
   };
 
+  async function compressNow(b, base, key) {
+    b.disabled = true;
+    try { await api(`${base}/compress/${key}`, {}); }
+    catch (err) { b.disabled = false; toast("실패: " + err.message); return; }
+    b.textContent = "압축 요청됨"; toast("1분 안에 압축을 시작한다. 끝나면 화면이 바뀐다");
+    const id = current.id, done = x => (key[0] === "M" ? x.materials : x.results).some(o => key[0] + o.id === key && o.summary);
+    for (let n = 0; n < 90; n++) {   // 압축은 보통 1~3분. 15분까지 본다.
+      await new Promise(r => setTimeout(r, 10000));
+      if (location.hash !== "#/idea/" + encodeURIComponent(id)) return;
+      const x = await api(`/api/ideas/${encodeURIComponent(id)}`).catch(() => null);
+      if (!x) continue;
+      if (done(x)) { toast("압축 끝"); AT.render(); return; }
+      const live = document.querySelector(`[data-icompress="${key}"]`);
+      if (live && (x.compressing || {})[key] === "running") live.textContent = "압축 중";
+    }
+  }
+
   async function copy(text) {
     try { await navigator.clipboard.writeText(text); }
     catch {  // http without a secure context: fall back to a hidden textarea
@@ -164,6 +186,7 @@
   view.addEventListener("click", async e => {
     const b = e.target.closest("button"); if (!b || !current || !view.contains(b)) return;
     const d = b.dataset, base = `/api/ideas/${encodeURIComponent(current.id)}`;
+    if (d.icompress) { e.preventDefault(); compressNow(b, base, d.icompress); return; }   // 줄(details)을 펼치지 않는다
     try {
       if (d.fu) {
         const request = $("#fu-text").value.trim(); if (!request) { toast("요청을 한 줄 적는다"); return; }
