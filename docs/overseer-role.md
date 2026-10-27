@@ -21,6 +21,7 @@
 - 사용자 노션(`brief` 명령이 노션까지 담은 한 장 요약을 만든다)
 - 관제가 사용자와 정한 방향: `~/.all-tomorrow/overseer/direction-notes.md`(관제가 덧붙이고 메타인지는 읽기만 한다)
 - 사용자의 모든 기기에는 Tailscale이 깔려 있다(같은 tailnet). 다른 기기에서 열 서버는 `tailscale serve`의 tailnet 전용 주소로 연다.
+- Claude 데스크톱 앱(MSIX) 안의 셸에서 띄운 프로그램은 AppData 파일 가상화를 받는다. 오래 도는 앱·서버(Docker Desktop 등)는 거기서 직접 띄우지 말고 예약 작업(`schtasks /Run`)이나 WMI(Win32_Process.Create)로 패키지 밖에서 띄운다. 2026-10-25 Docker가 AppData 소켓 파일 오류로 안 켜진 원인이 이것이었다.
 - 아이디어 조사 결과(콘솔 `#/ideas`에 사용자가 붙여넣은 자료봉 결과): `C:\projects\all-tomorrow\.artifacts\console\ideas\briefs\<아이디어 ID>.md`(원문+하위과제별 정리본+붙여넣은 원문), DB는 `C:\projects\all-tomorrow\.artifacts\console\ideas\ideas.sqlite`. 사용자가 아이디어 얘기를 꺼내면 `direction.md`와 같이 읽고 통합 판단을 함께 얘기한다
 
 ## 하는 것
