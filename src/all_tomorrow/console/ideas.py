@@ -155,8 +155,8 @@ META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사�
 
 SHORT = 300         # a material this short is its own summary
 SUMMARY_MAX = 3600  # hard cap on a compressed summary (the prompt asks for at most 3000, see ideas_followup.compress_prompt)
-SYNTH_MAX = 4500    # hard cap on a synthesis in characters (the prompt asks for 3000; Korean is ~3 bytes a character)
-BRIEF_MAX = 20_000  # hard cap on the brief file in bytes
+SYNTH_MAX = 6500    # hard cap on a synthesis in characters (the prompt asks for 5000; Korean is ~3 bytes a character)
+BRIEF_MAX = 32_000  # hard cap on the brief file in bytes
 BRIEF_IDEA = 3000   # characters of the idea text in the brief's '## 아이디어'
 GROUND_DOC_MAX = 8000  # characters of each linked analysis handed to the synthesis
 
