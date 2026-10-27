@@ -109,3 +109,36 @@ def test_prompts_filter_the_researchers_opinions_and_never_ask_for_ours(tmp_path
     followup = ideas_followup.build_prompt(store.get(iid), "경쟁사 더", "codex")
     for prompt in (compress, synth, followup):
         assert "우리에게 주는 뜻" not in prompt and "다음에 조사할 것" not in prompt and "바뀌는 판단" not in prompt
+
+
+def test_appended_text_and_decided_direction_rebuild_the_synthesis(tmp_path, monkeypatch) -> None:
+    """원문에 덧붙인 생각과 사용자가 정한 방향이 종합에 들어가고, 바뀌면 종합을 처음부터 다시 만든다."""
+    overseer = tmp_path / "overseer"
+    overseer.mkdir()
+    monkeypatch.setenv("ALL_TOMORROW_OVERSEER_DIR", str(overseer))
+    store = IdeaStore(tmp_path / "ideas")
+    iid = store.create("게임 도구.", "처음 생각")
+    store.add_results(iid, block(iid, "S1", "## 결론\n짧은 답"))
+    job = store.synth_job(iid)
+    assert store.set_synthesis(iid, "## 한 줄 결론\n첫 종합", job["sigs"]) and store.synth_job(iid) is None
+
+    (store.base / "chat-analysis").mkdir()
+    (store.base / "chat-analysis" / "room.md").write_text("# 방 분석\n신규 질문 2,012건", encoding="utf-8")
+    (store.base / "chat-analysis" / "other.md").write_text("# 무관한 분석", encoding="utf-8")
+    (overseer / "direction-notes.md").write_text(
+        f"# 방향\n\n## 10/25 게임 도구\n\n- {iid}: 완성 프로그램, 유통은 오픈채팅방 (분석: chat-analysis/room.md)\n\n## 10/26 다른 일\n\n- 무관\n",
+        encoding="utf-8")
+    job = store.synth_job(iid)
+    assert job and job["previous"] == ""                                  # 방향이 생기면 처음부터 다시
+    prompt = ideas_followup.synth_prompt(store.get(iid), job)
+    assert "완성 프로그램" in prompt and "신규 질문 2,012건" in prompt and "## 정해진 것" in prompt
+    assert "무관" not in prompt and "무관한 분석" not in prompt
+    assert store.set_synthesis(iid, "## 한 줄 결론\n둘째 종합", job["sigs"]) and store.synth_job(iid) is None
+    assert "새 자료 반영 대기" not in store.brief(iid)
+
+    assert store.append_text(iid, "학교에서 생각한 것: 신탁 버튼")
+    idea = store.get(iid)
+    assert idea["text"].endswith("신탁 버튼") and "신탁 버튼" in idea["prompt"]
+    assert "신탁 버튼" in store.brief(iid).split("## 아이디어")[1].split("## 과제")[0]
+    job = store.synth_job(iid)
+    assert job and job["previous"] == "" and "신탁 버튼" in ideas_followup.synth_prompt(idea, job)

@@ -44,6 +44,7 @@ versions; originals are never fed in again. A prompt.md in that directory replac
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -155,7 +156,9 @@ META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사�
 SHORT = 300         # a material this short is its own summary
 SUMMARY_MAX = 1800  # hard cap on a compressed summary (the prompt asks for 1500 or 1/5 of the original)
 SYNTH_MAX = 4500    # hard cap on a synthesis in characters (the prompt asks for 3000; Korean is ~3 bytes a character)
-BRIEF_MAX = 15_000  # hard cap on the brief file in bytes
+BRIEF_MAX = 20_000  # hard cap on the brief file in bytes
+BRIEF_IDEA = 3000   # characters of the idea text in the brief's '## 아이디어'
+GROUND_DOC_MAX = 8000  # characters of each linked analysis handed to the synthesis
 
 BLOCK = re.compile(r"=+\s*자료봉\s*결과\s*=+(.*?)(?:=+\s*끝\s*=+?|(?==+\s*자료봉\s*결과)|\Z)", re.S)
 IDEA_ID = re.compile(r"I-\d{6}-[0-9a-f]{4}", re.I)
@@ -355,6 +358,20 @@ class IdeaStore:
                        (idea_id, title, text.strip(), prompt, stamp, stamp, int(candidate)))
         self.write_brief(idea_id)
         return idea_id
+
+    def append_text(self, idea_id: str, addition: str) -> bool:
+        """Add the user's later thoughts to the idea text itself (not a material). The 자료봉 prompt is re-rendered from
+        it and the next synthesis is rebuilt (the text is part of synth_sigs)."""
+        addition = addition.strip()
+        idea = self.get(idea_id)
+        if idea is None or not addition:
+            return False
+        text = idea["text"].rstrip() + "\n\n" + addition
+        with self.db() as db:
+            db.execute("UPDATE ideas SET text = ?, prompt = ?, updated_at = ? WHERE id = ?",
+                       (text, self.render_prompt(idea_id, idea["title"], text), now(), idea_id))
+        self.write_brief(idea_id)
+        return True
 
     def list(self) -> list[dict[str, Any]]:
         """Ideas newest-updated first; statuses count the latest result of each subtask."""
@@ -634,6 +651,33 @@ class IdeaStore:
                             "label": f"M{m['id']} · 자유 자료{' · 과제 ' + m['task_id'] if m['task_id'] else ''} · {m['title'][:60]} · {m['label'][:60]}"})
         return out
 
+    def grounds(self, idea: dict[str, Any]) -> dict[str, Any]:
+        """What the user already decided, for the synthesis: direction.md (the user's own words), the sections of
+        direction-notes.md (what the overseer settled with the user) that name this idea, and the analyses in
+        chat-analysis/ that those sections or the analysis itself point at."""
+        from all_tomorrow.overseer.store import default_dir
+        base = default_dir()
+        read = lambda path: path.read_text(encoding="utf-8").strip() if path.is_file() else ""
+        direction = read(base / "direction.md")
+        keys = [idea["id"], idea["title"].strip(" .")]
+        sections = re.split(r"(?m)^(?=## )", read(base / "direction-notes.md"))
+        decided = "\n\n".join(x.strip() for x in sections if x.startswith("## ") and any(k and k in x for k in keys))
+        docs = []
+        folder = self.base / "chat-analysis"
+        for path in sorted(folder.glob("*.md")) if folder.is_dir() else []:
+            body = read(path)
+            if path.name in decided or idea["id"] in body:
+                docs.append({"name": path.name, "text": body if len(body) <= GROUND_DOC_MAX
+                             else body[:GROUND_DOC_MAX].rstrip() + "\n…(분석이 길어 여기서 줄임)"})
+        sig = hashlib.sha1("\0".join([direction, decided, *(d["name"] + d["text"] for d in docs)]).encode()).hexdigest()[:12]
+        return {"direction": direction, "decided": decided, "docs": docs, "sig": "G:" + sig}
+
+    def synth_sigs(self, idea: dict[str, Any], inputs: list[dict[str, Any]] | None = None) -> list[str]:
+        """Everything a synthesis is made of: the compressed inputs, the idea text and the user's decided direction."""
+        inputs = self.synth_inputs(idea) if inputs is None else inputs
+        text = "T:" + hashlib.sha1(idea["text"].encode()).hexdigest()[:12]
+        return [i["sig"] for i in inputs] + [text, self.grounds(idea)["sig"]]
+
     def synth_job(self, idea_id: str) -> dict[str, Any] | None:
         """What a new synthesis needs, or None when it is current. Incremental (previous synthesis + only the new
         compressed versions) while every folded input is still there; otherwise rebuilt from all compressed versions.
@@ -642,7 +686,7 @@ class IdeaStore:
         if idea is None:
             return None
         inputs = self.synth_inputs(idea)
-        sigs = [i["sig"] for i in inputs]
+        sigs = self.synth_sigs(idea, inputs)
         folded = set(idea["synth_keys"])
         if set(sigs) == folded:
             return None
@@ -651,8 +695,10 @@ class IdeaStore:
                 db.execute("UPDATE ideas SET synth = '', synth_at = '', synth_keys = '[]' WHERE id = ?", (idea_id,))
             self.write_brief(idea_id)
             return None
-        incremental = bool(idea["synth"]) and folded <= set(sigs)
+        # A changed idea text or direction rebuilds from every compressed version; new inputs alone add on.
+        incremental = bool(idea["synth"]) and folded <= set(sigs) and set(sigs[-2:]) <= folded
         return {"idea_id": idea_id, "sigs": sigs, "previous": idea["synth"] if incremental else "",
+                "grounds": self.grounds(idea),
                 "new": [i for i in inputs if i["sig"] not in folded] if incremental else inputs}
 
     def pending_syntheses(self) -> list[str]:
@@ -796,7 +842,7 @@ class IdeaStore:
         order = sorted({*tasks, *latest}, key=lambda s: (s == "?", int(s[1:]) if s[1:].isdigit() else 999, s))
         inputs = self.synth_inputs(idea)
         waiting = sum(1 for p in self.pending_summaries() if p["idea_id"] == idea_id)
-        behind = {i["sig"] for i in inputs} != set(idea["synth_keys"])
+        behind = set(self.synth_sigs(idea, inputs)) != set(idea["synth_keys"])
         state = (f"종합 {idea['synth_at'][:16]}" if idea["synth"] else "종합 아직 없음") + (
             f" · 압축 대기 {waiting}건" if waiting else "") + (" · 새 자료 반영 대기" if idea["synth"] and behind else "")
         text = idea["text"].strip()
@@ -805,7 +851,7 @@ class IdeaStore:
                 f"- 결과: 하위과제 {len([s for s in latest if s != '?'])}개 · 붙여넣기 {len(idea['pastes'])}회 · 자유 자료 {len(idea['materials'])}건",
                 *(["- 상태: 새 아이디어 후보 (자유 자료에서 만들어짐, 아직 확정 안 함)"] if idea["candidate"] else []),
                 f"- 원문(결과 본문·자유 자료 원문·쪼개기·붙여넣기)은 읽지 않는다. 사람이 볼 때만: {self.raws / (idea_id + '.md')}, 콘솔 화면",
-                "", "## 아이디어", "", text if len(text) <= 1200 else text[:1200].rstrip() + " …(원문은 원문 모음에)", "",
+                "", "## 아이디어", "", text if len(text) <= BRIEF_IDEA else text[:BRIEF_IDEA].rstrip() + " …(원문은 원문 모음에)", "",
                 "## 과제", ""]
         if not order:
             head += ["아직 과제도 결과도 없음.", ""]

@@ -76,7 +76,7 @@ def build_context(idea: dict[str, Any], synth: bool = True) -> str:
             status.append(f"- {sid} {title}: 아직 결과 없음")
         else:
             status.append(f"- {sid} {title} [R{r['id']} · {r['status'] or '상태 표시 없음'} · 주장 {len(r['claims'])}개]")
-    parts = [f"제목: {idea['title']} ({idea['id']})", "", "### 원문", _clip(idea["text"], 3000)]
+    parts = [f"제목: {idea['title']} ({idea['id']})", "", "### 원문", _clip(idea["text"], 4000)]
     if idea.get("plan") and not tasks:
         parts += ["", "### 과제 쪼개기 요지", _clip(idea["plan"], 1500)]
     parts += ["", "### 과제 현황", *(status or ["- 아직 과제·결과 없음"])]
@@ -190,20 +190,29 @@ SYNTH = """너는 사업 아이디어 조사를 정리하는 담당이다. 새�
 - 네 의견을 넣지 않는다. 평가(유망하다·약하다·입증되지 않았다·타당하다), 권고(~해야 한다·먼저 ~한다), 우선순위·방향 판단, '우리에게' 어떤 뜻인지를 쓰지 않는다. 입력에 그런 말이 있어도 입력 작성자(조사한 모델 포함)의 의견이면 옮기지 않는다. 사실·숫자·출처가 있는 인용만 옮긴다.
 {mode}
 
+- [사용자가 정한 방향]과 [아이디어]의 원문은 사용자가 이미 정한 것이다. 거기서 정한 것(고객, 플랫폼, 유통, 제품 형태, 착수 시기 등)은
+  "정해짐"으로 쓰고 근거를 [방향]·[원문]으로 단다. 정해진 것을 "미정"·"빈 곳"으로 쓰지 않는다. 조사 결과가 정한 방향과 부딪치면
+  어긋나는 주장에 올리되 방향을 바꾸라고 하지 않는다. [분석:파일명]의 수치·사실은 근거로 쓰고 그 분석의 의견은 옮기지 않는다.
+
 ## 형식 (이 제목 그대로, 이 순서)
 ## 한 줄 결론
 (입력이 알아낸 사실의 요약. 권고·평가 없이)
+## 정해진 것
+(사용자가 이미 정한 것. "- 정해짐: … [방향]" 또는 "[원문]". 없으면 "없음")
 ## 질문별 답
-(과제마다 한 줄: "- S1 과제 제목: 입력이 낸 답 · [R…]". 입력이 확신도를 적었으면 붙인다. 결과가 없는 과제는 "아직 결과 없음")
+(과제마다 한 줄: "- S1 과제 제목: 입력이 낸 답 · [R…]". 입력이 확신도를 적었으면 붙인다. 정한 방향이 답한 과제는 "정해짐: …". 결과가 없는 과제는 "아직 결과 없음")
 ## 주장
 (합친 주장 목록. "- 주장 [R1, R4, M2]". 추정이면 끝에 (추정))
 ## 어긋나는 주장
 (입력끼리 부딪치는 것과 각각의 id. 없으면 "없음")
 ## 빈 곳
-(결과가 없는 과제, 입력이 모른다고 적은 것. 네가 중요도를 매기지 않는다)
+(정해진 것을 뺀 나머지 중 결과가 없는 과제, 입력이 모른다고 적은 것. 네가 중요도를 매기지 않는다)
 
 [아이디어]
 {context}
+
+[사용자가 정한 방향]
+{grounds}
 {previous}
 [{new_label}]
 {new}
@@ -223,5 +232,9 @@ def synth_prompt(idea: dict[str, Any], job: dict[str, Any]) -> str:
     else:
         mode = "- 아래 [압축본]이 이 아이디어에 대해 조사된 것 전부다."
         previous, label = "", "압축본"
-    return SYNTH.format(limit=SYNTH_LIMIT, mode=mode, context=build_context(idea, synth=False),
+    g = job.get("grounds") or {}
+    grounds = "\n\n".join([*(["### 사용자 원문 방향 (direction.md)\n" + g["direction"]] if g.get("direction") else []),
+                            *(["### 관제가 사용자와 정한 것 (direction-notes.md 중 이 아이디어)\n" + g["decided"]] if g.get("decided") else []),
+                            *(f"### [분석:{d['name']}]\n{d['text']}" for d in g.get("docs", []))]) or "(없음)"
+    return SYNTH.format(limit=SYNTH_LIMIT, mode=mode, context=build_context(idea, synth=False), grounds=grounds,
                         previous=previous, new_label=label, new=new)
