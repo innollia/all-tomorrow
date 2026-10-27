@@ -148,6 +148,16 @@ def test_codex_does_not_fall_back_to_unrestricted_permissions(tmp_path):
         assert 'windows.sandbox="unelevated"' in argv
 
 
+def test_codex_reconnect_notice_is_not_a_failed_turn(tmp_path):
+    worker = CodexWorker(allowed_roots=(str(tmp_path),))
+    events = [{"type": "error", "message": "Reconnecting... 2/5 (stream disconnected before completion)"},
+              {"type": "item.completed", "item": {"type": "agent_message", "text": "끝"}},
+              {"type": "turn.completed"}]
+    assert worker.parse_output("\n".join(map(json.dumps, events)))["output"] == "끝"
+    with pytest.raises(Exception):
+        worker.parse_output("\n".join(map(json.dumps, [{"type": "error", "message": "quota"}, *events[1:]])))
+
+
 def test_command_emits_utf8_json_on_windows_too(tmp_path):
     events = [
         {"type": "item.completed", "item": {"type": "agent_message", "text": "작업 완료"}},

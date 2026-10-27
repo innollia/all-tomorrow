@@ -92,7 +92,7 @@ def test_tick_starts_one_topic_with_web_search_then_collects_result(env) -> None
     assert tick(idle=60) == "idle"
     assert tick() == "started"
     assert len(calls) == 1 and calls[0][1] == "codex" and "첫 요청" in calls[0][2]
-    assert calls[0][3]["argv_suffix"] == ["-c", 'web_search="live"']
+    assert calls[0][3]["argv_suffix"][:2] == ["-c", 'web_search="live"']
     assert calls[0][3]["worker_options"] == {"timeout_seconds": 1800, "sandbox": "read-only"}
     assert [r["status"] for r in load_runs(folder)] == ["RUNNING"]
     assert tick() == "running" and len(calls) == 1                     # 한 번에 하나

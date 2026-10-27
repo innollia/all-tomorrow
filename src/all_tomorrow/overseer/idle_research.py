@@ -26,6 +26,7 @@ from all_tomorrow.console.research import RESULTS, load_runs, load_topics, resea
 log = logging.getLogger(__name__)
 
 PAUSE = "research.paused"
+PAGES = "pages"            # 조사 중 크롬으로 읽은 로그인 페이지 원문(pages/<실행 id>/)
 COMPRESS_RETRY = 1800      # 압축·종합이 실패하면 30분 뒤 다시, 같은 입력으로 3번 실패하면 그만둔다
 COMPRESS_TRIES = 3
 RETRY_AFTER = 6 * 3600
@@ -136,6 +137,37 @@ def _file_material(folder: Path, run: dict, output: str) -> str:
         run["material_error"] = type(error).__name__
         log.warning("추가 조사 자료 넣기 실패: %s", type(error).__name__)
         return " (아이디어 자료로 넣기는 실패했습니다)"
+
+
+def _file_pages(folder: Path, run: dict) -> str:
+    """조사 중 크롬으로 읽은 페이지 원문을 그 아이디어의 자유 자료로 하나씩 넣는다(압축은 자료 압축이 맡는다)."""
+    from all_tomorrow.adapters import chrome_pages
+    from all_tomorrow.console.ideas import IdeaStore
+    pages = chrome_pages.archived(folder / PAGES / run["id"])
+    if not pages:
+        return ""
+    try:
+        store = IdeaStore(folder.parent / "ideas")
+        idea = store.get(run["idea_id"])
+        if idea is None:
+            return ""
+        have = {(m["url"], m["body"]) for m in idea["materials"]}
+        added = 0
+        for page in pages:
+            if (page["url"], page["text"]) in have:
+                continue
+            store.add_material(run["idea_id"], {"kind": "url", "label": page["url"], "url": page["url"],
+                                                "title": page["title"] or page["url"], "body": page["text"],
+                                                "note": f"사용자 크롬(로그인)으로 읽은 원문 · 실행 {run['id']}"})
+            added += 1
+        run["pages_filed"] = added
+        if added:
+            store.write_brief(run["idea_id"])
+        return f" 크롬으로 읽은 페이지 {added}건도 원문 자료로 넣었습니다." if added else ""
+    except Exception as error:
+        run["pages_error"] = type(error).__name__
+        log.warning("크롬 페이지 자료 넣기 실패: %s", type(error).__name__)
+        return " (크롬으로 읽은 페이지를 자료로 넣기는 실패했습니다)"
 
 
 def _run_item(run: dict) -> str:
@@ -270,7 +302,7 @@ def _finish(folder: Path, run: dict, info: dict, base: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"# {run['title']}\n\n{output.strip()}\n", encoding="utf-8")
         run["result_file"] = name
-        tail = _file_material(folder, run, output) if run.get("idea_id") else ""
+        tail = _file_material(folder, run, output) + _file_pages(folder, run) if run.get("idea_id") else ""
         reports.enqueue(base, "research-" + run["id"],
                         f"[보고] 유휴 조사 끝: {run['title']} — 콘솔 '조사 목록'에서 결과를 볼 수 있습니다.{tail}")
     else:
@@ -333,8 +365,10 @@ def tick(base: Path, idle: float | None, *, now: float | None = None,
     if topic.get("idea_id"):
         run.update(idea_id=topic["idea_id"], request=topic["ask"])
     try:
-        meta = start(project_id, "codex", build_task(topic, runs, folder, cwd),
-                     worker_options={"timeout_seconds": cfg["timeout"], "sandbox": "read-only"}, argv_suffix=["-c", 'web_search="live"'])
+        from all_tomorrow.adapters import chrome_pages
+        meta = start(project_id, "codex", build_task(topic, runs, folder, cwd) + chrome_pages.PROMPT_NOTE,
+                     worker_options={"timeout_seconds": cfg["timeout"], "sandbox": "read-only"},
+                     argv_suffix=["-c", 'web_search="live"', *chrome_pages.codex_args(folder / PAGES / run["id"])])
     except Exception as error:
         run.update(status="FAILED", error=type(error).__name__ + ": " + str(error)[:200], finished=now)
         runs.append(run)

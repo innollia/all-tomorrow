@@ -391,7 +391,9 @@ class CodexWorker:
 
     def parse_output(self, output: str) -> dict[str, Any]:
         events = _json_records(output)
-        failures = [e for e in events if e.get("type") in {"error", "turn.failed"}]
+        # "Reconnecting... n/5" is a notice while Codex retries a dropped stream; the turn may still complete.
+        failures = [e for e in events if e.get("type") == "turn.failed"
+                    or (e.get("type") == "error" and not str(e.get("message", "")).startswith("Reconnecting"))]
         if failures:
             raise WorkerError("Codex reported a failed turn: " + json.dumps(failures, ensure_ascii=False))
         if events[-1].get("type") != "turn.completed":

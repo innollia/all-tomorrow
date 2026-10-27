@@ -91,7 +91,8 @@ def test_followup_runs_in_codex_then_material_is_compressed(env) -> None:
     assert tick(idle=None) == "started"                                  # 지금 돌리기처럼 PC 사용 중이어도
     task, kw = calls[0]
     assert "경쟁사 가격 더" in task and "책을 월 구독으로" in task and "해석한 조사 질문" in task
-    assert kw["argv_suffix"] == ["-c", 'web_search="live"'] and kw["worker_options"]["sandbox"] == "read-only"
+    assert kw["argv_suffix"][:2] == ["-c", 'web_search="live"'] and kw["worker_options"]["sandbox"] == "read-only"
+    assert "mcp_servers.chrome_pages.command=" in " ".join(kw["argv_suffix"]) and "read_logged_in_page" in task
     results["run1"] = {"status": "SUCCESS", "result": {"payload": {"output": "## 해석한 조사 질문\n" + RAW}}}
     assert tick(idle=None) == "finished"
     run = load_runs(folder)[0]
@@ -184,3 +185,26 @@ def test_move_material_between_ideas_and_drops_emptied_candidate(tmp_path) -> No
 def test_console_shell_scripts_carry_a_version(tmp_path) -> None:
     html = login(tmp_path).get("/").text
     assert "/static/console/pages/ideas.js?v=" in html and "__V__" not in html
+
+
+def test_followup_files_pages_read_in_chrome_as_raw_materials(env) -> None:
+    from all_tomorrow.adapters import chrome_pages
+    from all_tomorrow.console.research import ResearchStore
+    base, folder, ideas_dir, calls, results, tick = env
+    store = IdeaStore(ideas_dir)
+    iid = store.create("게임 툴", "게임 개발 도구")
+    ResearchStore(folder).create_followup(iid, "https://chatgpt.com/g/g-p-x/project 대화 전부 가져와")
+    assert tick(idle=None) == "started"
+    run_id = load_runs(folder)[0]["id"]
+    assert f"AT_PAGES_DIR = " in " ".join(calls[0][1]["argv_suffix"]) and run_id in " ".join(calls[0][1]["argv_suffix"])
+    pages = folder / "pages" / run_id                                   # Codex가 도구로 읽은 페이지(MCP 쪽이 남김)
+    chrome_pages.archive(pages, {"url": "https://chatgpt.com/g/g-p-x/project", "title": "프로젝트", "text": "대화 목록"})
+    chrome_pages.archive(pages, {"url": "https://chatgpt.com/g/g-p-x/c/1", "title": "가격 조사", "text": "대화원문표식" * 300})
+    chrome_pages.archive(pages, {"url": "https://chatgpt.com/g/g-p-x/c/1", "title": "가격 조사", "text": "대화원문표식" * 300})
+    results["run1"] = {"status": "SUCCESS", "result": {"payload": {"output": "## 한 줄 결론\n대화 2건 정리"}}}
+    assert tick(idle=None) == "finished"
+    mats = store.get(iid)["materials"]
+    assert load_runs(folder)[0]["pages_filed"] == 2 and len(mats) == 3        # 보고서 + 페이지 2건(같은 주소는 한 번)
+    page = next(m for m in mats if m["url"].endswith("/c/1"))
+    assert page["title"] == "가격 조사" and page["body"].startswith("대화원문표식") and page["summary"] == ""   # 긴 원문은 압축 대기
+    assert "대화원문표식" not in store.brief(iid)
