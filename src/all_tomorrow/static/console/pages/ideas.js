@@ -115,10 +115,15 @@
     const synthCard = `<div class="card" style="margin-bottom:16px"><div class="row"><span class="t" style="flex:1">종합</span>${waiting ? `<span class="pill warn">압축 대기 ${waiting}</span>` : ""}${i.synth_at ? `<span class="small mute">${ago(i.synth_at)}</span>` : ""}</div>
       ${i.synth ? `<pre class="idea-text" style="margin-top:8px">${md(i.synth)}</pre>` : '<div class="small mute" style="margin-top:8px">아직 종합 전. 결과·자료가 압축되면 Codex가 이 아이디어 하나의 짧은 종합본을 만든다.</div>'}
       <div class="row" style="margin-top:10px"><button class="primary" data-icopy="overseer">관제에게 가져가기</button><button data-icopy="brief">정리본 복사</button></div></div>`;
+    // 막 만든 아이디어: 할 일은 자료봉에 프롬프트를 주는 것뿐이라 그 버튼을 맨 위에 둔다.
+    const fresh = !i.plan && !i.results.length;
+    const promptCard = fresh ? `<div class="card" style="margin-bottom:16px"><div class="t">자료봉에게 줄 프롬프트</div>
+      <div class="small mute" style="margin-top:6px">복사해서 자료봉에 붙인다. 자료봉 답은 아래 「자료봉 흐름」의 과제 쪼개기 답 칸에 붙인다.</div>
+      <div class="row" style="margin-top:10px"><button class="primary" data-icopy="prompt" style="min-height:44px">전체 프롬프트 복사 (${i.prompt.length.toLocaleString()}자)</button></div></div>` : "";
     return `<h1>${esc(i.title)}</h1>
       <div class="sub">${ago(i.created_at)} 생성 · 자료 ${i.materials.length} · 결과 ${i.results.length}</div>
       ${i.candidate ? `<div class="card row" style="margin-bottom:12px"><span class="small" style="flex:1">새 아이디어 후보. 맞으면 확정하고, 아니면 맨 아래에서 삭제한다.</span><button data-iadopt="1">아이디어로 확정</button></div>` : ""}
-      ${synthCard}
+      ${promptCard}${synthCard}
       <div class="idea-two">
       ${intakeForm([], i.id)}
       <div class="card">
@@ -129,7 +134,7 @@
         ${fuLines.length ? `<details style="margin-top:8px"><summary>조사 이력 ${fuLines.length}</summary>${list(fuLines)}</details>` : ""}</div>
       </div>
       <h2>자료 (${i.materials.length})</h2>${list(mats)}
-      <details style="margin-top:20px"><summary style="min-height:44px"><b>자료봉 흐름</b> · 프롬프트 · 쪼개기 · 결과 붙여넣기 (결과 ${i.results.length})</summary>
+      <details style="margin-top:20px"${fresh ? " open" : ""}><summary style="min-height:44px"><b>자료봉 흐름</b> · 프롬프트 · 쪼개기 · 결과 붙여넣기 (결과 ${i.results.length})</summary>
       <h2>원문</h2><textarea rows="6" readonly style="font-size:16px">${esc(i.text)}</textarea>
       <h2>자료봉에게 줄 전체 프롬프트</h2>
       <div class="row" style="margin-bottom:8px"><button class="primary" data-icopy="prompt" style="min-height:44px">전체 프롬프트 복사</button></div>
@@ -241,7 +246,7 @@
     } else if (e.target.id === "idea-new") {
       e.preventDefault();
       const text = $("#idea-text").value.trim(); if (!text) return;
-      try { const r = await api("/api/ideas", { title: $("#idea-title").value, text }); draft.set("new-title", ""); draft.set("new-text", ""); location.hash = "#/idea/" + encodeURIComponent(r.id); }
+      try { const r = await api("/api/ideas", { title: $("#idea-title").value, text }); draft.set("new-title", ""); draft.set("new-text", ""); location.hash = "#/idea/" + encodeURIComponent(r.id); window.scrollTo(0, 0); toast("만듦. 맨 위 버튼으로 프롬프트를 복사한다"); }
       catch (err) { toast("실패: " + err.message); }
     } else if (e.target.id === "idea-plan" && current) {
       e.preventDefault();
