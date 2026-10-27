@@ -161,3 +161,22 @@ Eve 연결 추가분: 중앙 `src/all_tomorrow/overseer/{discord_edge,reports,lo
 ## 메타인지 일시정지
 
 `~/.all-tomorrow/overseer/metacog.paused` 파일이 있으면 overseer는 메타인지를 깨우지 않고 executor는 대기 Work를 실행하지 않는다. 사용량 수집과 보고 전송은 계속한다. 파일을 지우면 다음 1분 주기부터 다시 돈다. 2026-10-26 사용자 지시로 멈췄다(사흘 562회 깨어남, 자기 자신에 대한 중복 Work 고리, 관제가 적은 방향 메모 덮어쓰기).
+
+## 2026-10-27 서버 목록 전체 감시와 부팅 보고
+
+10/25 재부팅에서 Tailscale 트레이 앱이 안 떠 NoState에 머물고, 손으로 켠 인용된 사랑 작업판이 꺼진 채였다. `AllTomorrow-DP7-api-watchdog`(부팅·로그온·매분, S4U)이 API만 보던 것을 서버 목록 전체로 넓혔다. 예약 작업 트리거는 그대로이고, 코드는 `src/all_tomorrow/overseer/server_watch.py`.
+
+- **목록.** `config/infrastructure.json`의 서비스에 `autostart`(`boot`|`logon`|`manual`)와 `start`(`task`: 예약 작업 이름 / `command`: argv + `cwd`, `{python}`은 감시가 쓰는 DP7 Python / `program`: 프로그램 경로)가 생겼다. `health.kind`에 `tailscale`(`tailscale status --json`의 BackendState=Running)과 `docker`(`docker info` 응답)가 추가됐고 콘솔 servers 화면도 같이 쓴다. 새 항목: 인용된 사랑 작업판(포트 8765, http `127.0.0.1:8765/`, `boot`), Tailscale(`logon`), Docker Desktop(`manual`, 관찰만). 시작 명령에는 비밀값을 적지 않는다.
+- **점검.** 감시는 매분 돌지만 서버 점검은 4분(=실제 5분 안팎) 간격이다. `boot`/`logon` 서버가 `failed`면 `start` 방법으로 켠다. 확인 불가(`unknown`)는 건드리지 않고, `logon` 서버(Tailscale)는 로그온 세션(explorer.exe)이 없으면 기다린다. API와 감시 자신은 기존 `api_watchdog.check_once`(3분 연속 실패 + 1시간 3회 재기동 한도)가 맡는다.
+- **3번 실패하면 멈춘다.** 같은 서버를 3번 켰는데 다음 점검에서도 죽어 있으면 재시도를 멈추고 `reports.enqueue`로 보고 1건을 남긴다(Eve 디스코드 봇이 전송). 서버가 다시 살아나면 상태가 지워진다. 상태 `~/.all-tomorrow/overseer/server-watch.json`, 기록 `server-watch.jsonl`.
+- **Tailscale.** 로그인 방식(unattended 아님)을 유지한다. 트레이 앱은 로그온 세션에서만 뜨므로 S4U인 감시가 직접 띄우지 않고 예약 작업 `AllTomorrow-DP7-tailscale-ipn`(Interactive, 로그온 때도 실행, `tailscale-ipn.exe`)을 시작한다. 이 작업은 `scripts/dp7-up.ps1` 끝에서 등록한다. serve 설정(443→5476, 8443→8765)은 Tailscale 쪽에 남아 있어 건드리지 않는다.
+- **부팅 보고.** 부팅(또는 감시가 3분 넘게 안 돌았다 다시 돈 때 = 꺼졌다 켜진 때, 빠른 시작 포함) 10분 뒤 한 번 `~/.all-tomorrow/overseer/boot-report.md`를 쓴다: 서버별 살아남/죽음/확인 불가와 이유, 자동 시작 시도 횟수. 첫 줄 요약(`요약: 살아남 N / 죽음 M (이름)`)은 관제 브리핑 5절에 한 줄로 들어가고, 자동 시작 서버가 죽어 있으면 보고 1건(`boot-report-<부팅시각>`)을 낸다. `manual` 서버(Docker 등)는 파일에만 적는다.
+- **프로세스 위치.** `command`/`program` 시작은 감시 예약 작업 안에서 떼어 낸 프로세스로 뜬다. Claude 데스크톱 앱 셸에서 직접 띄운 서버는 AppData 가상화를 받으므로 감시 작업(`schtasks /Run`)이 켜게 한다.
+- **임시 시작 바로가기.** 시작 폴더의 `Tailscale.lnk`, `QuoteVnDesk.lnk`는 감시가 대신하게 되어 `C:\projects\_quarantine`로 옮겼다(삭제 아님). 되돌리려면 다시 시작 폴더로 복사한다.
+
+### 재부팅 시험 방법 (사용자 확인 후 실제 재부팅)
+
+1. 재부팅 후 로그온하고 10분 안에 `Get-ScheduledTask AllTomorrow-DP7-* | Get-ScheduledTaskInfo`로 작업들이 돌고 있는지, `tailscale status`가 Running인지 본다(트레이 앱이 로그온 직후 떠야 한다).
+2. 5~10분 뒤 `http://127.0.0.1:8765/`가 200인지, `server-watch.jsonl`에 `start_requested`/`start_launched`가 남았는지 본다.
+3. 부팅 10분 뒤 `~/.all-tomorrow/overseer/boot-report.md`가 생기고, 죽은 서버가 있으면 디스코드에 보고가 오는지 본다. 빠른 시작 때문에 uptime이 안 줄어도 감시 공백(3분 이상)으로 재부팅을 알아챈다.
+4. 시작 폴더 바로가기가 없는 상태에서 위가 모두 되면 성공이다.

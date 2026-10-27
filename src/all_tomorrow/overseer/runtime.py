@@ -170,6 +170,11 @@ def main(argv=None):
         elif args.component == "api-watchdog":
             from all_tomorrow.overseer.api_watchdog import check_once
             check_once(base, task=args.api_task)
+            try:  # 서버 목록 전체 감시. 실패해도 API 검사는 이미 끝났다.
+                from all_tomorrow.overseer.server_watch import run as watch_servers
+                watch_servers(base)
+            except Exception as error:
+                log.error("server watch failed: %s", type(error).__name__)
         elif args.component == "activity":
             from all_tomorrow.overseer.schedule import local_idle_seconds
             from all_tomorrow.overseer.workspace import save

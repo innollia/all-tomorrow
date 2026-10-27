@@ -70,3 +70,12 @@ Register-ScheduledTask -TaskName "$TaskPrefix-activity" -Action $activityAction 
     -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $user) -Principal $interactive -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName "$TaskPrefix-activity"
 Write-Host '재부팅·로그인 뒤 작업 상태와 디스코드 실제 보고를 확인하세요. 비밀값은 출력하지 않았습니다.'
+# Tailscale은 로그인 방식(unattended 아님)이라 로그온 세션의 트레이 앱(tailscale-ipn.exe)이 떠야 Running이 된다.
+# api-watchdog(S4U)가 서버 목록 감시로 Tailscale이 죽은 걸 보면 이 작업을 시작한다. 로그온 때도 한 번 실행한다.
+$ipn = Join-Path $env:ProgramFiles 'Tailscale\tailscale-ipn.exe'
+if (Test-Path -LiteralPath $ipn) {
+    $ipnSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    Register-ScheduledTask -TaskName "$TaskPrefix-tailscale-ipn" -Action (New-ScheduledTaskAction -Execute $ipn) `
+        -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $user) -Principal $interactive -Settings $ipnSettings -Force | Out-Null
+}

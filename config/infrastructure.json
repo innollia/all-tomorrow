@@ -54,7 +54,12 @@
         "target": "http://127.0.0.1:5476/healthz"
       },
       "placement": "must_local",
-      "placement_reason": "Postgres????? ?? ??"
+      "placement_reason": "Postgres????? ?? ??",
+      "autostart": "boot",
+      "start": {
+        "kind": "task",
+        "task": "AllTomorrow-DP7-api"
+      }
     },
     {
       "id": "api-watchdog",
@@ -86,7 +91,12 @@
         "target": "AllTomorrow-DP7-executor"
       },
       "placement": "must_local",
-      "placement_reason": "?? Codex/Claude CLI????"
+      "placement_reason": "?? Codex/Claude CLI????",
+      "autostart": "boot",
+      "start": {
+        "kind": "task",
+        "task": "AllTomorrow-DP7-executor"
+      }
     },
     {
       "id": "overseer",
@@ -102,7 +112,12 @@
         "target": "AllTomorrow-DP7-overseer"
       },
       "placement": "must_local",
-      "placement_reason": "?? ???CLI"
+      "placement_reason": "?? ???CLI",
+      "autostart": "boot",
+      "start": {
+        "kind": "task",
+        "task": "AllTomorrow-DP7-overseer"
+      }
     },
     {
       "id": "activity",
@@ -118,7 +133,12 @@
         "target": "AllTomorrow-DP7-activity"
       },
       "placement": "must_local",
-      "placement_reason": "PC ?? ??"
+      "placement_reason": "PC ?? ??",
+      "autostart": "logon",
+      "start": {
+        "kind": "task",
+        "task": "AllTomorrow-DP7-activity"
+      }
     },
     {
       "id": "collect",
@@ -134,7 +154,12 @@
         "target": "AllTomorrow-DP7-collect"
       },
       "placement": "must_local",
-      "placement_reason": "?? ?? DB"
+      "placement_reason": "?? ?? DB",
+      "autostart": "boot",
+      "start": {
+        "kind": "task",
+        "task": "AllTomorrow-DP7-collect"
+      }
     },
     {
       "id": "postgres",
@@ -394,6 +419,77 @@
       },
       "placement": "aws",
       "placement_reason": "?? ?? ???"
+    },
+    {
+      "id": "quote-vn-desk",
+      "name": "인용된 사랑 작업판",
+      "host_id": "dp7",
+      "description": "인용된 사랑(quote_vn) 웹 작업판 server.py. api-watchdog가 죽어 있으면 저장소 맨 위(TINProject)에서 다시 켠다",
+      "project": "인용된 사랑",
+      "execution": "startup",
+      "ports": [
+        8765
+      ],
+      "scope": "tailnet",
+      "health": {
+        "kind": "http",
+        "target": "http://127.0.0.1:8765/"
+      },
+      "placement": "must_local",
+      "placement_reason": "DP7의 TINProject 작업 폴더를 직접 편집",
+      "autostart": "boot",
+      "start": {
+        "kind": "command",
+        "command": [
+          "{python}",
+          "tools/quote_vn_desk/server.py",
+          "--no-open",
+          "--quiet",
+          "--allow-host",
+          "dp7.tailc5ef02.ts.net"
+        ],
+        "cwd": "C:\\projects\\TINProject"
+      }
+    },
+    {
+      "id": "tailscale",
+      "name": "Tailscale",
+      "host_id": "dp7",
+      "description": "tailnet 접속(serve: https 443→5476, 8443→8765). 로그인 방식이라 사용자 로그온 뒤 트레이 앱(tailscale-ipn.exe)이 떠야 Running이 된다. 회복은 로그온 세션에서 tailscale-ipn.exe를 여는 예약 작업",
+      "project": "All Tomorrow",
+      "execution": "startup",
+      "ports": [],
+      "scope": "tailnet",
+      "health": {
+        "kind": "tailscale"
+      },
+      "placement": "must_local",
+      "placement_reason": "DP7을 tailnet에 연결",
+      "autostart": "logon",
+      "start": {
+        "kind": "task",
+        "task": "AllTomorrow-DP7-tailscale-ipn"
+      }
+    },
+    {
+      "id": "docker-desktop",
+      "name": "Docker Desktop",
+      "host_id": "dp7",
+      "description": "Docker 엔진. 다른 에이전트가 복구 중이라 자동 시작하지 않고 관찰만 한다",
+      "project": "All Tomorrow",
+      "execution": "manual",
+      "ports": [],
+      "scope": "local",
+      "health": {
+        "kind": "docker"
+      },
+      "placement": "must_local",
+      "placement_reason": "로컬 컨테이너 실행",
+      "autostart": "manual",
+      "start": {
+        "kind": "program",
+        "path": "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe"
+      }
     }
   ]
 }

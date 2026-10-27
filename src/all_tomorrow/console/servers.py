@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import platform
+import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -32,17 +33,34 @@ class Host(Record):
     notes: str
 
 class Health(Record):
-    kind: Literal['http', 'tcp', 'windows_task', 'process', 'none']
+    # tailscale: `tailscale status` BackendState == Running. docker: the engine answers `docker info`.
+    kind: Literal['http', 'tcp', 'windows_task', 'process', 'tailscale', 'docker', 'none']
     target: str | None = None
 
     @model_validator(mode='after')
     def validate_target(self):
-        if self.kind != 'none' and not self.target:
+        if self.kind not in ('none', 'tailscale', 'docker') and not self.target:
             raise ValueError('probe target required')
         if self.kind == 'http':
             url = urlsplit(self.target)
             if url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password or url.query or url.fragment:
                 raise ValueError('HTTP probe must be a credential-free URL')
+        return self
+
+class Start(Record):
+    """How the watchdog (overseer/server_watch.py) brings a dead server up. Never holds secrets."""
+    kind: Literal['task', 'command', 'program']
+    task: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]+$')  # scheduled task name
+    command: list[str] | None = None  # argv; "{python}" = the watchdog's own interpreter
+    cwd: str | None = None
+    path: str | None = None  # program path
+    args: list[str] = Field(default_factory=list)
+
+    @model_validator(mode='after')
+    def validate_kind(self):
+        needed = {'task': self.task, 'command': self.command and self.cwd, 'program': self.path}[self.kind]
+        if not needed:
+            raise ValueError('start fields missing for ' + self.kind)
         return self
 
 class Service(Record):
@@ -57,11 +75,16 @@ class Service(Record):
     health: Health
     placement: Literal['must_local', 'movable', 'aws']
     placement_reason: str
+    # boot/logon: the watchdog starts it when dead. manual: observed only.
+    autostart: Literal['boot', 'logon', 'manual'] | None = None
+    start: Start | None = None
 
     @model_validator(mode='after')
     def validate_ports(self):
         if any(not 1 <= p <= 65535 for p in self.ports) or (self.health.kind == 'tcp' and not self.ports):
             raise ValueError('valid ports required')
+        if self.autostart in ('boot', 'logon') and (self.start is None or self.health.kind == 'none'):
+            raise ValueError('autostart needs a start method and a real health check')
         return self
 
 class Registry(Record):
@@ -103,6 +126,39 @@ def windows_observation(health: Health) -> tuple[str, str]:
         return 'unknown', '예약 작업 실행 기록 없음'
     return 'failed', '예약 작업 비활성 또는 최근 실행 실패'
 
+def _run(argv: list[str], timeout: float) -> subprocess.CompletedProcess:
+    flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    return subprocess.run(argv, capture_output=True, text=True, encoding='utf-8', errors='replace',
+                          timeout=timeout, creationflags=flags)
+
+def _exe(name: str, *fallback: str) -> str | None:
+    found = shutil.which(name)
+    if found:
+        return found
+    return next((p for p in fallback if Path(p).is_file()), None)
+
+def observe_tailscale() -> tuple[str, str]:
+    exe = _exe('tailscale', r'C:\Program Files\Tailscale\tailscale.exe')
+    if not exe:
+        return 'unknown', 'tailscale 실행 파일 없음'
+    try:
+        state = str(json.loads(_run([exe, 'status', '--json'], 8).stdout)['BackendState'])
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return 'failed', 'tailscale status 응답 없음 (트레이 앱·서비스 꺼짐 가능)'
+    return ('ok', 'BackendState=Running') if state == 'Running' else ('failed', f'BackendState={state}')
+
+def observe_docker() -> tuple[str, str]:
+    exe = _exe('docker', r'C:\Program Files\Docker\Docker\resources\bin\docker.exe')
+    if not exe:
+        return 'unknown', 'docker 실행 파일 없음'
+    try:
+        result = _run([exe, 'info', '--format', '{{.ServerVersion}}'], 8)
+    except (OSError, subprocess.SubprocessError):
+        return 'failed', 'Docker 엔진 응답 없음 (Docker Desktop 꺼짐 가능)'
+    if result.returncode == 0 and result.stdout.strip():
+        return 'ok', 'Docker 엔진 응답'
+    return 'failed', 'Docker 엔진 응답 없음'
+
 async def probe(service: Service, local_host: str, client: httpx.AsyncClient) -> dict:
     health = service.health
     state, detail = 'unknown', '확인 방법 미등록 / 원격 loopback 접근 불가'
@@ -126,6 +182,8 @@ async def probe(service: Service, local_host: str, client: httpx.AsyncClient) ->
             state, detail = 'ok', f'TCP {service.ports[0]} 연결 확인 (기능 응답은 별도)'
         except (OSError, asyncio.TimeoutError):
             state, detail = 'failed', f'TCP {service.ports[0]} 연결 실패'
+    elif local and health.kind in ('tailscale', 'docker') and platform.system() == 'Windows':
+        state, detail = await asyncio.to_thread(observe_tailscale if health.kind == 'tailscale' else observe_docker)
     elif local and health.kind in ('windows_task', 'process') and platform.system() == 'Windows':
         state, detail = await asyncio.to_thread(windows_observation, health)
     return dict(status=state, detail=detail, checked_at=datetime.now(timezone.utc).isoformat())
