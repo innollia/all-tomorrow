@@ -129,15 +129,27 @@ def list_projects() -> list[dict[str, Any]]:
 
 
 @mcp.tool
-def register_project(project_id: str, path: str, name: str | None = None, notes: str = "") -> dict[str, Any]:
-    """Add or update a managed project. path must be an existing absolute directory."""
+def register_project(project_id: str, path: str, name: str | None = None, notes: str = "",
+                     seed_knowhow: bool = True, kind: str | None = None) -> dict[str, Any]:
+    """Add or update a managed project. path must be an existing absolute directory.
+
+    A project that is new to the registry also gets docs/knowhow.md with lessons picked from other
+    projects (kind: godot-game, python-service, ...; guessed from the files when omitted). Nothing existing is overwritten."""
     resolved = Path(path)
     if not resolved.is_absolute() or not resolved.is_dir():
         raise ValueError("path must be an existing absolute directory")
     projects = load_projects()
+    is_new = project_id not in projects
     projects[project_id] = {"name": name or resolved.name, "path": resolved.as_posix(), "notes": notes}
     _save_projects(projects)
-    return {"project_id": project_id, **projects[project_id]}
+    result: dict[str, Any] = {"project_id": project_id, **projects[project_id]}
+    if is_new and seed_knowhow:
+        from all_tomorrow.overseer import knowhow
+        try:
+            result["knowhow"] = knowhow.seed(resolved, knowhow.knowhow_dir(), kind=kind)
+        except Exception as error:   # a missing index or unknown kind must not block registering
+            result["knowhow"] = {"skipped": f"{type(error).__name__}: {str(error)[:200]}"}
+    return result
 
 
 @mcp.tool

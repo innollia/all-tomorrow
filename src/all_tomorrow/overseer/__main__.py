@@ -119,6 +119,10 @@ def _load_gateway_key() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw = sys.argv[1:] if argv is None else argv
+    if raw[:1] == ["knowhow"]:   # cross-project know-how: no store writes, no model call (docs/knowhow.md)
+        from all_tomorrow.overseer import knowhow
+        return knowhow.main(raw[1:])
     parser = argparse.ArgumentParser(prog="all_tomorrow.overseer")
     sub = parser.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("collect")
