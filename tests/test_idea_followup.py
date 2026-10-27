@@ -91,7 +91,7 @@ def test_followup_runs_in_codex_then_material_is_compressed(env) -> None:
     assert tick(idle=None) == "started"                                  # 지금 돌리기처럼 PC 사용 중이어도
     task, kw = calls[0]
     assert "경쟁사 가격 더" in task and "책을 월 구독으로" in task and "해석한 조사 질문" in task
-    assert kw["argv_suffix"][:2] == ["-c", 'web_search="live"'] and kw["worker_options"]["sandbox"] == "read-only"
+    assert kw["argv_suffix"][:2] == ["-c", 'web_search="live"'] and "sandbox" not in kw["worker_options"]
     assert "mcp_servers.chrome_pages.command=" in " ".join(kw["argv_suffix"]) and "read_logged_in_page" in task
     results["run1"] = {"status": "SUCCESS", "result": {"payload": {"output": "## 해석한 조사 질문\n" + RAW}}}
     assert tick(idle=None) == "finished"
@@ -103,11 +103,11 @@ def test_followup_runs_in_codex_then_material_is_compressed(env) -> None:
     brief = store.brief(iid)
     assert "원문표식ZZ" not in brief and "압축 대기" in brief and "Codex 추가 조사" in brief
     assert "압축 대기 1건" in store.recent_summary()
-    # 압축: PC 사용 중이어도, 웹 검색 없이, read-only로, 원문을 보고 바로 시작
+    # 압축: PC 사용 중이어도, 웹 검색 없이, 원문을 보고 바로 시작
     assert tick(idle=None, now=NOW + 60) == "compress"
     ctask, ckw = calls[1]
     assert "원문표식ZZ" in ctask and "웹 검색을 하지 않는다" in ctask and "argv_suffix" not in ckw
-    assert ckw["worker_options"]["sandbox"] == "read-only"
+    assert "sandbox" not in ckw["worker_options"]
     assert tick(idle=None, now=NOW + 70) == "running"
     results["run2"] = {"status": "SUCCESS", "result": {"payload": {"output": "## 새로 더해진 것\n- 월 9달러부터\n## 이미 앎\n없음"}}}
     assert tick(idle=None, now=NOW + 80) == "finished"
@@ -118,7 +118,7 @@ def test_followup_runs_in_codex_then_material_is_compressed(env) -> None:
     # 압축이 끝나면 종합: 압축본만 넣는다
     assert tick(idle=None, now=NOW + 90) == "synth"
     stask, skw = calls[2]
-    assert "월 9달러부터" in stask and "원문표식ZZ" not in stask and skw["worker_options"]["sandbox"] == "read-only"
+    assert "월 9달러부터" in stask and "원문표식ZZ" not in stask and "sandbox" not in skw["worker_options"]
     results["run3"] = {"status": "SUCCESS", "result": {"payload": {"output": "## 한 줄 결론\n가격 9달러대가 기준이다 [M1]"}}}
     assert tick(idle=None, now=NOW + 100) == "finished"
     assert "가격 9달러대가 기준이다" in store.brief(iid) and "결론: 가격 9달러대" in store.recent_summary()

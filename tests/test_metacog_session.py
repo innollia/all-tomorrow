@@ -115,7 +115,7 @@ def test_run_writes_journal_on_top_and_one_report(tmp_path):
     journal = (tmp_path / ms.JOURNAL).read_text(encoding="utf-8")
     assert journal.index("메타인지 세션") < journal.index("예전 기록") and SECRET not in journal
     assert "17턴" in journal and "240초" in journal
-    assert "관제" in seen["prompt"] and "물을 것" in seen["prompt"] and seen["timeout"] == 20 * 60
+    assert "관제" in seen["prompt"] and "물을 것" in seen["prompt"] and seen["timeout"] == 60 * 60
     reports = list((tmp_path / "reports").glob("metacog-session-*.json"))
     assert len(reports) == 1 and "해결" in json.loads(reports[0].read_text(encoding="utf-8"))["content"]
     ms.run(tmp_path, "quote-vn-desk:FileNotFoundError", runner=runner, redact=Redactor({SECRET}))
@@ -123,16 +123,19 @@ def test_run_writes_journal_on_top_and_one_report(tmp_path):
     assert len((tmp_path / ms.RUNS).read_text(encoding="utf-8").splitlines()) == 2
 
 
-def test_argv_is_headless_allowlisted_and_default_model(tmp_path, monkeypatch):
-    monkeypatch.delenv("ALL_TOMORROW_METACOG_SESSION_MODEL", raising=False)
-    argv = ms.build_argv(tmp_path, ms.settings())
+def test_argv_is_headless_with_user_settings_and_default_model(tmp_path, monkeypatch):
+    for name in ("MODEL", "TURNS", "MINUTES", "DAILY"):
+        monkeypatch.delenv(f"ALL_TOMORROW_METACOG_SESSION_{name}", raising=False)
+    cfg = ms.settings()
+    assert (cfg["turns"], cfg["minutes"], cfg["daily"]) == (100, 60, 12)
+    argv = ms.build_argv(tmp_path, cfg)
     assert "-p" in argv and "--model" not in argv
-    assert argv[argv.index("--permission-mode") + 1] == "dontAsk"
-    assert argv[argv.index("--max-turns") + 1] == "40"
-    allowed = argv[argv.index("--allowedTools") + 1].split(",")
-    assert "mcp__oracle__oracle_ask" in allowed and "mcp__all-tomorrow__dispatch_task" in allowed
-    assert not any("notion" in a.lower() for a in allowed)
-    assert "Bash(git push:*)" in argv[argv.index("--disallowedTools") + 1]
+    assert argv[argv.index("--permission-mode") + 1] == "bypassPermissions"
+    assert argv[argv.index("--max-turns") + 1] == "100"
+    for gone in ("--setting-sources", "--strict-mcp-config", "--tools", "--allowedTools", "--no-session-persistence"):
+        assert gone not in argv
+    deny = argv[argv.index("--disallowedTools") + 1]
+    assert "Bash(git push:*)" in deny and "Bash(rm -rf:*)" in deny and "Read(**/.env)" in deny
     config = json.loads((tmp_path / "metacog-mcp.json").read_text(encoding="utf-8"))
     assert set(config["mcpServers"]) == {"oracle", "all-tomorrow"}
 

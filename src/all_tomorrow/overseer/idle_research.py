@@ -5,10 +5,10 @@
 - 차례: 켜진 주제를 목록 위에서부터. 한 번도 안 돌았거나, 반복 주기(repeat_days)가 지났거나,
   실패 뒤 6시간이 지났거나, '지금 돌리기'를 눌렀으면 차례다. 반복 주제는 지난 결과를 들려 보내 바뀐 것 위주로 쓰게 한다.
 - 조건: PC 미사용 10분 이상('지금 돌리기'는 무시), Codex 사용량 창이 모두 80% 미만, 하루 8회, research.paused 없음.
-- Codex는 웹 검색을 켜고(-c web_search="live") 그 주제의 프로젝트 폴더에서 돈다. 파일은 고치지 않게 한다.
+- Codex는 사용자 설정(플러그인·MCP)과 웹 검색을 켜고(-c web_search="live") 그 주제의 프로젝트 폴더에서 돈다. 파일은 고치지 않게 한다(프롬프트로).
 - 자유 자료와 하위 과제 결과는 원문을 보관만 하고, 저장되면 압축 작업(kind=compress)을 먼저 띄운다(PC 사용 여부·하루 횟수와 무관, 웹 검색 없음).
 - 압축할 것이 없으면 종합 작업(kind=synth): 아이디어 하나의 종합본(정리본의 본문)을 이전 종합본 + 새 압축본으로 다시 만든다.
-  원문은 넣지 않는다. 압축과 같은 조건·같은 Codex read-only 경로다.
+  원문은 넣지 않는다. 압축과 같은 조건·같은 Codex 경로다.
 - 결과는 results/<실행 id>.md로 남기고, 끝날 때 보고 1건을 낸다.
 - 아이디어에 연결된 주제(idea_id, 아이디어 화면의 '추가 조사')는 돌릴 때 아이디어 맥락을 붙이고, 끝나면 결과를 그 아이디어의 자유 자료로 넣는다.
 """
@@ -216,7 +216,7 @@ def _start_synth(folder: Path, job: dict, runs: list[dict], now: float, start: C
            "project_id": "all-tomorrow", "started": now, "status": "RUNNING"}
     try:
         meta = start("all-tomorrow", "codex", ideas_followup.synth_prompt(idea, job),
-                     worker_options={"timeout_seconds": min(cfg["timeout"], 900), "sandbox": "read-only"})
+                     worker_options={"timeout_seconds": min(cfg["timeout"], 900)})
     except Exception as error:
         run.update(status="FAILED", error=type(error).__name__ + ": " + str(error)[:200], finished=now)
         runs.append(run)
@@ -230,7 +230,7 @@ def _start_synth(folder: Path, job: dict, runs: list[dict], now: float, start: C
 
 
 def _start_compress(folder: Path, item: dict, runs: list[dict], now: float, start: Callable[..., dict], cfg: dict) -> str:
-    """원문은 두고 압축본만 만들게 한다: read-only, 웹 검색 없음, PC 사용 여부와 상관없이 바로."""
+    """원문은 두고 압축본만 만들게 한다: 웹 검색 없음, PC 사용 여부와 상관없이 바로."""
     from all_tomorrow import mcp_server
     from all_tomorrow.console import ideas_followup
     from all_tomorrow.console.ideas import IdeaStore
@@ -245,7 +245,7 @@ def _start_compress(folder: Path, item: dict, runs: list[dict], now: float, star
         run["material_id"] = item["id"]
     try:
         meta = start("all-tomorrow", "codex", ideas_followup.compress_prompt(idea, material),
-                     worker_options={"timeout_seconds": min(cfg["timeout"], 900), "sandbox": "read-only"})
+                     worker_options={"timeout_seconds": min(cfg["timeout"], 900)})
     except Exception as error:
         run.update(status="FAILED", error=type(error).__name__ + ": " + str(error)[:200], finished=now)
         runs.append(run)
@@ -367,7 +367,7 @@ def tick(base: Path, idle: float | None, *, now: float | None = None,
     try:
         from all_tomorrow.adapters import chrome_pages
         meta = start(project_id, "codex", build_task(topic, runs, folder, cwd) + chrome_pages.PROMPT_NOTE,
-                     worker_options={"timeout_seconds": cfg["timeout"], "sandbox": "read-only"},
+                     worker_options={"timeout_seconds": cfg["timeout"]},
                      argv_suffix=["-c", 'web_search="live"', *chrome_pages.codex_args(folder / PAGES / run["id"])])
     except Exception as error:
         run.update(status="FAILED", error=type(error).__name__ + ": " + str(error)[:200], finished=now)

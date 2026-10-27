@@ -26,6 +26,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from all_tomorrow.adapters.workers import CLAUDE_DENY, _worker_environment
 from all_tomorrow.overseer import reports
 from all_tomorrow.overseer.environment import REPO
 from all_tomorrow.overseer.workspace import save
@@ -39,22 +40,16 @@ PAUSE = "metacog-session.paused"
 JOURNAL = "metacog-journal.md"
 WORKDIR = Path(os.environ.get("ALL_TOMORROW_METACOG_SESSION_CWD", r"C:\projects"))
 
-# 사람이 없으므로 명시적 허용 목록만 쓴다(dontAsk: 목록 밖 도구는 자동 거부).
-TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "PowerShell"]
-MCP_TOOLS = ["mcp__oracle__oracle_ask", "mcp__all-tomorrow__dispatch_task", "mcp__all-tomorrow__get_run",
-             "mcp__all-tomorrow__list_runs", "mcp__all-tomorrow__list_projects", "mcp__all-tomorrow__project_status",
-             "mcp__all-tomorrow__list_local_workers"]
-# "먼저 묻는 일"의 기계적 안전망. 본 규칙은 프롬프트(overseer-role.md)가 정하고 세션이 보고로 남긴다.
-DENY = ["Bash(git push:*)", "PowerShell(git push:*)", "Bash(rm -rf:*)", "Bash(git reset --hard:*)",
-        "Bash(git clean:*)", "Read(~/.all-tomorrow/key-pool.env)", "Read(~/.claude/.credentials.json)",
-        "Read(**/.env)", "Bash(cat:*key-pool*)", "mcp__all-tomorrow__register_project"]
+# 권한은 사용자 터미널과 같게(사용자 설정·MCP·전체 도구, bypassPermissions). 사용자 규칙에서 나온 차단만 남긴다:
+# git push, 비밀값 파일 읽기, rm -rf / reset --hard / git clean. 나머지 "먼저 묻는 일"은 overseer-role.md가 정한다.
+DENY = CLAUDE_DENY
 
 
 def settings() -> dict:
     env = os.environ.get
-    return {"daily": int(env("ALL_TOMORROW_METACOG_SESSION_DAILY", "6")),
-            "minutes": float(env("ALL_TOMORROW_METACOG_SESSION_MINUTES", "20")),
-            "turns": int(env("ALL_TOMORROW_METACOG_SESSION_TURNS", "40")),
+    return {"daily": int(env("ALL_TOMORROW_METACOG_SESSION_DAILY", "12")),
+            "minutes": float(env("ALL_TOMORROW_METACOG_SESSION_MINUTES", "60")),
+            "turns": int(env("ALL_TOMORROW_METACOG_SESSION_TURNS", "100")),
             "model": env("ALL_TOMORROW_METACOG_SESSION_MODEL", "")}
 
 
@@ -244,27 +239,16 @@ def claude_executable() -> str:
 
 def build_argv(base: Path, cfg: dict) -> list[str]:
     argv = [claude_executable(), "-p", "--output-format", "json", "--max-turns", str(cfg["turns"]),
-            "--setting-sources", "", "--strict-mcp-config", "--mcp-config", str(mcp_config(base)),
-            "--tools", ",".join(TOOLS), "--allowedTools", ",".join(TOOLS + MCP_TOOLS),
-            "--disallowedTools", ",".join(DENY), "--permission-mode", "dontAsk", "--disable-slash-commands"]
+            "--mcp-config", str(mcp_config(base)),   # 사용자 MCP 위에 all-tomorrow·oracle을 더한다
+            "--disallowedTools", ",".join(DENY), "--permission-mode", "bypassPermissions"]
     if cfg["model"]:          # 기본은 지정하지 않는다(최상위 고가 모델 금지)
         argv += ["--model", cfg["model"]]
     return argv
 
 
 def session_env(key_pool: Path | None = None) -> dict:
-    """key-pool.env에서 온 값(비밀값)은 세션 환경에서 뺀다. 이름만 읽는다."""
-    env = dict(os.environ)
-    path = key_pool or Path.home() / ".all-tomorrow" / "key-pool.env"
-    try:
-        for line in path.read_text(encoding="utf-8-sig").splitlines():
-            name, sep, _ = line.strip().partition("=")
-            if sep and name and not name.startswith("#"):
-                env.pop(name.strip(), None)
-    except OSError:
-        pass
-    env.pop("ANTHROPIC_API_KEY", None)        # 구독 로그인을 쓴다
-    return env
+    """key-pool.env에서 온 값(비밀값)은 세션 환경에서 뺀다. 이름만 읽는다. ANTHROPIC_API_KEY도 뺀다(구독 로그인)."""
+    return _worker_environment({}, key_pool)
 
 
 def run_claude(prompt: str, argv: list[str], *, cwd: Path, timeout: float) -> dict:

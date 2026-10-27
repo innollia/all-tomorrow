@@ -370,7 +370,7 @@ def claude_worker(model: str, candidate: Path):
     import shutil
     from all_tomorrow.adapters.workers import ClaudeWorker
     return ClaudeWorker(argv=[shutil.which("claude") or "claude", "--model", model, "--effort", "low"],
-                        allowed_roots=(str(candidate),), timeout_seconds=600)
+                        allowed_roots=(str(candidate),), timeout_seconds=1800)
 
 
 def reset_candidate(candidate: Path) -> None:

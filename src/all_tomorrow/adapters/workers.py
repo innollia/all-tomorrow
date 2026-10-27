@@ -315,18 +315,35 @@ async def _run_process_safe(
     return stdout_str, duration_ms
 
 
-def _worker_environment(extra: dict[str, str]) -> dict[str, str]:
-    # Host CLI logins remain on disk; do not copy control-plane credentials or
-    # the parent agent's session/sandbox variables into a child agent.
-    allowed = {
-        "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP",
-        "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMFILES",
-        "PROGRAMFILES(X86)", "PROGRAMDATA", "SYSTEMDRIVE", "USERNAME",
-        "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
-        "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "CODEX_HOME", "XDG_CONFIG_HOME",
-        "XDG_DATA_HOME", "XDG_CACHE_HOME",
-    }
-    environment = {**{k: v for k, v in os.environ.items() if k.upper() in allowed}, **extra}
+# Workers get the same powers as the user's own terminal (user decision 2026-10-27). The only blocks kept
+# come from the user's rules: no git push, no reading/printing secret files, no rm -rf / reset --hard / git clean.
+CLAUDE_DENY = ["Bash(git push:*)", "PowerShell(git push:*)",
+               "Bash(rm -rf:*)", "PowerShell(rm -rf:*)", "Bash(git reset --hard:*)", "PowerShell(git reset --hard:*)",
+               "Bash(git clean:*)", "PowerShell(git clean:*)",
+               "Read(~/.all-tomorrow/key-pool.env)", "Read(**/key-pool.env)", "Read(~/.claude/.credentials.json)",
+               "Read(**/.env)", "Bash(cat:*key-pool*)", "PowerShell(Get-Content:*key-pool*)"]
+KEY_POOL = Path.home() / ".all-tomorrow" / "key-pool.env"
+
+
+def secret_names(key_pool: Path | None = None) -> set[str]:
+    """Names (never values) of the variables key-pool.env provides; they stay out of worker environments."""
+    names = {"ANTHROPIC_API_KEY"}   # workers use the subscription login
+    try:
+        for line in (key_pool or KEY_POOL).read_text(encoding="utf-8-sig").splitlines():
+            name, sep, _ = line.strip().partition("=")
+            if sep and name and not name.startswith("#"):
+                names.add(name.strip())
+    except OSError:
+        pass
+    return names
+
+
+def _worker_environment(extra: dict[str, str], key_pool: Path | None = None) -> dict[str, str]:
+    # The whole environment, minus key-pool secrets and a parent Claude Code session's markers.
+    hidden = {n.upper() for n in secret_names(key_pool)}
+    environment = {k: v for k, v in os.environ.items()
+                   if k.upper() not in hidden and k.upper() != "CLAUDECODE" and not k.upper().startswith("CLAUDE_CODE_")}
+    environment.update(extra)
     environment.setdefault("HOME", str(Path.home()))
     return environment
 
@@ -344,17 +361,17 @@ def _json_records(output: str) -> list[dict[str, Any]]:
 
 
 class CodexWorker:
-    """A fresh, ephemeral Codex CLI execution using the host login."""
+    """A Codex CLI execution using the host login and the user's own ~/.codex/config.toml (plugins, MCP, trust)."""
 
     def __init__(self, *, allowed_roots: tuple[str, ...], argv: list[str] | None = None,
-                 model: str | None = None, timeout_seconds: float = 300,
-                 output_limit_bytes: int = 1024 * 1024,
+                 model: str | None = None, timeout_seconds: float = 1800,
+                 output_limit_bytes: int = 16 * 1024 * 1024,
                  ignore_user_config: bool = False,
                  skip_git_repo_check: bool = False,
                  sandbox: str = "workspace-write",
                  env: dict[str, str] | None = None) -> None:
-        if sandbox not in {"read-only", "workspace-write"}:
-            raise ValueError("sandbox must be read-only or workspace-write")
+        if sandbox not in {"read-only", "workspace-write", "danger-full-access"}:
+            raise ValueError("sandbox must be read-only, workspace-write or danger-full-access")
         self._sandbox = sandbox
         self._argv = list(argv or ["codex"])
         self._allowed_roots = allowed_roots
@@ -377,8 +394,9 @@ class CodexWorker:
         return _check_executable_available(self._argv)
 
     def build_argv(self, prompt: str) -> list[str]:
-        cmd = [*self._argv, "exec", "--ephemeral", "--json", "--sandbox", self._sandbox,
-               "-c", 'approval_policy="never"']
+        # Sessions are kept (no --ephemeral) and workspace-write may use the network, like the user's terminal.
+        cmd = [*self._argv, "exec", "--json", "--sandbox", self._sandbox,
+               "-c", 'approval_policy="never"', "-c", "sandbox_workspace_write.network_access=true"]
         if os.name == "nt":
             cmd.extend(["-c", 'windows.sandbox="unelevated"'])
         if self._ignore_user_config:
@@ -436,7 +454,7 @@ class CodexWorker:
 
 
 class ClaudeWorker(CodexWorker):
-    """Headless project manager, restricted to file tools and git/python Bash."""
+    """Headless Claude Code with the user's settings, MCP servers and all tools; only CLAUDE_DENY is blocked."""
 
     def __init__(self, *, argv: list[str] | None = None, **kwargs: Any) -> None:
         super().__init__(argv=argv or ["claude"], **kwargs)
@@ -446,13 +464,8 @@ class ClaudeWorker(CodexWorker):
         return "claude"
 
     def build_argv(self, prompt: str) -> list[str]:
-        return [*self._argv, "-p", "--output-format", "json", "--no-session-persistence",
-                "--setting-sources", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-                # Prefix rules like Bash(python *) deny chained commands the model writes
-                # (e.g. "python ...; git status"), so the whole run failed; allow Bash.
-                "--tools", "Read,Write,Edit,Bash", "--allowedTools",
-                "Read,Write,Edit,Bash", "--permission-mode", "dontAsk",
-                "--disable-slash-commands", "--", prompt]
+        return [*self._argv, "-p", "--output-format", "json", "--permission-mode", "bypassPermissions",
+                "--disallowedTools", ",".join(CLAUDE_DENY), "--", prompt]
 
     def parse_output(self, output: str) -> dict[str, Any]:
         result = json.loads(output)
@@ -473,7 +486,7 @@ class KiroWorker(CodexWorker):
     """Kiro headless text protocol; JSON event schema is not assumed."""
 
     def __init__(self, *, argv: list[str] | None = None,
-                 trusted_tools: tuple[str, ...] = ("fs_read", "fs_write"),
+                 trusted_tools: tuple[str, ...] | None = None,
                  agent: str | None = None, **kwargs: Any) -> None:
         super().__init__(argv=argv or ["kiro-cli"], **kwargs)
         self._trusted_tools = trusted_tools
@@ -484,8 +497,9 @@ class KiroWorker(CodexWorker):
         return "kiro"
 
     def build_argv(self, prompt: str) -> list[str]:
-        cmd = [*self._argv, "chat", "--no-interactive", "--output-format", "text",
-               "--trust-tools=" + ",".join(self._trusted_tools)]
+        # None trusts every tool (user decision 2026-10-27); a tuple narrows it again.
+        trust = "--trust-all-tools" if self._trusted_tools is None else "--trust-tools=" + ",".join(self._trusted_tools)
+        cmd = [*self._argv, "chat", "--no-interactive", "--output-format", "text", trust]
         if self._model:
             cmd.extend(["--model", self._model])
         if self._agent:
@@ -509,8 +523,8 @@ class AntigravityWorker:
         effort: str = "high",
         model: str | None = None,
         output_format: str = "json",
-        timeout_seconds: float = 120.0,
-        output_limit_bytes: int = 1024 * 1024,
+        timeout_seconds: float = 1800.0,
+        output_limit_bytes: int = 16 * 1024 * 1024,
         env: dict[str, str] | None = None,
     ) -> None:
         if argv is None:
@@ -636,8 +650,8 @@ class OpenCodeWorker:
         agent: str | None = None,
         format: str = "json",
         auto: bool = False,
-        timeout_seconds: float = 180.0,
-        output_limit_bytes: int = 1024 * 1024,
+        timeout_seconds: float = 1800.0,
+        output_limit_bytes: int = 16 * 1024 * 1024,
         env: dict[str, str] | None = None,
     ) -> None:
         if argv_prefix is None:

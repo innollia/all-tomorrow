@@ -150,9 +150,9 @@ def test_prompt_and_claude_cli_contract(tmp_path):
     worker = ClaudeWorker(allowed_roots=(str(tmp_path),))
     argv = worker.build_argv(prompt)
     assert argv[-2:] == ["--", prompt]
-    assert argv[argv.index("--allowedTools") + 1] == "Read,Write,Edit,Bash"
-    assert "dontAsk" in argv and "--strict-mcp-config" in argv
-    assert "--dangerously-skip-permissions" not in argv
+    assert argv[argv.index("--permission-mode") + 1] == "bypassPermissions"
+    assert "--strict-mcp-config" not in argv and "--setting-sources" not in argv and "--allowedTools" not in argv
+    assert "Bash(git push:*)" in argv[argv.index("--disallowedTools") + 1]
     assert worker.parse_output('{"type":"result","subtype":"success","result":"OK"}')["output"] == "OK"
     with pytest.raises(RuntimeError):
         worker.parse_output('{"type":"result","subtype":"error_during_execution","is_error":true}')

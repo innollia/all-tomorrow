@@ -86,7 +86,7 @@ class ProjectTriggers:
         self.worker_factory = worker_factory or (lambda d: ClaudeWorker(
             argv=["claude", *(["--model", d["model"]] if d.get("model") else []),
                   *(["--effort", d["effort"]] if d.get("effort") else [])],
-            allowed_roots=(d["cwd"],), timeout_seconds=900))
+            allowed_roots=(d["cwd"],), timeout_seconds=1800))
         self.clock = clock
         self.lock = asyncio.Lock()
         self.tasks = {}

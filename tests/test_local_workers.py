@@ -89,10 +89,16 @@ async def test_auth_failure_preserves_actionable_diagnostic(tmp_path):
 
 
 async def test_environment_and_explicit_credential_redaction(tmp_path, monkeypatch):
+    # The whole environment passes through, except names that come from key-pool.env.
+    import all_tomorrow.adapters.workers as workers_module
+    pool = tmp_path / "key-pool.env"
+    pool.write_text("CENTRAL_SECRET=x" + chr(10), encoding="utf-8")
+    monkeypatch.setattr(workers_module, "KEY_POOL", pool)
     monkeypatch.setenv("CENTRAL_SECRET", "central-canary")
+    monkeypatch.setenv("ORDINARY_SETTING", "kept")
     argv = fixture_cli(tmp_path, """
 import os,sys
-assert 'CENTRAL_SECRET' not in os.environ
+assert 'CENTRAL_SECRET' not in os.environ and os.environ['ORDINARY_SETTING'] == 'kept'
 print(os.environ['PROVIDER_TOKEN'], file=sys.stderr)
 sys.exit(1)
 """)
@@ -139,11 +145,11 @@ def test_config_requires_absolute_existing_roots(tmp_path):
         load_config(path)
 
 
-def test_codex_does_not_fall_back_to_unrestricted_permissions(tmp_path):
+def test_codex_runs_like_the_users_terminal(tmp_path):
     argv = CodexWorker(allowed_roots=(str(tmp_path),)).build_argv("task")
     assert argv[argv.index("--sandbox") + 1] == "workspace-write"
-    assert "--ephemeral" in argv
-    assert "danger-full-access" not in argv
+    assert "sandbox_workspace_write.network_access=true" in argv
+    assert "--ephemeral" not in argv and "--ignore-user-config" not in argv
     if os.name == "nt":
         assert 'windows.sandbox="unelevated"' in argv
 
@@ -175,8 +181,10 @@ def test_command_emits_utf8_json_on_windows_too(tmp_path):
     assert json.loads(result.stdout.decode("utf-8"))["payload"]["output"] == "작업 완료"
 
 
-def test_codex_sandbox_option_defaults_to_workspace_write_and_allows_read_only(tmp_path):
+def test_codex_sandbox_option_allows_read_only_and_full_access(tmp_path):
     ro = CodexWorker(allowed_roots=(str(tmp_path),), sandbox="read-only").build_argv("task")
     assert ro[ro.index("--sandbox") + 1] == "read-only"
+    full = CodexWorker(allowed_roots=(str(tmp_path),), sandbox="danger-full-access").build_argv("task")
+    assert full[full.index("--sandbox") + 1] == "danger-full-access"
     with pytest.raises(ValueError):
-        CodexWorker(allowed_roots=(str(tmp_path),), sandbox="danger-full-access")
+        CodexWorker(allowed_roots=(str(tmp_path),), sandbox="anything")
