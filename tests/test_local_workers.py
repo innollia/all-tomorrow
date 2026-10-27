@@ -163,3 +163,10 @@ def test_command_emits_utf8_json_on_windows_too(tmp_path):
                             capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout.decode("utf-8"))["payload"]["output"] == "작업 완료"
+
+
+def test_codex_sandbox_option_defaults_to_workspace_write_and_allows_read_only(tmp_path):
+    ro = CodexWorker(allowed_roots=(str(tmp_path),), sandbox="read-only").build_argv("task")
+    assert ro[ro.index("--sandbox") + 1] == "read-only"
+    with pytest.raises(ValueError):
+        CodexWorker(allowed_roots=(str(tmp_path),), sandbox="danger-full-access")

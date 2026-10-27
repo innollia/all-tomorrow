@@ -351,7 +351,11 @@ class CodexWorker:
                  output_limit_bytes: int = 1024 * 1024,
                  ignore_user_config: bool = False,
                  skip_git_repo_check: bool = False,
+                 sandbox: str = "workspace-write",
                  env: dict[str, str] | None = None) -> None:
+        if sandbox not in {"read-only", "workspace-write"}:
+            raise ValueError("sandbox must be read-only or workspace-write")
+        self._sandbox = sandbox
         self._argv = list(argv or ["codex"])
         self._allowed_roots = allowed_roots
         self._model = model
@@ -373,7 +377,7 @@ class CodexWorker:
         return _check_executable_available(self._argv)
 
     def build_argv(self, prompt: str) -> list[str]:
-        cmd = [*self._argv, "exec", "--ephemeral", "--json", "--sandbox", "workspace-write",
+        cmd = [*self._argv, "exec", "--ephemeral", "--json", "--sandbox", self._sandbox,
                "-c", 'approval_policy="never"']
         if os.name == "nt":
             cmd.extend(["-c", 'windows.sandbox="unelevated"'])

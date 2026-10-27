@@ -164,7 +164,7 @@ def tick(base: Path, idle: float | None, *, now: float | None = None,
            "title": topic["title"], "project_id": project_id, "started": now, "status": "RUNNING"}
     try:
         meta = start(project_id, "codex", build_task(topic, runs, folder, cwd),
-                     worker_options={"timeout_seconds": cfg["timeout"]}, argv_suffix=["-c", 'web_search="live"'])
+                     worker_options={"timeout_seconds": cfg["timeout"], "sandbox": "read-only"}, argv_suffix=["-c", 'web_search="live"'])
     except Exception as error:
         run.update(status="FAILED", error=type(error).__name__ + ": " + str(error)[:200], finished=now)
         runs.append(run)
