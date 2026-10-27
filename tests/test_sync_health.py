@@ -67,7 +67,7 @@ def test_collect_only_peer_reporting_and_success(tmp_path, monkeypatch):
             store.con.backup(con)
         monkeypatch.setattr(s, 'peer_paths', lambda _: [peer])
         s.run(base, store, check=lambda *a, **k: dict(healthy, host='dp7'), now=104000)
-        assert len(list((base/'reports').glob('*.json'))) == 1
+        assert not list((base/'reports').glob('*.json'))  # 자동 복구로 해결된 것은 보고하지 않는다.
     finally:
         store.close()
 
@@ -111,3 +111,46 @@ def test_run_cli_checks_before_collect(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, 'collect', lambda *a, **k: order.append(('collect', True)))
     assert cli.main(['--dir', str(tmp_path), 'run', '--collect-only']) == 0
     assert order == [('health', True), ('collect', True)]
+
+
+def test_one_report_per_lasting_anomaly(tmp_path):
+    base = tmp_path/'overseer'; store = SessionStore(base/'overseer.sqlite')
+    state = {'issues': ['peer_disconnected:DOC5FPZ']}
+    check = lambda config, now=None: {'host': 'dp7', 'at': now, 'issues': list(state['issues']), 'devices': []}
+    reports = lambda: sorted(p.name for p in (base/'reports').glob('*.json'))
+    try:
+        for hour in range(12):  # 반나절 안에 풀리는 끊김은 기록만 한다.
+            s.run(base, store, check=check, now=100000 + hour*3600)
+        assert reports() == []
+        for hour in range(12, 48):  # 날짜가 바뀌어도 같은 이상은 한 번만 보고한다.
+            s.run(base, store, check=check, now=100000 + hour*3600)
+        assert len(reports()) == 1
+        assert '사람이 확인' in json.loads((base/'reports'/reports()[0]).read_text(encoding='utf-8'))['content']
+        state['issues'] = []
+        s.run(base, store, check=check, now=100000 + 48*3600)
+        assert json.loads((base/'sync-health.json').read_text(encoding='utf-8'))['alerts'] == {}
+        state['issues'] = ['peer_disconnected:DOC5FPZ']
+        for hour in range(49, 49 + 13):  # 정상으로 돌아왔다가 다시 생기면 새 이상이다.
+            s.run(base, store, check=check, now=100000 + hour*3600)
+        assert len(reports()) == 2
+    finally:
+        store.close()
+
+
+def test_failed_repair_is_reported_once_and_offline_peer_is_not(tmp_path, monkeypatch):
+    base = tmp_path/'overseer'; store = SessionStore(base/'overseer.sqlite')
+    peer = tmp_path/'peer.sqlite'
+    with closing(sqlite3.connect(peer)) as con:
+        con.execute('create table sync_health (host text primary key, payload text not null)')
+        con.execute('insert into sync_health values (?,?)', ('laptop', json.dumps(
+            {'host': 'laptop', 'at': 100000, 'issues': ['inspection_failed'], 'devices': []})))
+        con.commit()
+    monkeypatch.setattr(s, 'peer_paths', lambda _: [peer])
+    check = lambda config, now=None: {'host': 'dp7', 'at': now, 'issues': ['port_missing'], 'devices': []}
+    try:
+        for hour in range(30):  # 상대 기록은 꺼진 뒤 그대로 남아 있어도 보고하지 않는다.
+            s.run(base, store, check=check, repair=lambda _: None, now=100000 + 4*3600 + hour*3600, sleep=lambda _: None)
+        contents = [json.loads(p.read_text(encoding='utf-8'))['content'] for p in (base/'reports').glob('*.json')]
+        assert len(contents) == 1 and '설정 포트 미수신' in contents[0] and '실패' in contents[0]
+    finally:
+        store.close()

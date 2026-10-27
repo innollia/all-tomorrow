@@ -178,12 +178,48 @@ def describe(cause):
             'inspection_failed': '점검 실패'}.get(cause, cause)
 
 
-def notify(base, result):
-    day = datetime.fromtimestamp(result['at']).strftime('%Y-%m-%d')
-    for cause in sorted(set(result.get('initial_issues', [])) | set(result['issues'])):
-        key = hashlib.sha256((result['host'] + cause).encode()).hexdigest()[:20]
-        reports.enqueue(base, f'sync-{day}-{key}',
-                        f"[보고] 동기화 {result['host']} · {describe(cause)} · 관측 {datetime.fromtimestamp(result['at']).isoformat(timespec='seconds')} · 복구 {result.get('recovery', '없음')} · 현재 {', '.join(map(describe, result['issues'])) or '정상'}")
+REPAIRABLE = {'key_rejected', 'connection_refused', 'duplicate', 'port_missing'}
+PERSIST = 12 * 3600  # 자동 복구 대상이 아닌 이상은 이만큼 이어져야 사람이 볼 일로 본다.
+STALE = 3 * 3600  # 이보다 오래된 상대 기록은 상대가 꺼진 것으로 보고 기록만 둔다.
+
+
+def needs_person(cause, result, since, now):
+    if cause in REPAIRABLE and result.get('recovery') in ('실패', '제한으로 보류'):
+        return True
+    return now - since >= PERSIST
+
+
+def notify(base, result, cause, since, key):
+    reports.enqueue(base, f'sync-{key}-{int(since)}',
+                    f"[보고] 동기화 {result['host']} · {describe(cause)} · {datetime.fromtimestamp(since).isoformat(timespec='minutes')}부터 이어짐 · 복구 {result.get('recovery', '없음')} · 사람이 확인해야 함")
+
+
+def track(base, alerts, results, now, *, send=True):
+    """이상 하나당 한 번만 보고한다. 이어지는 동안은 다시 보고하지 않고, 사라지면 지운다."""
+    current = {}
+    for result in results:
+        for cause in result.get('issues', []):
+            key = hashlib.sha256((result['host'] + cause).encode()).hexdigest()[:20]
+            alert = alerts.get(key) or {'host': result['host'], 'cause': cause, 'since': result['at'], 'reported': False}
+            if send and not alert['reported'] and needs_person(cause, result, alert['since'], now):
+                notify(base, result, cause, alert['since'], key)
+                alert['reported'] = True
+            current[key] = alert
+    return current
+
+
+def peer_results(base, now):
+    results = []
+    for peer in peer_paths(base):
+        try:
+            with closing(open_peer(peer)) as con:
+                for (payload,) in con.execute('select payload from sync_health'):
+                    result = json.loads(payload)
+                    if now - result['at'] <= STALE:
+                        results.append(result)
+        except (sqlite3.Error, OSError, ValueError, KeyError):
+            continue
+    return results
 
 
 def run(base, store, *, collect_only=False, config=None, check=inspect, repair=restart, now=None, sleep=time.sleep):
@@ -228,23 +264,13 @@ def run(base, store, *, collect_only=False, config=None, check=inspect, repair=r
         if result['initial_issues'] or result['issues']:
             incidents.append({k: result[k] for k in ('host', 'at', 'issues', 'initial_issues', 'recovery') if k in result})
         result['incidents'] = incidents[-168:]
+        others = [r for r in peer_results(base, now) if r.get('host') != result['host']]
+        result['alerts'] = track(base, previous.get('alerts', {}), [result, *others], now, send=not collect_only)
         save(path, result)
         store.con.execute('create table if not exists sync_health (host text primary key, payload text not null)')
         store.con.execute('insert or replace into sync_health values (?,?)', (result['host'], json.dumps(result)))
         store.commit()
         store.publish(base)
-        if not collect_only:
-            for incident in result['incidents']:
-                notify(base, incident)
-            for peer in peer_paths(base):
-                try:
-                    with closing(open_peer(peer)) as con:
-                        for (payload,) in con.execute('select payload from sync_health'):
-                            peer_result = json.loads(payload)
-                            for incident in peer_result.get('incidents', [peer_result]):
-                                notify(base, incident)
-                except (sqlite3.Error, OSError, ValueError, KeyError):
-                    continue
         return result
 
 
