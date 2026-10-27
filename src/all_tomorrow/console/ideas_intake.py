@@ -42,6 +42,58 @@ def first_line(text: str, limit: int = 60) -> str:
     return "(제목 없음)"
 
 
+SPLIT_MIN = 15_000   # 이보다 짧은 글은 나누지 않는다
+PART_MIN = 1_500     # 이보다 짧은 조각은 앞 보고서에 붙인다
+REPORT_META = re.compile(r"^(조사 기준|기준일|기준 시점|\d{4}년 \d{1,2}월 \d{1,2}일 기준)")
+
+
+def split_reports(text: str) -> list[str]:
+    """여러 보고서를 이어 붙인 긴 글 → 보고서 하나씩. 압축본은 자료 하나에 1,500자라, 보고서 여섯 개가 한 자료면
+    앞 보고서만 남는다. 새 보고서의 시작: 줄 머리의 '# 제목'(앞 문장 끝에 붙어 온 '….# 제목'도), 또는 번호가 다시
+    1로 돌아온 '## 1.'(바로 위의 '조사 기준:'·'기준일:' 같은 머리줄까지 함께). 나눌 곳이 없으면 그대로 하나."""
+    if len(text) < SPLIT_MIN:
+        return [text]
+    lines = re.sub(r"(?<=[.!?。])# (?=\S)", "\n\n# ", text).split("\n")
+    starts = [0]
+    for i, line in enumerate(lines):
+        if line.startswith("# ") or re.match(r"##\s*1\.\s", line):
+            j = i
+            while j - 1 >= starts[-1] and (not lines[j - 1].strip() or REPORT_META.match(lines[j - 1].strip())
+                                          or lines[j - 1].startswith("# ")):
+                j -= 1
+            while j < i and not lines[j].strip():
+                j += 1
+            if j > starts[-1] and any(x.strip() for x in lines[starts[-1]:j]):
+                starts.append(j)
+    parts = ["\n".join(lines[a:b]).strip() for a, b in zip(starts, starts[1:] + [len(lines)])]
+    merged: list[str] = []
+    for part in parts:
+        if merged and (len(part) < PART_MIN or len(merged[-1]) < PART_MIN):
+            merged[-1] += "\n\n" + part
+        else:
+            merged.append(part)
+    return merged if len(merged) > 1 else [text]
+
+
+def report_title(part: str) -> str:
+    """'# 제목'이 있으면 그것, 없으면 첫 '## ' 제목, 그것도 없으면 첫 줄."""
+    lines = part.split("\n")
+    found = next((x for x in lines[:8] if x.startswith("# ")), "") or next((x for x in lines if x.startswith("## ")), "")
+    return first_line(found or part)
+
+
+def split_item(item: dict[str, Any]) -> list[dict[str, Any]]:
+    """붙여넣기·파일 하나가 보고서 여러 개면 보고서마다 자료 하나로. 출처(종류·라벨·링크)는 그대로 둔다."""
+    if item["kind"] not in ("paste", "file"):
+        return [item]
+    parts = split_reports(item["body"])
+    if len(parts) == 1:
+        return [item]
+    note = (item["note"] + " · " if item["note"] else "") + "보고서 {k}/{n}: 이어 붙은 글을 나눔"
+    return [{**item, "title": f"({k}/{len(parts)}) {report_title(p)}", "body": p, "note": note.format(k=k, n=len(parts)),
+             "raw": item.get("raw") if k == 1 else None} for k, p in enumerate(parts, 1)]
+
+
 class _Text(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)

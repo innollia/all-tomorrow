@@ -154,7 +154,7 @@ META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사�
 """
 
 SHORT = 300         # a material this short is its own summary
-SUMMARY_MAX = 1800  # hard cap on a compressed summary (the prompt asks for 1500 or 1/5 of the original)
+SUMMARY_MAX = 3600  # hard cap on a compressed summary (the prompt asks for at most 3000, see ideas_followup.compress_prompt)
 SYNTH_MAX = 4500    # hard cap on a synthesis in characters (the prompt asks for 3000; Korean is ~3 bytes a character)
 BRIEF_MAX = 20_000  # hard cap on the brief file in bytes
 BRIEF_IDEA = 3000   # characters of the idea text in the brief's '## 아이디어'
@@ -1070,6 +1070,7 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
                 items.append(ideas_intake.file_item(f.name, f.data))
             except ValueError as error:
                 skipped.append(str(error))
+        items = [part for item in items for part in ideas_intake.split_item(item)]
         try:
             placed = await asyncio.to_thread(store.intake, items, body.idea_id)
         except ValueError:   # nothing usable in it: not an error, just nothing added

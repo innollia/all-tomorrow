@@ -256,3 +256,23 @@ def test_compress_now_api_shows_requested_then_running(tmp_path) -> None:
     assert c.get(f"/api/ideas/{iid}").json()["compressing"] == {f"M{m['id']}": "queued"}
     assert c.post(f"/api/ideas/{iid}/compress/M99999", json={}).status_code == 404
     assert c.post(f"/api/ideas/{iid}/compress/x", json={}).status_code == 404
+
+
+def test_long_paste_of_several_reports_becomes_one_material_per_report(tmp_path) -> None:
+    """보고서 여러 개를 이어 붙인 붙여넣기는 보고서마다 자료 하나가 된다(압축본이 앞 보고서만 남지 않게)."""
+    from all_tomorrow.console import ideas_intake
+    body = lambda tag: (f"본문{tag} " * 700).strip()
+    text = ("Godot 포크 비교 이야기\n\n" + body("A") + "\n\n## 결론\n포크보다 공식판.# 상용화 부품 지도\n\n조사 기준: 2026년 10월 27일\n\n"
+            "## 1. 조사 기준\n" + body("B") + "\n## 4. 반드시 직접 만들어야 하는 빈칸\n" + body("B2") +
+            "\n\n기준일: 2026년 10월 27일 · 공식 문서\n\n## 1. 서버 구조\n" + body("C") +
+            "\n\n# 맞춤화 데이터 및 법률 조사\n\n기준일: 2026년 10월 27일\n\n## 1. 데이터 수집\n" + body("D") + "\n## 4. 미성년자의 유료 서비스\n" + body("D2"))
+    parts = ideas_intake.split_reports(text)
+    assert len(parts) == 4 and "".join(parts).count("본문") == text.count("본문")
+    assert parts[1].startswith("# 상용화 부품 지도\n\n조사 기준") and "반드시 직접 만들어야 하는 빈칸" in parts[1]
+    assert parts[2].startswith("기준일:") and parts[3].startswith("# 맞춤화 데이터") and "미성년자" in parts[3]
+    assert ideas_intake.split_reports("짧은 글\n## 1. 하나\n## 1. 둘") == ["짧은 글\n## 1. 하나\n## 1. 둘"]
+    c = login(tmp_path)
+    iid = make_idea(c)
+    added = c.post("/api/ideas/intake", json={"text": text, "idea_id": iid}).json()["added"]
+    titles = [m["title"] for m in c.get(f"/api/ideas/{iid}").json()["materials"]]
+    assert len(added) == 4 and "(2/4) 상용화 부품 지도" in titles and "(4/4) 맞춤화 데이터 및 법률 조사" in titles

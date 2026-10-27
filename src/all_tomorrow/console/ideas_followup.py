@@ -158,6 +158,7 @@ COMPRESS = """너는 사업 아이디어 조사 자료를 압축하는 담당이
 </material>
 """
 COMPRESS_LIMIT = 1500
+COMPRESS_LIMIT_LONG = 3000   # 아주 긴 원문(표가 많은 보고서)은 1/8까지, 이 상한까지
 COMPRESS_INPUT = 100_000
 
 
@@ -173,7 +174,8 @@ def compress_prompt(idea: dict[str, Any], material: dict[str, Any]) -> str:
     if len(body) > COMPRESS_INPUT:
         body = body[:COMPRESS_INPUT * 3 // 4] + "\n…(중간 생략)…\n" + body[-COMPRESS_INPUT // 4:]
         cut = f" 중 앞뒤 {COMPRESS_INPUT}자만 넣음"
-    limit = min(COMPRESS_LIMIT, max(300, len(material["body"].strip()) // 5))
+    size = len(material["body"].strip())
+    limit = min(COMPRESS_LIMIT_LONG, max(min(COMPRESS_LIMIT, max(300, size // 5)), size // 8))
     return COMPRESS.format(limit=limit, context=build_context(others), title=material["title"], label=material["label"],
                            note=f" ({material['note']})" if material["note"] else "", size=len(material["body"]), cut=cut, body=body)
 
