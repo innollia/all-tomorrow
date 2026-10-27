@@ -4,7 +4,9 @@
 + 이상 기록), 얼마나 쓸지(하루 횟수·시간·턴 상한), 무엇을 남겼는지(metacog-journal.md 맨 위 + 보고 1건).
 판단·조사·수리는 세션(도구를 가진 Claude)이 하고, 무거운 코딩·조사는 all-tomorrow MCP dispatch_task로 Codex에 맡긴다.
 
-- 계기: server_watch(autostart 서버 3번 시작 실패로 재시도 중단)와 api_watchdog(API 재기동 한도).
+- 계기: server_watch(autostart 서버 3번 시작 실패로 재시도 중단)와 api_watchdog(API 재기동 한도),
+  그리고 사용자 관심의 변화(interest: 새 프로젝트 폴더, 한 아이디어에 며칠째 손댐). 관심 세션은 INTEREST_PROMPT로
+  목적만 들려 보내고, 조사 목록 도구(research_mcp)를 준다.
 - 지문(fingerprint) = 서버 id + 오류 종류. 같은 지문은 한 번만 깨운다. 서버가 살아나면(resolve) 지문을 지워
   다음에 같은 이상이 다시 생기면 다시 깨운다. 보고(reports.enqueue)도 깨울 때·세션이 끝날 때 한 번씩만.
 - 세션은 감시 예약 작업이 떼어 낸 프로세스(`python -m all_tomorrow.overseer.metacog_session run`)에서 뜬다.
@@ -55,8 +57,8 @@ def settings() -> dict:
 
 @dataclass
 class Incident:
-    fingerprint: str          # 서버 id + ":" + 오류 종류
-    source: str               # server_watch | api_watchdog
+    fingerprint: str          # 서버 id + ":" + 오류 종류 (관심은 "interest:idea:<id>" 등)
+    source: str               # server_watch | api_watchdog | interest
     title: str                # 사람이 읽는 한 줄
     detail: str               # 마지막 상태, 켜는 방법 등
     facts: dict = field(default_factory=dict)
@@ -139,9 +141,26 @@ def safe_wake(base: Path, incident: Incident) -> str:
 
 def resolve(base: Path, server_id: str) -> list[str]:
     """서버가 살아났다 = 상태가 바뀌었다. 그 서버의 지문을 지운다(다음 이상은 다시 깨운다)."""
+    return close(base, [fp for fp in load_state(base).get("incidents", {}) if fp.split(":", 1)[0] == server_id])
+
+
+def mark(base: Path, fingerprints: list[str], now: float, *, source: str, title: str) -> None:
+    """한 세션이 함께 맡은 다른 지문들: 깨운 것으로 적어 따로 깨우지 않는다(하루 횟수는 세지 않는다)."""
+    if not fingerprints:
+        return
+    state = load_state(base)
+    incidents = state.setdefault("incidents", {})
+    for fp in fingerprints:
+        incidents.setdefault(fp, {"fingerprint": fp, "source": source, "title": title, "detail": "",
+                                  "facts": {}, "opened": now})["woke"] = now
+    save(base / STATE, state)
+
+
+def close(base: Path, fingerprints: list[str]) -> list[str]:
+    """지문을 닫는다. 같은 이상(관심)이 다시 생기면 다시 깨운다."""
     state = load_state(base)
     incidents = state.get("incidents", {})
-    gone = [fp for fp in incidents if fp.split(":", 1)[0] == server_id]
+    gone = [fp for fp in fingerprints if fp in incidents]
     if gone:
         for fp in gone:
             closed = incidents.pop(fp)
@@ -213,17 +232,62 @@ def registry_path() -> Path:
     return Path(os.environ.get("ALL_TOMORROW_SERVER_REGISTRY") or servers.REGISTRY)
 
 
+INTEREST_PROMPT = """너는 All Tomorrow의 메타인지다. 메타인지 = 사용자 없이 도는 관제. 아래 <role>의 관제 지침을 그대로 따른다.
+지금 사람은 없다. 묻지 말고 스스로 판단한다. 지침의 "먼저 묻는 일"은 하지 말고 마지막 답의 "물을 것"에 남긴다.
+git push는 하지 않는다. 코드는 고치지 않는다.
+
+목적: 사용자가 자리에 없는 동안, 사용자가 돌아와서 '해 뒀으면 좋았을' 일을 미리 해 둔다.
+
+깨운 이유(사용자 관심이 움직였다):
+- {title}
+{detail}
+
+사실(최근 7일, 지금 기준):
+{facts}
+
+근거로 볼 것:
+- 아이디어의 정리본(위 경로): 종합본의 빈 곳·모르는 것과 '다음 조사'. 아이디어 원문·자료는 콘솔 #/idea/<id>.
+- 새 프로젝트는 그 폴더의 README·docs·최근 커밋. 큰 판단 전에는 {base}\\control-brief.md(방향·노션 요약)를 읽는다.
+- 조사 목록: research MCP의 list_research_topics(이미 있는 주제, 사용자가 끄거나 지운 메타인지 주제). 놀 때 Codex가
+  위에서부터 하나씩 조사하고, 아이디어에 연결된 주제의 결과는 그 아이디어의 자료로 들어간다.
+  add_research_topic·update_research_topic으로 넣고 고칠 수 있다. 넣은 것은 콘솔에 '메타인지 제안'으로 근거와 함께 보인다.
+  사용자가 끄거나 지운 주제는 사용자의 답이다.
+- 비밀값 파일(~/.all-tomorrow/key-pool.env, .env, 자격 증명)은 열지 않는다. 실행 상한: {turns}턴, {minutes:g}분.
+
+마지막 답은 일지에 그대로 들어간다. 한국어로 짧게, 정확히 이 형식만 쓴다:
+### 본 것
+(관심의 흐름과 빈 곳)
+### 한 것
+(넣거나 고친 주제와 그 근거, 아무것도 안 했으면 왜)
+### 결과
+(첫 줄은 해결|일부 해결|미해결 중 하나, 그 뒤 확인한 사실)
+### 남은 것
+(없으면 없음)
+### 물을 것
+(사람이 정해야 할 것, 없으면 없음)
+
+<role>
+{role}
+</role>
+"""
+
+
 def build_prompt(base: Path, entry: dict, cfg: dict) -> str:
     role = (REPO / "docs" / "overseer-role.md").read_text(encoding="utf-8")
+    if entry.get("source") == "interest":
+        from all_tomorrow.overseer import interest
+        return INTEREST_PROMPT.format(title=entry["title"], detail=entry["detail"], facts=interest.summary(),
+                                      base=base, turns=cfg["turns"], minutes=cfg["minutes"], role=role)
     return PROMPT.format(title=entry["title"], fingerprint=entry["fingerprint"], source=entry["source"],
                          detail=entry["detail"], facts=json.dumps(entry.get("facts", {}), ensure_ascii=False),
                          base=base, registry=registry_path(), turns=cfg["turns"], minutes=cfg["minutes"], role=role)
 
 
 def mcp_config(base: Path) -> Path:
-    """oracle·all-tomorrow만. DP7 Python으로 띄운다(Syncthing .venv 실행기는 예약 작업에서 안 뜬 적이 있다)."""
+    """oracle·all-tomorrow·research(조사 목록). DP7 Python으로 띄운다(Syncthing .venv 실행기는 예약 작업에서 안 뜬 적이 있다)."""
     servers = {"oracle": {"type": "stdio", "command": sys.executable, "args": ["-m", "all_tomorrow.overseer.oracle_mcp"]},
-               "all-tomorrow": {"type": "stdio", "command": sys.executable, "args": ["-m", "all_tomorrow.mcp_server"]}}
+               "all-tomorrow": {"type": "stdio", "command": sys.executable, "args": ["-m", "all_tomorrow.mcp_server"]},
+               "research": {"type": "stdio", "command": sys.executable, "args": ["-m", "all_tomorrow.overseer.research_mcp"]}}
     path = base / "metacog-mcp.json"
     save(path, {"mcpServers": servers})
     return path

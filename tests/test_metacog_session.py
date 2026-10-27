@@ -137,7 +137,7 @@ def test_argv_is_headless_with_user_settings_and_default_model(tmp_path, monkeyp
     deny = argv[argv.index("--disallowedTools") + 1]
     assert "Bash(git push:*)" in deny and "Bash(rm -rf:*)" in deny and "Read(**/.env)" in deny
     config = json.loads((tmp_path / "metacog-mcp.json").read_text(encoding="utf-8"))
-    assert set(config["mcpServers"]) == {"oracle", "all-tomorrow"}
+    assert set(config["mcpServers"]) == {"oracle", "all-tomorrow", "research"}
 
 
 def test_session_env_drops_key_pool_names(tmp_path, monkeypatch):

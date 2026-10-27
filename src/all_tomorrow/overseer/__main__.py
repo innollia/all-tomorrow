@@ -199,6 +199,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             log.info("published %s for the other PC", store.publish(base))
             _refresh_control_brief(store, base)
+            _check_interest(base)
             if no_metacog or not _metacog_due(store):
                 return 0
             args.cmd, args.force = "metacog", False
@@ -242,6 +243,15 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         store.close()
     return 0
+
+
+def _check_interest(base):
+    # 사용자 관심이 움직였으면 메타인지 세션을 깨운다(지문당 한 번, 하루 상한은 다른 이상과 같이 센다).
+    from all_tomorrow.overseer import interest
+    try:
+        log.info("interest check: %s", interest.check(base))
+    except Exception as error:
+        log.warning("interest check failed: %s", type(error).__name__)
 
 
 def _refresh_control_brief(store, base):

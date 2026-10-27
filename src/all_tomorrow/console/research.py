@@ -6,8 +6,10 @@
   DELETE /api/research/{id}            주제 삭제(결과 파일은 남긴다)
   GET    /api/research/runs/{run}      결과 본문
 
-파일은 셋이고 쓰는 쪽이 하나씩이다: agenda.json은 이 API만, runs.json과 results/는 실행기
-(overseer.idle_research)만 쓴다. 그래서 둘이 같은 파일을 동시에 고치는 일이 없다.
+파일은 셋이다: agenda.json은 이 API와 메타인지 세션의 조사 목록 도구(overseer.research_mcp)가
+agenda.lock을 잡고 쓰고, runs.json과 results/는 실행기(overseer.idle_research)만 쓴다.
+메타인지가 넣은 주제는 source="metacog"(와 reason)로 남아 콘솔에 '메타인지 제안'으로 보인다. 사용자가 그런 주제를
+끄거나 지우면 declined.json에 남고, 메타인지는 같은 주제를 다시 넣거나 다시 켜지 못한다.
 모델을 부르지 않는다.
 """
 from __future__ import annotations
@@ -26,6 +28,7 @@ from pydantic import BaseModel, Field
 from all_tomorrow.console import ConsoleContext
 
 AGENDA = "agenda.json"
+DECLINED = "declined.json"
 RUNS = "runs.json"
 RESULTS = "results"
 
@@ -79,6 +82,10 @@ class TopicPatch(BaseModel):
     move: int | None = Field(default=None, ge=-1, le=1)   # -1 위로, 1 아래로(위가 먼저 돈다)
 
 
+def _key(text: str) -> str:
+    return re.sub(r"\W+", "", text).lower()
+
+
 class ResearchStore:
     def __init__(self, folder: Path) -> None:
         self.folder = folder
@@ -88,6 +95,66 @@ class ResearchStore:
 
     def _save(self, topics: list[dict[str, Any]]) -> None:
         _write(self.folder / AGENDA, {"topics": topics})
+
+    def _lock(self):
+        from all_tomorrow.overseer.runtime import singleton
+        self.folder.mkdir(parents=True, exist_ok=True)
+        return singleton(self.folder / "agenda.lock", wait=10)
+
+    def declined(self) -> list[dict[str, Any]]:
+        """사용자가 끄거나 지운 메타인지 주제. 메타인지에 대한 사용자의 답이다."""
+        return _read(self.folder / DECLINED, {"topics": []}).get("topics", [])
+
+    def _decline(self, topic: dict[str, Any], how: str) -> None:
+        if topic.get("source") != "metacog":
+            return
+        left = [d for d in self.declined() if d["id"] != topic["id"]]
+        left.append({"id": topic["id"], "title": topic["title"], "ask": topic["ask"], "idea_id": topic.get("idea_id", ""),
+                     "project_id": topic.get("project_id", ""), "how": how, "at": time.time()})
+        _write(self.folder / DECLINED, {"topics": left[-200:]})
+
+    def suggest(self, title: str, ask: str, reason: str, *, idea_id: str = "", project_id: str = "all-tomorrow",
+                repeat_days: float = 0) -> dict[str, Any]:
+        """메타인지 세션이 넣는 주제. 사용자가 전에 끄거나 지운 것과 같은 주제는 넣지 않는다."""
+        title, ask, reason = title.strip(), ask.strip(), reason.strip()
+        if not ask or not reason:
+            raise ValueError("조사할 내용과 근거가 있어야 한다")
+        with self._lock():
+            for d in self.declined():
+                if {_key(title), _key(ask)} & {_key(d["title"]), _key(d["ask"])} - {""}:
+                    raise ValueError(f"사용자가 {d['how']} 주제와 같다: {d['id']} {d['title']}")
+            topics = self.topics()
+            if any(_key(ask) == _key(t["ask"]) for t in topics):
+                raise ValueError("같은 요청의 주제가 이미 목록에 있다")
+            topic = {"id": "R-" + time.strftime("%y%m%d") + "-" + uuid.uuid4().hex[:4],
+                     "title": title or ask.splitlines()[0][:60], "ask": ask, "project_id": project_id.strip() or "all-tomorrow",
+                     "repeat_days": max(0.0, min(float(repeat_days), 365.0)), "enabled": True, "created": time.time(),
+                     "run_now_at": None, "source": "metacog", "reason": reason}
+            if idea_id.strip():
+                topic["idea_id"] = idea_id.strip()
+            topics.append(topic)
+            self._save(topics)
+        return topic
+
+    def revise(self, topic_id: str, *, title: str | None = None, ask: str | None = None, reason: str | None = None,
+               repeat_days: float | None = None) -> dict[str, Any]:
+        """메타인지가 자기가 넣은 주제만 고친다. 사용자가 끈 주제는 건드리지 않는다(켜기는 사용자 몫)."""
+        with self._lock():
+            topics = self.topics()
+            topic = next((t for t in topics if t["id"] == topic_id), None)
+            if topic is None:
+                raise KeyError(topic_id)
+            if topic.get("source") != "metacog":
+                raise ValueError("사용자가 넣은 주제는 고치지 않는다")
+            if not topic.get("enabled", True) or any(d["id"] == topic_id for d in self.declined()):
+                raise ValueError("사용자가 끈 주제다")
+            for name, value in (("title", title), ("ask", ask), ("reason", reason)):
+                if value is not None and value.strip():
+                    topic[name] = value.strip()
+            if repeat_days is not None:
+                topic["repeat_days"] = max(0.0, min(float(repeat_days), 365.0))
+            self._save(topics)
+        return topic
 
     def overview(self) -> list[dict[str, Any]]:
         runs = load_runs(self.folder)
@@ -105,9 +172,10 @@ class ResearchStore:
                  "title": body.title.strip() or ask.splitlines()[0][:60], "ask": ask,
                  "project_id": body.project_id.strip() or "all-tomorrow", "repeat_days": body.repeat_days,
                  "enabled": True, "created": time.time(), "run_now_at": None}
-        topics = self.topics()
-        topics.append(topic)
-        self._save(topics)
+        with self._lock():
+            topics = self.topics()
+            topics.append(topic)
+            self._save(topics)
         return topic
 
     def create_followup(self, idea_id: str, request: str) -> dict[str, Any]:
@@ -120,9 +188,10 @@ class ResearchStore:
         topic = {"id": "R-" + time.strftime("%y%m%d") + "-" + uuid.uuid4().hex[:4],
                  "title": "추가 조사 · " + request.splitlines()[0][:40], "ask": request, "idea_id": idea_id,
                  "project_id": "all-tomorrow", "repeat_days": 0, "enabled": True, "created": now, "run_now_at": now}
-        topics = self.topics()
-        topics.append(topic)
-        self._save(topics)
+        with self._lock():
+            topics = self.topics()
+            topics.append(topic)
+            self._save(topics)
         return topic
 
     def followups(self, idea_id: str) -> list[dict[str, Any]]:
@@ -130,38 +199,46 @@ class ResearchStore:
         return [t for t in reversed(self.overview()) if t.get("idea_id") == idea_id]
 
     def update(self, topic_id: str, patch: TopicPatch) -> dict[str, Any]:
-        topics = self.topics()
-        index = next((i for i, t in enumerate(topics) if t["id"] == topic_id), None)
-        if index is None:
-            raise KeyError(topic_id)
-        topic = topics[index]
-        for name in ("title", "project_id", "repeat_days", "enabled"):
-            value = getattr(patch, name)
-            if isinstance(value, str):
-                value = value.strip()
-                if not value:      # 빈 제목·프로젝트로는 바꾸지 않는다
-                    continue
-            if value is not None:
-                topic[name] = value
-        if patch.ask is not None:
-            if not patch.ask.strip():
-                raise ValueError("조사할 내용이 비어 있다")
-            topic["ask"] = patch.ask.strip()
-        if patch.run_now:
-            topic["run_now_at"], topic["enabled"] = time.time(), True
-        if patch.move:
-            other = index + patch.move
-            if 0 <= other < len(topics):
-                topics[index], topics[other] = topics[other], topics[index]
-        self._save(topics)
+        with self._lock():
+            topics = self.topics()
+            index = next((i for i, t in enumerate(topics) if t["id"] == topic_id), None)
+            if index is None:
+                raise KeyError(topic_id)
+            topic = topics[index]
+            was_enabled = topic.get("enabled", True)
+            for name in ("title", "project_id", "repeat_days", "enabled"):
+                value = getattr(patch, name)
+                if isinstance(value, str):
+                    value = value.strip()
+                    if not value:      # 빈 제목·프로젝트로는 바꾸지 않는다
+                        continue
+                if value is not None:
+                    topic[name] = value
+            if patch.ask is not None:
+                if not patch.ask.strip():
+                    raise ValueError("조사할 내용이 비어 있다")
+                topic["ask"] = patch.ask.strip()
+            if patch.run_now:
+                topic["run_now_at"], topic["enabled"] = time.time(), True
+            if patch.move:
+                other = index + patch.move
+                if 0 <= other < len(topics):
+                    topics[index], topics[other] = topics[other], topics[index]
+            self._save(topics)
+            if was_enabled and not topic["enabled"]:
+                self._decline(topic, "끈")
+            elif topic["enabled"] and not was_enabled:   # 사용자가 다시 켜면 거절이 풀린다
+                _write(self.folder / DECLINED, {"topics": [d for d in self.declined() if d["id"] != topic_id]})
         return topic
 
     def delete(self, topic_id: str) -> None:
-        topics = self.topics()
-        left = [t for t in topics if t["id"] != topic_id]
-        if len(left) == len(topics):
-            raise KeyError(topic_id)
-        self._save(left)
+        with self._lock():
+            topics = self.topics()
+            left = [t for t in topics if t["id"] != topic_id]
+            if len(left) == len(topics):
+                raise KeyError(topic_id)
+            self._save(left)
+            self._decline(next(t for t in topics if t["id"] == topic_id), "지운")
 
     def result(self, run_id: str) -> dict[str, Any]:
         run = next((r for r in load_runs(self.folder) if r.get("id") == run_id), None)
