@@ -108,10 +108,11 @@ class Chrome:
                     pass
 
     async def _settle(self, session: str, scroll: bool, settle: float) -> dict:
-        """글이 더 늘지 않을 때까지 기다린다(SPA). scroll이면 끝까지 내려 더 불러온다."""
+        """글이 더 늘지 않을 때까지 기다린다(SPA). scroll이면 끝까지 내려 더 불러온다.
+        ChatGPT 대화는 질문이 먼저 뜨고 답이 몇 초 뒤에 붙어서, 짧게 멈춘 것을 끝으로 보면 답이 빠진다(실측)."""
         deadline = time.monotonic() + settle + (60 if scroll else 0)
         last, same, page = -1, 0, {}
-        await asyncio.sleep(2)
+        await asyncio.sleep(4)
         while time.monotonic() < deadline:
             value = await self.call("Runtime.evaluate", {"expression": READ_JS, "returnByValue": True}, session)
             page = json.loads(value.get("result", {}).get("value") or "{}")
@@ -121,7 +122,7 @@ class Chrome:
                 moved = (await self.call("Runtime.evaluate", {"expression": SCROLL_JS, "returnByValue": True}, session)
                          ).get("result", {}).get("value") or 0
             same = same + 1 if size == last and not moved else 0
-            if same >= 2 and size > 0:
+            if same >= 4 and size > 0:
                 break
             last = size
             await asyncio.sleep(1.5)
