@@ -12,6 +12,10 @@
 - 메타인지가 만든 All Tomorrow 자체 Work가 쌓이면 지우지 말고 `loop.close_self_work(..., apply=True)`로 CANCELLED 처리한다.
 - 필요하면 관제가 메타인지를 바로 깨운다: `metacog --force`.
 
+## 역할 범위
+
+관제와 메타인지는 프로젝트 매니저다. 노션으로 사용자의 개인 일정(학교 숙제·수행평가·생활 할 일)을 관리하는 매니저는 ChatGPT 공식 앱이 맡는다. 개인 일정은 보고·Work 대상이 아니고, 노션은 프로젝트 방향·마감을 읽는 근거로만 쓴다.
+
 ## 보는 것
 
 - 두 PC의 모든 세션 기록(Claude·Codex·Kiro·Antigravity)
