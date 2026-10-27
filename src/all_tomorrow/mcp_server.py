@@ -23,7 +23,7 @@ from uuid import uuid4
 
 from fastmcp import FastMCP
 
-from all_tomorrow.local_workers import ADAPTERS, list_workers, load_config
+from all_tomorrow.local_workers import ADAPTERS, EXECUTABLES, discover_executable, list_workers, load_config
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROJECTS_PATH = Path(os.environ.get("ALL_TOMORROW_PROJECTS", REPO_ROOT / "config" / "projects.local.json"))
@@ -217,6 +217,12 @@ def dispatch_task(project_id: str, worker: str, task: str) -> dict[str, Any]:
     Returns immediately with a run_id; poll get_run for the result. Runs keep going
     after this Claude session ends.
     """
+    return start_run(project_id, worker, task)
+
+
+def start_run(project_id: str, worker: str, task: str, *, worker_options: dict[str, Any] | None = None,
+              argv_suffix: list[str] | None = None) -> dict[str, Any]:
+    """dispatch_task 본체. 유휴 조사(overseer.idle_research)처럼 워커 설정을 조금 바꿔 띄울 때도 쓴다."""
     if worker not in ADAPTERS:
         raise ValueError(f"worker must be one of {sorted(ADAPTERS)}")
     if not task.strip():
@@ -225,7 +231,13 @@ def dispatch_task(project_id: str, worker: str, task: str) -> dict[str, Any]:
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True)
-    config = load_config_dict(_worker_config())
+    raw = _worker_config()
+    if worker_options or argv_suffix:
+        entry = raw.setdefault("workers", {}).setdefault(worker, {})
+        entry["options"] = {**entry.get("options", {}), **(worker_options or {})}
+        if argv_suffix:
+            entry["argv"] = [*(entry.get("argv") or [discover_executable(worker) or EXECUTABLES[worker]]), *argv_suffix]
+    config = load_config_dict(raw)
     (run_dir / "workers.json").write_text(json.dumps(config), encoding="utf-8")
     (run_dir / "task.txt").write_text(task, encoding="utf-8")
     worker_argv = [sys.executable, "-m", "all_tomorrow.local_workers", "--config", str(run_dir / "workers.json"),

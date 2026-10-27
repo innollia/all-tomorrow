@@ -99,6 +99,14 @@ async def serve(component: str, base: Path):
                 # 이 파일이 있으면 메타인지 깨어남과 그 Work 실행을 멈춘다. 사용량 수집·보고는 계속한다.
                 paused = (base / "metacog.paused").exists()
                 if component == "executor":
+                    # 유휴 조사(사용자가 콘솔 조사 목록에 정한 주제)는 metacog.paused와 따로 research.paused로 멈춘다.
+                    from all_tomorrow.overseer import idle_research
+                    try:
+                        research = await asyncio.to_thread(idle_research.tick, base, idle)
+                        if research in {"started", "finished", "failed"}:
+                            log.info("유휴 조사: %s", research)
+                    except Exception as error:   # 조사 실패가 아래 Work 실행을 막지 않게 한다
+                        log.warning("유휴 조사 점검 실패: %s: %s", type(error).__name__, str(error)[:200])
                     if not paused and idle is not None and idle >= 300:
                         await with_store(lambda store: execute_pending(store, base, registry=project_registry(),
                                                                         redact=redact, limit=1))
