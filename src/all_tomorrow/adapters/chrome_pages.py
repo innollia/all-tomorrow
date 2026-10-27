@@ -169,10 +169,11 @@ def start_broker() -> None:
         subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          start_new_session=True)
         return
-    command = subprocess.list2cmdline(argv).replace("'", "''")
-    script = f"Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine='{command}'}} | Out-Null"
-    subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                   capture_output=True, timeout=60, stdin=subprocess.DEVNULL)
+    from all_tomorrow.winspawn import wmi_create_hidden
+    try:
+        wmi_create_hidden(argv)
+    except (RuntimeError, OSError, subprocess.TimeoutExpired):
+        pass   # ensure_broker가 기다리다 없으면 실패로 본다
 
 
 def ensure_broker(wait: float = 30) -> bool:
@@ -253,6 +254,26 @@ def codex_args(pages_dir: Path) -> list[str]:
             "-c", f"{key}.env={{AT_PAGES_DIR = {json.dumps(str(pages_dir))}}}",
             "-c", f"{key}.startup_timeout_sec=60",
             "-c", f"{key}.tool_timeout_sec=900"]
+
+
+# 조사·압축·종합 Codex에 필요 없는 사용자 MCP는 끈다(Roblox Studio 등이 실행마다 뜬다). 플러그인과 node_repl
+# (크롬·브라우저 플러그인이 쓰는 런타임)은 그대로 둔다. 사용자 config.toml에 있는 것만 끈다: 없는 이름에
+# enabled=false만 주면 command 없는 서버 설정이 생긴다.
+RESEARCH_MCP_KEEP = {"node_repl", "chrome_pages"}
+CODEX_CONFIG = Path.home() / ".codex" / "config.toml"
+
+
+def research_mcp_args(config: Path | None = None) -> list[str]:
+    import tomllib
+    try:
+        servers = tomllib.loads((config or CODEX_CONFIG).read_text(encoding="utf-8")).get("mcp_servers", {})
+    except (OSError, ValueError):
+        return []
+    args: list[str] = []
+    for name in servers:
+        if name not in RESEARCH_MCP_KEEP and re.fullmatch(r"[A-Za-z0-9_-]+", name):
+            args += ["-c", f"mcp_servers.{name}.enabled=false"]
+    return args
 
 
 def _mcp() -> None:

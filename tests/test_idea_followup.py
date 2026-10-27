@@ -106,7 +106,7 @@ def test_followup_runs_in_codex_then_material_is_compressed(env) -> None:
     # 압축: PC 사용 중이어도, 웹 검색 없이, 원문을 보고 바로 시작
     assert tick(idle=None, now=NOW + 60) == "compress"
     ctask, ckw = calls[1]
-    assert "원문표식ZZ" in ctask and "웹 검색을 하지 않는다" in ctask and "argv_suffix" not in ckw
+    assert "원문표식ZZ" in ctask and "웹 검색을 하지 않는다" in ctask and 'web_search="live"' not in ckw.get("argv_suffix", [])
     assert "sandbox" not in ckw["worker_options"]
     assert tick(idle=None, now=NOW + 70) == "running"
     results["run2"] = {"status": "SUCCESS", "result": {"payload": {"output": "## 새로 더해진 것\n- 월 9달러부터\n## 이미 앎\n없음"}}}

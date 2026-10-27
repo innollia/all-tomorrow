@@ -46,9 +46,10 @@ async def test_configured_service_executes_through_pipeline(worker_id: str, tmp_
     argv = fixture_cli(tmp_path, f"""
 import sys
 from pathlib import Path
-assert 'write proof.txt' in sys.argv[-1]
-assert 'req-local' in sys.argv[-1]
-assert 'trace-local' in sys.argv[-1]
+prompt = sys.stdin.read() if sys.argv[-1] == '-' else sys.argv[-1]   # codex gets the prompt on stdin
+assert 'write proof.txt' in prompt
+assert 'req-local' in prompt
+assert 'trace-local' in prompt
 Path('proof.txt').write_text('actual child output')
 print({output!r})
 """)
@@ -61,6 +62,19 @@ print({output!r})
     assert result.status == NodeStatus.SUCCESS
     assert (tmp_path / "proof.txt").read_text() == "actual child output"
     assert "write proof.txt" not in json.dumps(result.events)
+
+
+async def test_codex_prompt_goes_on_stdin_past_the_windows_command_line_limit(tmp_path: Path) -> None:
+    argv = fixture_cli(tmp_path, f"""
+import sys
+prompt = sys.stdin.read()
+assert sys.argv[-1] == '-' and len(prompt) > 40000 and prompt.rstrip().endswith('END')
+print({chr(10).join(map(json.dumps, SUCCESS["codex"]))!r})
+""")
+    worker = CodexWorker(allowed_roots=(str(tmp_path),), argv=argv)
+    result = await worker.execute(WorkerRequest("req-long", "trace-long", "project-local", frozenset({"coding"}),
+                                                {"cwd": str(tmp_path), "task": "가" * 40000 + "END"}))
+    assert result.status == WorkerStatus.SUCCESS, (result.status, result.payload)
 
 
 @pytest.mark.parametrize("adapter,output,status", [

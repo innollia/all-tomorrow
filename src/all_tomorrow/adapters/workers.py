@@ -231,6 +231,7 @@ async def _run_process_safe(
     request: WorkerRequest,
     worker_name: str,
     start_time: float,
+    stdin_data: bytes | None = None,
 ) -> tuple[str, int] | WorkerResult:
     """
     Execute a subprocess with timeout, combined output limit, process reap, and error redaction.
@@ -254,21 +255,35 @@ async def _run_process_safe(
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=cwd,
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.DEVNULL if stdin_data is None else asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=_worker_environment(env),
-            **({"start_new_session": True} if os.name != "nt" else {}),
+            # No console window for the worker; its children (MCP servers like `cmd /c mcp.bat`) inherit that.
+            **({"start_new_session": True} if os.name != "nt" else {"creationflags": subprocess.CREATE_NO_WINDOW}),
         )
-    except FileNotFoundError:
+    except FileNotFoundError as error:
+        if getattr(error, "winerror", None) == 206:   # Windows command line over 32,767 chars, not a missing file
+            return failure(WorkerStatus.FAILED, "Command line too long")
         return failure(WorkerStatus.EXECUTABLE_NOT_FOUND, f"Executable not found: {cmd[0]}")
     except OSError as error:
         return failure(WorkerStatus.FAILED, error)
 
     try:
         _attach_windows_job(proc)
-        stdout, stderr = await asyncio.wait_for(
-            _read_bounded(proc, output_limit_bytes, diagnostics),
+
+        async def feed() -> None:
+            if stdin_data is None:
+                return
+            try:
+                proc.stdin.write(stdin_data)
+                await proc.stdin.drain()
+                proc.stdin.close()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+        _, (stdout, stderr) = await asyncio.wait_for(
+            asyncio.gather(feed(), _read_bounded(proc, output_limit_bytes, diagnostics)),
             timeout=timeout_seconds,
         )
     except asyncio.TimeoutError:
@@ -434,10 +449,15 @@ class CodexWorker:
         except WorkerError as error:
             return WorkerResult(request.request_id, request.trace_id,
                                 WorkerStatus.TRAVERSAL_BLOCKED, error=_sanitize_error(error))
+        prompt = _build_worker_prompt(request)
+        # Codex reads the prompt from stdin ("-"): a Windows command line stops at 32,767 chars and long
+        # idea syntheses went past it. Claude keeps it as an argument.
+        on_stdin = self.worker_id == "codex"
         result = await _run_process_safe(
-            cmd=self.build_argv(_build_worker_prompt(request)), cwd=cwd, env=self._env,
+            cmd=self.build_argv("-" if on_stdin else prompt), cwd=cwd, env=self._env,
             timeout_seconds=self._timeout_seconds, output_limit_bytes=self._output_limit_bytes,
-            request=request, worker_name=self.worker_id, start_time=start)
+            request=request, worker_name=self.worker_id, start_time=start,
+            stdin_data=prompt.encode("utf-8") if on_stdin else None)
         if isinstance(result, WorkerResult):
             return result
         output, duration = result

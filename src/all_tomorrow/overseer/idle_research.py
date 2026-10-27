@@ -210,6 +210,7 @@ def next_synth(folder: Path, runs: list[dict], now: float) -> dict | None:
 
 
 def _start_synth(folder: Path, job: dict, runs: list[dict], now: float, start: Callable[..., dict], cfg: dict) -> str:
+    from all_tomorrow.adapters import chrome_pages
     from all_tomorrow.console import ideas_followup
     from all_tomorrow.console.ideas import IdeaStore
     idea = IdeaStore(folder.parent / "ideas").get(job["idea_id"])
@@ -220,7 +221,8 @@ def _start_synth(folder: Path, job: dict, runs: list[dict], now: float, start: C
            "project_id": "all-tomorrow", "started": now, "status": "RUNNING"}
     try:
         meta = start("all-tomorrow", "codex", ideas_followup.synth_prompt(idea, job),
-                     worker_options={"timeout_seconds": min(cfg["timeout"], 900)})
+                     worker_options={"timeout_seconds": min(cfg["timeout"], 900)},
+                     argv_suffix=chrome_pages.research_mcp_args())
     except Exception as error:
         run.update(status="FAILED", error=type(error).__name__ + ": " + str(error)[:200], finished=now)
         runs.append(run)
@@ -236,6 +238,7 @@ def _start_synth(folder: Path, job: dict, runs: list[dict], now: float, start: C
 def _start_compress(folder: Path, item: dict, runs: list[dict], now: float, start: Callable[..., dict], cfg: dict) -> str:
     """원문은 두고 압축본만 만들게 한다: 웹 검색 없음, PC 사용 여부와 상관없이 바로."""
     from all_tomorrow import mcp_server
+    from all_tomorrow.adapters import chrome_pages
     from all_tomorrow.console import ideas_followup
     from all_tomorrow.console.ideas import IdeaStore
     store = IdeaStore(folder.parent / "ideas")
@@ -249,7 +252,8 @@ def _start_compress(folder: Path, item: dict, runs: list[dict], now: float, star
         run["material_id"] = item["id"]
     try:
         meta = start("all-tomorrow", "codex", ideas_followup.compress_prompt(idea, material),
-                     worker_options={"timeout_seconds": min(cfg["timeout"], 900)})
+                     worker_options={"timeout_seconds": min(cfg["timeout"], 900)},
+                     argv_suffix=chrome_pages.research_mcp_args())
     except Exception as error:
         run.update(status="FAILED", error=type(error).__name__ + ": " + str(error)[:200], finished=now)
         runs.append(run)
@@ -372,7 +376,8 @@ def tick(base: Path, idle: float | None, *, now: float | None = None,
         from all_tomorrow.adapters import chrome_pages
         meta = start(project_id, "codex", build_task(topic, runs, folder, cwd) + chrome_pages.PROMPT_NOTE,
                      worker_options={"timeout_seconds": cfg["timeout"]},
-                     argv_suffix=["-c", 'web_search="live"', *chrome_pages.codex_args(folder / PAGES / run["id"])])
+                     argv_suffix=["-c", 'web_search="live"', *chrome_pages.codex_args(folder / PAGES / run["id"]),
+                                  *chrome_pages.research_mcp_args()])
     except Exception as error:
         run.update(status="FAILED", error=type(error).__name__ + ": " + str(error)[:200], finished=now)
         runs.append(run)

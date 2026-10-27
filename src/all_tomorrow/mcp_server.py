@@ -188,7 +188,8 @@ def _run_child(run_dir: Path) -> int:
     """Entry point of the detached run process: execute the worker CLI into the run files."""
     argv = json.loads((run_dir / "argv.json").read_text(encoding="utf-8"))
     with open(run_dir / "result.json", "wb") as out, open(run_dir / "stderr.log", "wb") as err:
-        return subprocess.run(argv, stdout=out, stderr=err, stdin=subprocess.DEVNULL, cwd=REPO_ROOT).returncode
+        return subprocess.run(argv, stdout=out, stderr=err, stdin=subprocess.DEVNULL, cwd=REPO_ROOT,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).returncode
 
 
 def _spawn_detached(run_dir: Path) -> tuple[int, str]:
@@ -198,16 +199,9 @@ def _spawn_detached(run_dir: Path) -> tuple[int, str]:
                                    stderr=subprocess.DEVNULL, cwd=REPO_ROOT, start_new_session=True)
         return process.pid, "session"
     # MCP clients tear down this server's whole process tree when the Claude session ends
-    # (observed even with job breakaway). WMI creates the run outside that tree.
-    command = subprocess.list2cmdline(argv).replace("'", "''")
-    script = (f"$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments "
-              f"@{{CommandLine='{command}'; CurrentDirectory='{REPO_ROOT}'}}; \"$($r.ReturnValue) $($r.ProcessId)\"")
-    result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                            capture_output=True, encoding="utf-8", timeout=60, stdin=subprocess.DEVNULL)
-    code, _, pid = result.stdout.strip().partition(" ")
-    if code != "0":
-        raise RuntimeError(f"WMI process creation failed: {result.stdout.strip()} {result.stderr.strip()[:300]}")
-    return int(pid), "wmi"
+    # (observed even with job breakaway). WMI creates the run outside that tree, in a hidden console.
+    from all_tomorrow.winspawn import wmi_create_hidden
+    return wmi_create_hidden(argv, str(REPO_ROOT)), "wmi"
 
 
 @mcp.tool

@@ -34,3 +34,27 @@ def test_read_asks_the_broker_over_one_json_line(monkeypatch) -> None:
     monkeypatch.setattr(chrome_pages.socket, "create_connection", lambda *a, **k: Sock())
     assert chrome_pages.read("https://chatgpt.com/x", scroll=True)["text"] == "글"
     assert sent == [{"url": "https://chatgpt.com/x", "scroll": True}]
+
+
+def test_research_mcp_args_turns_off_only_the_users_extra_servers(tmp_path):
+    config = tmp_path / "config.toml"
+    config.write_text('[mcp_servers.node_repl]\ncommand = "n"\n[mcp_servers.Roblox_Studio]\ncommand = "cmd.exe"\n'
+                      '[mcp_servers.oracle]\ncommand = "py"\n[mcp_servers."odd.name"]\ncommand = "x"\n', encoding="utf-8")
+    args = chrome_pages.research_mcp_args(config)
+    assert args == ["-c", "mcp_servers.Roblox_Studio.enabled=false", "-c", "mcp_servers.oracle.enabled=false"]
+    assert chrome_pages.research_mcp_args(tmp_path / "missing.toml") == []
+
+
+def test_wmi_create_hides_the_new_console(monkeypatch):
+    import subprocess
+    from all_tomorrow import winspawn
+    seen = {}
+
+    def run(argv, **kw):
+        seen["script"], seen["flags"] = argv[-1], kw.get("creationflags")
+        return subprocess.CompletedProcess(argv, 0, "0 1234\n", "")
+    monkeypatch.setattr(winspawn.subprocess, "run", run)
+    assert winspawn.wmi_create_hidden(["python", "-c", "print('x')"], "C:/repo") == 1234
+    assert "ShowWindow=[uint16]0" in seen["script"] and "ProcessStartupInformation=$si" in seen["script"]
+    assert "CurrentDirectory='C:/repo'" in seen["script"] and "print(''x'')" in seen["script"]
+    assert seen["flags"] == winspawn.NO_WINDOW
