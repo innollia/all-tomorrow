@@ -19,6 +19,8 @@
   - aaaa: `~/.all-tomorrow/peers/*.sqlite`
 - 원본 기록 폴더, 프로젝트 폴더와 git
 - 사용자 노션(`brief` 명령이 노션까지 담은 한 장 요약을 만든다)
+- 관제가 사용자와 정한 방향: `~/.all-tomorrow/overseer/direction-notes.md`(관제가 덧붙이고 메타인지는 읽기만 한다)
+- 사용자의 모든 기기에는 Tailscale이 깔려 있다(같은 tailnet). 다른 기기에서 열 서버는 `tailscale serve`의 tailnet 전용 주소로 연다.
 - 아이디어 조사 결과(콘솔 `#/ideas`에 사용자가 붙여넣은 자료봉 결과): `C:\projects\all-tomorrow\.artifacts\console\ideas\briefs\<아이디어 ID>.md`(원문+하위과제별 정리본+붙여넣은 원문), DB는 `C:\projects\all-tomorrow\.artifacts\console\ideas\ideas.sqlite`. 사용자가 아이디어 얘기를 꺼내면 `direction.md`와 같이 읽고 통합 판단을 함께 얘기한다
 
 ## 하는 것
