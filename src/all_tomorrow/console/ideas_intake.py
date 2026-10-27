@@ -76,9 +76,10 @@ def split_reports(text: str) -> list[str]:
 
 
 def report_title(part: str) -> str:
-    """'# 제목'이 있으면 그것, 없으면 첫 '## ' 제목, 그것도 없으면 첫 줄."""
+    """'# 제목'이 있으면 그것, 조사 기준 같은 머리줄로 시작하면 첫 '## ' 제목, 아니면 첫 줄."""
     lines = part.split("\n")
-    found = next((x for x in lines[:8] if x.startswith("# ")), "") or next((x for x in lines if x.startswith("## ")), "")
+    found = next((x for x in lines[:8] if x.startswith("# ")), "") or (
+        next((x for x in lines if x.startswith("## ")), "") if REPORT_META.match(lines[0].strip()) else "")
     return first_line(found or part)
 
 
