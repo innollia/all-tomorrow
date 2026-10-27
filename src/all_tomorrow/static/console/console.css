@@ -83,3 +83,20 @@ th{color:var(--mute);font-weight:400;font-size:12px;border-top:0}
 .servers a:hover{text-decoration:underline}.servers a:focus-visible,.server-table:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .server-back{display:inline-block;min-height:44px}.server-detail-status{margin-top:12px}.server-detail{display:grid;grid-template-columns:100px minmax(0,1fr);gap:12px 20px;border-top:1px solid var(--line);padding-top:20px}.server-detail dt{color:var(--mute)}.server-detail dd{margin:0;overflow-wrap:anywhere}
 @media(max-width:480px){.servers .grid{grid-template-columns:minmax(0,1fr)}.server-detail{grid-template-columns:1fr;gap:4px}.server-detail dd{margin-bottom:12px}}
+/* Ideas: one quiet line per idea; materials and results fold to one line each, their actions inside. */
+.pill.warn{color:var(--warn);border-color:var(--warn)}
+.list > a.idea-row{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border-top:1px solid var(--line);min-height:44px}
+.list > a.idea-row:first-child{border-top:0}.list > a.idea-row:hover{background:var(--panel)}
+.idea-row-title{font-weight:600}
+.idea-two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:8px}
+.idea-text{white-space:pre-wrap;margin:8px 0 0;font:inherit}.idea-text.small{font-size:12px}
+.list > details.idea-item{display:block;padding:0 12px;border-top:1px solid var(--line)}
+.list > details.idea-item:first-child{border-top:0}
+.idea-item > summary{list-style:none;color:var(--text);font-size:14px;padding:10px 0;min-height:44px}
+.idea-item > summary::-webkit-details-marker{display:none}
+.idea-item > summary::before{content:"▸";color:var(--mute);float:left;margin-right:8px}.idea-item[open] > summary::before{content:"▾"}
+.idea-item[open]{padding-bottom:12px}.idea-item details{margin-top:8px}
+.idea-actions{margin-top:10px}.idea-actions select,.idea-actions button{min-height:44px;font-size:14px}
+select{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;max-width:100%}
+@media (max-width:767px){.idea-two{grid-template-columns:1fr}}
+.idea-h{font-size:15px}

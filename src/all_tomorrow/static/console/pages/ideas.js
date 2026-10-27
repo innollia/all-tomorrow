@@ -19,7 +19,7 @@
   for (let n = 0; n < SLOTS; n++) DRAFTED["idea-slot-" + n] = () => slotKey(n);
 
   // 자유 자료 넣기: 붙여넣기 칸 하나 + 파일 + 넣기 버튼. 아이디어를 고르지 않으면 서버(Jev)가 맞는 걸 고른다.
-  const intakeForm = (ideas, fixed) => `<form id="idea-intake" class="card" style="margin-bottom:16px">
+  const intakeForm = (ideas, fixed) => `<form id="idea-intake" class="card" style="margin-bottom:${fixed ? 0 : 16}px">
     <div class="t">자료 넣기</div>
     <textarea id="intake-text" rows="6" placeholder="조사한 것을 그대로 붙여넣기. 형식 상관없음 (대화, 메모, 표, 링크, 아주 긴 글도 됨)" style="font-size:16px;margin-top:8px;width:100%">${esc(draft.get("intake:" + (fixed || "")))}</textarea>
     <div class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px">
@@ -47,29 +47,24 @@
     const move = a.material_id ? `<select data-imove="${a.material_id}" data-from="${esc(a.idea_id)}" aria-label="다른 아이디어로 옮기기" style="font-size:16px;min-height:44px;max-width:100%"><option value="">다른 아이디어로 옮기기</option>${ideas.filter(i => i.id !== a.idea_id).map(i => `<option value="${esc(i.id)}">${esc(i.title)}</option>`).join("")}</select>` : "";
     return `<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px"><span style="flex:1;min-width:200px">${what} → <b>${where}</b> <span class="mute">(${HOW[a.placed_by] || "알아서"})${a.kind === "result" ? "" : " · 곧 짧게 정리됨"}</span></span>${move}</div>`;
   };
+  // 종합본은 마크다운이다. 제목(#)과 굵게(**)만 살리고 나머지는 글 그대로 둔다.
+  const md = t => esc(t).replace(/^#{1,4} +(.+)$/gm, '<b class="idea-h">$1</b>').replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
   const FSTATE = { RUNNING: "도는 중", SUCCESS: "끝", FAILED: "실패", INTERRUPTED: "끊김", LOST: "잃어버림" };
 
   AT.pages["/ideas"] = async () => {
     const ideas = await api("/api/ideas");
-    const day = t => esc(String(t || "").slice(0, 10));
-    const rows = ideas.map(i => {
-      const c = i.status_counts;
-      return `<div style="flex-wrap:wrap"><a href="#/idea/${encodeURIComponent(i.id)}" style="flex:1;min-width:180px">${esc(i.title)}</a>
-      <span class="small mute mono">${esc(i.id)} · 만든 날 ${day(i.created_at)}</span>
-      ${i.candidate ? '<span class="pill" style="color:var(--warn)">후보</span>' : ""}<span class="pill">과제 ${i.subtasks}${i.plan_at ? "" : " · 쪼개기 없음"}</span>${i.materials ? `<span class="pill">자유 자료 ${i.materials}</span>` : ""}
-      <span class="pill">완료 ${c["완료"]} · 불완전 ${c["불완전"]} · 실패 ${c["실패"]}${c[""] ? " · 상태없음 " + c[""] : ""}</span>
-      ${i.pending ? `<span class="pill" style="color:var(--warn)">압축 대기 ${i.pending}</span>` : ""}<span class="pill">${i.synth_at ? "종합 " + ago(i.synth_at) : "종합 전"}</span>
-      <span class="small mute">결과 ${i.results}개 · 갱신 ${ago(i.updated_at)}</span></div>`;
-    });
+    const rows = ideas.map(i => `<a class="idea-row" href="#/idea/${encodeURIComponent(i.id)}">
+      <span class="idea-row-title">${esc(i.title)}${i.candidate ? ' <span class="pill warn">후보</span>' : ""}${i.pending ? ` <span class="pill warn">압축 대기 ${i.pending}</span>` : ""}</span>
+      <span class="small mute">자료 ${i.materials || 0} · 결과 ${i.results} · ${i.synth_at ? "종합 " + ago(i.synth_at) : "종합 전"} · 갱신 ${ago(i.updated_at)}</span></a>`);
     return `<h1>아이디어 조사</h1>
       ${intakeForm(ideas, "")}
-      <details class="card" style="margin-bottom:16px"><summary style="min-height:44px">새 아이디어 직접 만들기 (자료봉 프롬프트용)</summary>
+      <h2>아이디어 (${ideas.length})</h2>${list(rows)}
+      <details style="margin-top:20px"><summary style="min-height:44px">새 아이디어 직접 만들기 (자료봉 프롬프트용)</summary>
       <form id="idea-new">
         <input id="idea-title" placeholder="제목 (비우면 첫 줄)" maxlength="200" style="margin:8px 0;font-size:16px" value="${esc(draft.get("new-title"))}">
         <textarea id="idea-text" rows="8" placeholder="아이디어 텍스트 뭉탱이를 그대로 붙여넣기" style="font-size:16px">${esc(draft.get("new-text"))}</textarea>
         <div class="row" style="margin-top:8px"><button class="primary" style="min-height:44px">프롬프트 만들기</button></div>
-      </form></details>
-      <h2>아이디어</h2>${list(rows)}`;
+      </form></details>`;
   };
 
   AT.pages["/idea/"] = async id => {
@@ -89,25 +84,26 @@
       if (!ids.length || !(r.subtask_id === "?" || (r.assigned || "").startsWith("jev:"))) return "";
       return `<select data-iassign="${r.id}" aria-label="과제 고르기"><option value="">${r.subtask_id === "?" ? "미분류 · 과제 고르기" : "과제 바꾸기"}</option>${ids.map(t => `<option value="${esc(t)}">${esc(t)} ${esc(idea.tasks[t].title)}</option>`).join("")}</select>`;
     };
-    const results = i.results.map(r => `<div style="display:block">
-      <div class="row"><b>${esc(r.subtask_id)}</b>${r.assigned ? `<span class="pill small" title="과제를 정한 방법">${esc(r.assigned === "ID" ? "ID로 확인" : r.assigned.startsWith("jev:") ? "Jev " + r.assigned.slice(4) : "직접 고름")}</span>` : ""}<span class="pill"${r.latest ? "" : ' style="opacity:.6"'}>${r.latest ? "최신" : "이전(덮어씀)"}</span><span style="flex:1">${esc(r.subtask_title || (r.subtask_id === "?" ? "형식 밖 결과" : ""))}</span>
-        <span class="pill"${r.status && r.status !== "완료" ? ' style="color:var(--warn)"' : ""}>${esc(r.status || "상태 없음")}</span>
-        <span class="small mute">주장 ${r.claims.length} · 출처 없음 ${r.claims.filter(c => !c.source).length}</span><span class="small mute">${ago(r.created_at)}</span>${assignSelect(r, i)}<button class="danger" data-idel-result="${r.id}">삭제</button></div>
-      ${r.latest ? (r.summary ? `<pre class="small" style="white-space:pre-wrap">${esc(r.summary)}</pre>` : '<div class="small mute">압축 대기 · 곧 Codex가 짧게 정리한다</div>') : ""}
-      <details><summary>주장 ${r.claims.length}개</summary>${r.claims.map(claim).join("")}</details>
-      <details><summary>원문 ${r.body.length.toLocaleString()}자 (보관용)</summary><pre class="small" style="white-space:pre-wrap">${esc(r.body)}</pre></details></div>`);
+    const results = i.results.map(r => `<details class="idea-item"${r.latest ? "" : ' style="opacity:.6"'}><summary><span class="row">
+      <b>${esc(r.subtask_id)}</b>${r.assigned ? `<span class="pill small" title="과제를 정한 방법">${esc(r.assigned === "ID" ? "ID로 확인" : r.assigned.startsWith("jev:") ? "Jev " + r.assigned.slice(4) : "직접 고름")}</span>` : ""}${r.latest ? "" : '<span class="pill">이전(덮어씀)</span>'}<span style="flex:1">${esc(r.subtask_title || (r.subtask_id === "?" ? "형식 밖 결과" : ""))}</span>
+        ${r.status === "완료" ? "" : `<span class="pill warn">${esc(r.status || "상태 없음")}</span>`}
+        <span class="small mute">${ago(r.created_at)}</span></span></summary>
+      ${r.latest ? (r.summary ? `<pre class="small idea-text">${md(r.summary)}</pre>` : '<div class="small mute">압축 대기 · 곧 Codex가 짧게 정리한다</div>') : ""}
+      <details><summary>주장 ${r.claims.length}개 · 출처 없음 ${r.claims.filter(c => !c.source).length}</summary>${r.claims.map(claim).join("")}</details>
+      <details><summary>원문 ${r.body.length.toLocaleString()}자 (보관용)</summary><pre class="small idea-text">${esc(r.body)}</pre></details>
+      <div class="row idea-actions">${assignSelect(r, i)}<button class="danger" data-idel-result="${r.id}">결과 삭제</button></div></details>`);
     const taskName = m => m.task_id ? `${esc(m.task_id)} ${esc((i.tasks[m.task_id] || {}).title || "")}` : "자유 자료";
     const kindName = { paste: "붙여넣기", url: "링크", file: "파일" };
-    const mats = i.materials.map(m => `<div style="display:block"><div class="row" style="flex-wrap:wrap">
-      <b style="flex:1;min-width:160px">${esc(m.title)}</b><span class="pill">${kindName[m.kind] || esc(m.kind)}</span>${m.task_id ? `<span class="pill">${taskName(m)}</span>` : ""}
-      <span class="pill"${m.summary ? "" : ' style="color:var(--warn)"'}>${m.summary ? "정리됨" : "압축 대기"}</span><span class="small mute">${ago(m.created_at)}</span>
-      <button class="danger" data-idel-mat="${m.id}" style="min-height:44px">삭제</button></div>
-      <div class="small mute">${m.url ? `<a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.url)}</a>` : esc(m.label)}${m.note ? " · " + esc(m.note) : ""}</div>
-      ${m.summary ? `<pre class="small" style="white-space:pre-wrap">${esc(m.summary)}</pre>` : '<div class="small mute">곧 Codex가 짧게 정리한다. 정리본·관제는 정리된 것만 읽는다.</div>'}
-      <details><summary>원문 ${m.body.length.toLocaleString()}자 (보관용)</summary><pre class="small" style="white-space:pre-wrap">${esc(m.body)}</pre></details>
-      <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px">
-      ${others.length ? `<select data-imove="${m.id}" data-from="${esc(i.id)}" aria-label="다른 아이디어로 옮기기" style="font-size:16px;min-height:44px"><option value="">다른 아이디어로 옮기기</option>${others.map(o => `<option value="${esc(o.id)}">${esc(o.title)}</option>`).join("")}</select>` : ""}
-      ${Object.keys(i.tasks || {}).length ? `<select data-imat="${m.id}" aria-label="과제 고르기" style="font-size:16px;min-height:44px"><option value="">과제 바꾸기</option><option value="-">자유 자료로</option>${Object.keys(i.tasks).map(t => `<option value="${esc(t)}">${esc(t)} ${esc(i.tasks[t].title)}</option>`).join("")}</select>` : ""}</div></div>`);
+    const mats = i.materials.map(m => `<details class="idea-item"><summary><span class="row">
+      <span style="flex:1;min-width:160px">${esc(m.title)}</span><span class="pill">${kindName[m.kind] || esc(m.kind)}</span>${m.task_id ? `<span class="pill">${taskName(m)}</span>` : ""}
+      ${m.summary ? "" : '<span class="pill warn">압축 대기</span>'}<span class="small mute">${ago(m.created_at)}</span></span></summary>
+      ${m.url ? `<div class="small mute"><a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.url)}</a></div>` : m.note ? `<div class="small mute">${esc(m.note)}</div>` : ""}
+      ${m.summary ? `<pre class="small idea-text">${md(m.summary)}</pre>` : '<div class="small mute">곧 Codex가 짧게 정리한다. 종합·관제는 정리된 것만 읽는다.</div>'}
+      <details><summary>원문 ${m.body.length.toLocaleString()}자 (보관용)</summary><pre class="small idea-text">${esc(m.body)}</pre></details>
+      <div class="row idea-actions">
+      ${others.length ? `<select data-imove="${m.id}" data-from="${esc(i.id)}" aria-label="다른 아이디어로 옮기기"><option value="">다른 아이디어로 옮기기</option>${others.map(o => `<option value="${esc(o.id)}">${esc(o.title)}</option>`).join("")}</select>` : ""}
+      ${Object.keys(i.tasks || {}).length ? `<select data-imat="${m.id}" aria-label="과제 고르기"><option value="">과제 바꾸기</option><option value="-">자유 자료로</option>${Object.keys(i.tasks).map(t => `<option value="${esc(t)}">${esc(t)} ${esc(i.tasks[t].title)}</option>`).join("")}</select>` : ""}
+      <button class="danger" data-idel-mat="${m.id}">자료 삭제</button></div></details>`);
     const fuLines = (i.followups || []).map(t => {
       const r = (t.runs || [])[0];
       const state = r ? (FSTATE[r.status] || esc(r.status)) : "차례 기다리는 중";
@@ -116,22 +112,23 @@
     });
     // 정리본의 본문: Codex가 압축본으로 만든 종합. 원문은 아래 자료·결과에서 펼쳐 본다.
     const waiting = i.materials.filter(m => !m.summary).length + i.results.filter(r => r.latest && !r.summary).length;
-    const synthCard = `<div class="card" style="margin-bottom:16px"><div class="t">종합 ${i.synth_at ? `<span class="small mute">${ago(i.synth_at)}</span>` : ""}${waiting ? ` <span class="pill" style="color:var(--warn)">압축 대기 ${waiting}</span>` : ""}</div>
-      ${i.synth ? `<pre class="small" style="white-space:pre-wrap;margin-top:8px">${esc(i.synth)}</pre>` : '<div class="small mute" style="margin-top:8px">아직 종합 전. 결과·자료가 압축되면 Codex가 이 아이디어 하나의 짧은 종합본을 만든다.</div>'}</div>`;
-    return `<div class="row" style="justify-content:space-between"><h1>${esc(i.title)}</h1><button class="danger" data-idel-idea="1" style="min-height:44px">삭제</button></div>
-      <div class="sub mono">${esc(i.id)} · ${ago(i.created_at)} 생성</div>
-      ${i.candidate ? `<div class="card" style="margin-bottom:12px"><span class="small">새 아이디어 후보. 맞으면 확정하고, 아니면 삭제한다.</span> <button data-iadopt="1" style="min-height:44px">아이디어로 확정</button></div>` : ""}
+    const synthCard = `<div class="card" style="margin-bottom:16px"><div class="row"><span class="t" style="flex:1">종합</span>${waiting ? `<span class="pill warn">압축 대기 ${waiting}</span>` : ""}${i.synth_at ? `<span class="small mute">${ago(i.synth_at)}</span>` : ""}</div>
+      ${i.synth ? `<pre class="idea-text" style="margin-top:8px">${md(i.synth)}</pre>` : '<div class="small mute" style="margin-top:8px">아직 종합 전. 결과·자료가 압축되면 Codex가 이 아이디어 하나의 짧은 종합본을 만든다.</div>'}
+      <div class="row" style="margin-top:10px"><button class="primary" data-icopy="overseer">관제에게 가져가기</button><button data-icopy="brief">정리본 복사</button></div></div>`;
+    return `<h1>${esc(i.title)}</h1>
+      <div class="sub">${ago(i.created_at)} 생성 · 자료 ${i.materials.length} · 결과 ${i.results.length}</div>
+      ${i.candidate ? `<div class="card row" style="margin-bottom:12px"><span class="small" style="flex:1">새 아이디어 후보. 맞으면 확정하고, 아니면 맨 아래에서 삭제한다.</span><button data-iadopt="1">아이디어로 확정</button></div>` : ""}
       ${synthCard}
+      <div class="idea-two">
       ${intakeForm([], i.id)}
-      <div class="card" style="margin-bottom:16px">
+      <div class="card">
         <div class="t">추가 조사</div>
-        <textarea id="fu-text" rows="2" placeholder="대충 써도 된다. 예: 경쟁사 가격 더 / 일본에서도 되나 / B안 쪽으로" style="font-size:16px;margin-top:8px;width:100%">${esc(draft.get(i.id + ":fu"))}</textarea>
-        <div class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px"><button class="primary" data-fu="run" style="min-height:44px;font-size:16px">Codex로 돌리기</button><button data-fu="copy" style="min-height:44px;font-size:16px">자료봉용 복사</button></div>
+        <textarea id="fu-text" rows="6" placeholder="대충 써도 된다. 예: 경쟁사 가격 더 / 일본에서도 되나 / B안 쪽으로" style="font-size:16px;margin-top:8px;width:100%">${esc(draft.get(i.id + ":fu"))}</textarea>
+        <div class="row" style="margin-top:8px"><button class="primary" data-fu="run">Codex로 돌리기</button><button data-fu="copy">자료봉용 복사</button></div>
         <div id="fu-out" class="small" style="margin-top:8px"></div>
-        ${fuLines.length ? `<div class="small mute" style="margin-top:8px">조사 이력</div>${list(fuLines)}` : ""}</div>
+        ${fuLines.length ? `<details style="margin-top:8px"><summary>조사 이력 ${fuLines.length}</summary>${list(fuLines)}</details>` : ""}</div>
+      </div>
       <h2>자료 (${i.materials.length})</h2>${list(mats)}
-      <div class="row" style="margin-top:12px;flex-wrap:wrap"><button class="primary" data-icopy="overseer" style="min-height:44px">관제에게 가져가기</button><button data-icopy="brief" style="min-height:44px">정리본 복사</button><span class="small mute mono">${esc(i.brief_path)}</span></div>
-      <div class="small mute mono" style="margin-top:4px">원문 모음: ${esc(i.raw_path)}</div>
       <details style="margin-top:20px"><summary style="min-height:44px"><b>자료봉 흐름</b> · 프롬프트 · 쪼개기 · 결과 붙여넣기 (결과 ${i.results.length})</summary>
       <h2>원문</h2><textarea rows="6" readonly style="font-size:16px">${esc(i.text)}</textarea>
       <h2>자료봉에게 줄 전체 프롬프트</h2>
@@ -145,7 +142,9 @@
       <form id="idea-paste">${Array.from({ length: SLOTS }, (_, n) => `<textarea id="idea-slot-${n}" rows="4" placeholder="결과 ${n + 1}" style="margin-bottom:6px;font-size:16px">${esc(draft.get(slotKey(n)))}</textarea>`).join("")}
         <div class="row" style="margin-top:8px"><button class="primary" style="min-height:44px">결과 저장</button></div></form>
       <h2>결과 (${i.results.length})</h2>${list(results)}
-      </details>`;
+      </details>
+      <div class="small mute mono" style="margin-top:20px">정리본 ${esc(i.brief_path)}<br>원문 모음 ${esc(i.raw_path)}<br>${esc(i.id)}</div>
+      <button class="danger" data-idel-idea="1" style="margin-top:12px">아이디어 삭제</button>`;
   };
 
   async function copy(text) {
