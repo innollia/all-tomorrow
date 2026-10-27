@@ -177,3 +177,11 @@ def test_start_run_adds_argv_suffix_and_keeps_dispatch_unchanged(tmp_path, monke
     assert cfg["workers"]["codex"]["argv"] == ["/bin/codex", "-c", 'web_search="live"']
     assert cfg["workers"]["codex"]["options"]["timeout_seconds"] == 1800
     assert json.loads(workers.read_text())["workers"]["codex"]["options"]["timeout_seconds"] == 600   # 원본 설정은 그대로
+
+
+def test_launch_failures_do_not_use_up_the_tries():
+    from all_tomorrow.overseer.idle_research import COMPRESS_RETRY, _blocked
+    old = [{"status": "EXECUTABLE_NOT_FOUND", "started": 0}] * 5
+    assert not _blocked(old, COMPRESS_RETRY + 1)
+    assert _blocked(old, 10)                                       # 30분 간격은 그대로
+    assert _blocked([{"status": "FAILED", "started": 0}] * 3, COMPRESS_RETRY + 1)

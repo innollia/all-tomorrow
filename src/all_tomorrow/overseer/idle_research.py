@@ -181,7 +181,10 @@ def _run_item(run: dict) -> str:
 
 def _blocked(mine: list[dict], now: float) -> bool:
     failed = [r for r in mine if r.get("status") != "SUCCESS"]
-    return len(failed) >= COMPRESS_TRIES or bool(failed and now - failed[-1]["started"] < COMPRESS_RETRY)
+    # Codex를 못 띄운 실패(EXECUTABLE_NOT_FOUND)는 입력 탓이 아니라 횟수에 넣지 않는다. 예전에는 긴 요청이
+    # 명령줄 한도에 걸려 이렇게 기록돼 종합이 영영 멈췄다.
+    tries = [r for r in failed if r.get("status") != "EXECUTABLE_NOT_FOUND"]
+    return len(tries) >= COMPRESS_TRIES or bool(failed and now - failed[-1]["started"] < COMPRESS_RETRY)
 
 
 def next_compress(folder: Path, runs: list[dict], now: float) -> dict | None:
