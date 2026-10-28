@@ -58,11 +58,12 @@ def test_confirm_appends_public_row_commits_only_supporters_and_pushes_then_undo
     assert "민수" not in json.dumps(public, ensure_ascii=False)                       # 닉네임은 공개 목록에 안 나간다
     assert c.post("/api/shop-pay", json=PAY).status_code == 409
     assert c.get("/api/shop-pay").json()["paid"][0]["dm_user_id"] == "1234"
-    assert c.post("/api/shop-pay", json={**PAY, "order_id": "1028"}).status_code == 422
+    assert c.post("/api/shop-pay", json={**PAY, "order_id": "../x"}).status_code == 422
+    assert c.post("/api/shop-pay", json={**PAY, "order_id": "고양이바다사과나무구름"}).status_code == 200
 
     assert c.delete("/api/shop-pay/BONG-1028-AB12").status_code == 200
-    assert json.loads(git(repo, "show", "origin/main:static/shop/supporters_manual.json")) == []
-    assert c.get("/api/shop-pay").json()["paid"] == []
+    assert len(json.loads(git(repo, "show", "origin/main:static/shop/supporters_manual.json"))) == 1
+    assert [p["order_id"] for p in c.get("/api/shop-pay").json()["paid"]] == ["고양이바다사과나무구름"]
 
 
 def test_bmc_webhook_checks_signature_and_only_queues(tmp_path, monkeypatch) -> None:

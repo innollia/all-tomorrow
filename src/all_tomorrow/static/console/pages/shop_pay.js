@@ -17,9 +17,9 @@
       <span class="small mute">${ago(new Date(p.at))} · ${esc(p.commit)} <button class="danger" data-undo="${esc(p.order_id)}">되돌리기</button></span></div>`);
     setTimeout(bind, 0);
     return `<h1>봉봉봉 입금 확인</h1>
-      <div class="sub">주문 스레드(BONG-MMDD-XXXX · 닉네임)의 입금을 확인하면 상점 명예의 전당에 한 줄이 올라가고 사이트 저장소에 push된다. 이메일·계좌 정보는 적지 않는다.</div>
+      <div class="sub">주문 스레드(주문번호 · 닉네임)의 입금을 확인하면 상점 명예의 전당에 한 줄이 올라가고 사이트 저장소에 push된다. 이메일·계좌 정보는 적지 않는다.</div>
       <form id="pay" class="card" style="display:grid;gap:8px;max-width:480px">
-        <input name="order_id" placeholder="주문번호 BONG-1028-AB12" required pattern="BONG-\\d{4}-[A-Z0-9]{4}">
+        <input name="order_id" placeholder="주문번호 (주문 스레드 제목 그대로)" required maxlength="40">
         <input name="nickname" placeholder="디스코드 닉네임" required>
         <input name="amount" type="number" min="1" placeholder="금액(원)" required>
         <select name="method"><option value="bank">계좌 이체</option><option value="bmc">Buy Me a Coffee</option></select>

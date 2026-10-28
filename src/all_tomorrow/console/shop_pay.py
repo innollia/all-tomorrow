@@ -34,7 +34,7 @@ PUBLIC = "static/shop/supporters.json"
 
 
 class Payment(BaseModel):
-    order_id: str = Field(pattern=r"^BONG-\d{4}-[A-Z0-9]{4}$")
+    order_id: str = Field(pattern=r"^[0-9A-Za-z가-힣-]{2,40}$")   # BONG-MMDD-XXXX 또는 한글 단어 주문번호
     nickname: str = Field(min_length=1, max_length=100)        # 디스코드 닉네임(주문 스레드 이름). 공개 목록에는 안 나간다.
     amount: int = Field(gt=0, le=10_000_000)                    # 원
     method: Literal["bank", "bmc"]
