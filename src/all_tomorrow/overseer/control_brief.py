@@ -244,7 +244,7 @@ def recent_ideas(now=None) -> str:
         return f"아이디어 조사 읽기 실패: {type(error).__name__}"
 
 
-def render(con, base: Path, *, projects, notion, discord, counts, now=None, ideas="", interest="") -> str:
+def render(con, base: Path, *, projects, notion, discord, counts, now=None, ideas="") -> str:
     now = now or datetime.now(timezone.utc).astimezone()
     path = base / "direction.md"
     original = path.read_text(encoding="utf-8") if path.is_file() else ""
@@ -262,10 +262,8 @@ def render(con, base: Path, *, projects, notion, discord, counts, now=None, idea
         ("1. 큰 방향과 마감", direction(original, now.date())
          + ("\n\n### 관제가 사용자와 정한 방향 (direction-notes.md)\n" + decided if decided else ""), 2600),
         # Small and user-initiated, so it sits before the long Notion block and keeps its space.
-        ("2. 최근 아이디어 조사 (7일, 콘솔 #/ideas)", (ideas or "아이디어 조사 기록 없음")
-         + ("\n\n### 사용자 관심의 흐름 (사실만, overseer/interest.py)\n" + interest if interest else ""),
-         900 + (1100 if interest else 0)),
-        ("3. 노션 요약", notion_text or "읽지 못함", 6850 - (1100 if interest else 0)),
+        ("2. 최근 아이디어 조사 (7일, 콘솔 #/ideas)", ideas or "아이디어 조사 기록 없음", 900),
+        ("3. 노션 요약", notion_text or "읽지 못함", 6850),
         ("4. 디스코드 대화 (최근 72시간)", discord, 1750),
         ("5. 메타인지 상태", metacognition(base, counts), 1150),
         ("6. 세션 활동", activity.partition("## 프로젝트")[2], 2200),
@@ -286,7 +284,6 @@ def clip(text: str, limit: int) -> str:
 
 
 def refresh(con, base: Path, *, use_models=True) -> Path:
-    from all_tomorrow.overseer import interest
     from all_tomorrow.overseer.__main__ import _gateway_alive
     from all_tomorrow.overseer.runtime import singleton
     load_key_pool()
@@ -299,7 +296,7 @@ def refresh(con, base: Path, *, use_models=True) -> Path:
             model_status = f"무료 모델: 새 요약 {result['summarized']}구간 / 실패 {result['failed']}구간(다음 주기 재시도)."
         text = render(con, base, projects=brief.load_projects(), notion=load_notion(),
                       discord=model_status + "\n" + discord_digest.recent(base), counts=load_work_counts(),
-                      ideas=recent_ideas(), interest=interest.summary())
+                      ideas=recent_ideas())
         text = redact(text)
         target = base / "control-brief.md"
         # Unique sibling temp + replace keeps the previous complete brief on failure.
