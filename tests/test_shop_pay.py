@@ -33,7 +33,7 @@ def client(tmp_path, monkeypatch, secret="") -> tuple[TestClient, object, object
     repo, remote = shop_repo(tmp_path)
     monkeypatch.setenv("ALL_TOMORROW_SHOP_REPO", str(repo))
     monkeypatch.setenv("BMC_WEBHOOK_SECRET", secret)
-    app = create_app(auth=Auth("owner", "correct horse", "s" * 32), console_data_dir=str(tmp_path / "console"))
+    app = create_app(auth=Auth("owner", "correct horse", "s" * 32, edge_token="edge-secret"), console_data_dir=str(tmp_path / "console"))
     c = TestClient(app, base_url="https://testserver")
     c.__enter__()
     return c, repo, remote
@@ -82,3 +82,20 @@ def test_bmc_webhook_checks_signature_and_only_queues(tmp_path, monkeypatch) -> 
 def test_bmc_webhook_off_without_secret(tmp_path, monkeypatch) -> None:
     c, _, _ = client(tmp_path, monkeypatch)
     assert c.post("/internal/bmc/webhook", content=b"{}", headers={"x-signature-sha256": "x"}).status_code == 503
+
+
+def test_dm_unlock_requests_are_polled_and_acked_by_eve(tmp_path, monkeypatch) -> None:
+    c, _, _ = client(tmp_path, monkeypatch)
+    edge = {"Authorization": "Bearer edge-secret"}
+    c.post("/api/login", json={"username": "owner", "password": "correct horse"})
+    c.post("/api/shop-pay", json={**PAY, "dm_user_id": "1234"})
+    assert c.get("/internal/edge/eve/access-requests").status_code == 401
+    reqs = c.get("/internal/edge/eve/access-requests", headers=edge).json()["requests"]
+    assert [(r["user_id"], r["action"], r["order_id"]) for r in reqs] == [("1234", "unlock", "BONG-1028-AB12")]
+    ack = {"request_id": reqs[0]["request_id"], "ok": True, "state": "unlocked"}
+    assert c.post("/internal/edge/eve/access-requests/ack", json=ack, headers=edge).json() == {"ok": True}
+    assert c.post("/internal/edge/eve/access-requests/ack", json=ack, headers=edge).json() == {"ok": True}   # 두 번 와도 안전
+    assert c.get("/internal/edge/eve/access-requests", headers=edge).json() == {"requests": []}
+    assert c.post("/api/shop-pay/BONG-1028-AB12/dm/revoke").json()["action"] == "revoke"
+    assert c.get("/internal/edge/eve/access-requests", headers=edge).json()["requests"][0]["action"] == "revoke"
+    assert c.get("/api/shop-pay").json()["access"][0]["state"] == "unlocked"

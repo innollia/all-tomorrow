@@ -16,6 +16,7 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import subprocess
 import threading
 from datetime import UTC, datetime, timedelta, timezone
@@ -41,6 +42,13 @@ class Payment(BaseModel):
     note: str = Field(default="", max_length=80)
     dm_user_id: str = Field(default="", pattern=r"^([0-9]{1,32})?$")   # ss0 DM 해금 대상 디스코드 ID
     pending_id: str = Field(default="", max_length=100)         # BMC 확인 대기에서 온 것이면 그 id
+
+
+class AccessAck(BaseModel):
+    request_id: str = Field(min_length=1, max_length=64)
+    ok: bool
+    state: Literal["unlocked", "revoked"] | None = None
+    error: str = Field(default="", max_length=500)
 
 
 def shop_repo() -> Path:
@@ -143,8 +151,51 @@ def build_router(ctx: ConsoleContext, repo: ShopRepo | None = None) -> APIRouter
         data["paid"].append({**p.model_dump(exclude={"pending_id"}), "row": row, "commit": commit,
                              "at": datetime.now(UTC).isoformat(timespec="seconds")})
         data["pending"] = [x for x in data["pending"] if x["id"] != p.pending_id]
+        if p.dm_user_id:
+            add_request(data, p.dm_user_id, "unlock", p.order_id)
         ledger.save(data)
         return {"commit": commit, "row": row}
+
+    def add_request(data: dict[str, Any], user_id: str, action: str, order_id: str) -> dict[str, Any]:
+        req = {"request_id": secrets.token_hex(8), "user_id": user_id, "action": action, "order_id": order_id,
+               "requested_at": datetime.now(UTC).isoformat(timespec="seconds"), "done": False}
+        data.setdefault("access", []).append(req)
+        return req
+
+    @router.post("/api/shop-pay/{order_id}/dm/{action}")
+    def dm(order_id: str, action: Literal["unlock", "revoke"], _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        data = ledger.load()
+        found = next((x for x in data["paid"] if x["order_id"] == order_id), None)
+        if found is None or not found.get("dm_user_id"):
+            raise HTTPException(404, "해금 대상이 있는 확인 기록 없음")
+        req = add_request(data, found["dm_user_id"], action, order_id)
+        ledger.save(data)
+        return req
+
+    # Eve가 15초마다 가져간다(엣지 토큰). 처리 결과는 ack로, 상태는 /internal/edge/eve/unlocked-dm의 access로도 온다.
+    def edge(request: Request) -> None:
+        if ctx.verify_edge is None:
+            raise HTTPException(503, "edge authentication not configured")
+        ctx.verify_edge(request.headers.get("authorization"))
+
+    @router.get("/internal/edge/eve/access-requests")
+    def access_requests(request: Request) -> dict[str, Any]:
+        edge(request)
+        keep = ("request_id", "user_id", "action", "order_id", "requested_at")
+        return {"requests": [{k: r[k] for k in keep} for r in ledger.load().get("access", []) if not r["done"]]}
+
+    @router.post("/internal/edge/eve/access-requests/ack")
+    def access_ack(ack: AccessAck, request: Request) -> dict[str, Any]:
+        edge(request)
+        data = ledger.load()
+        req = next((r for r in data.get("access", []) if r["request_id"] == ack.request_id), None)
+        if req is None:
+            raise HTTPException(404, "no such request")
+        if not req["done"]:
+            req.update(done=True, ok=ack.ok, state=ack.state, error=ack.error,
+                       acked_at=datetime.now(UTC).isoformat(timespec="seconds"))
+            ledger.save(data)
+        return {"ok": True}
 
     @router.delete("/api/shop-pay/{order_id}")
     def undo(order_id: str, _: str = Depends(ctx.current_user)) -> dict[str, Any]:

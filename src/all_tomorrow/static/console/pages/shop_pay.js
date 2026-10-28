@@ -5,11 +5,15 @@
   AT.nav.push({ section: "봉봉봉", label: "입금 확인", href: "#/shop-pay", order: 80 });
   const won = n => Number(n).toLocaleString("ko-KR") + "원";
 
+  AT.refresh["/shop-pay"] = 20000;  // Eve가 해금을 처리하면 상태가 바뀐다
   AT.pages["/shop-pay"] = async () => {
     const d = await api("/api/shop-pay");
+    const dmState = o => { const r = (d.access || []).filter(x => x.order_id === o).pop();
+      return !r ? "" : !r.done ? `<span class="pill warn">${r.action === "unlock" ? "해금" : "회수"} 대기</span>`
+        : r.ok ? `<span class="pill">${r.state === "revoked" ? "회수됨" : "해금됨"}</span>` : `<span class="pill warn">실패 ${esc(r.error)}</span>`; };
     const pending = d.pending.map(p => `<div class="row"><span>${esc(p.name || "이름 없음")} · ${esc(String(p.amount))} ${esc(p.currency)}${p.live ? "" : ' <span class="pill warn">테스트</span>'}${p.note ? " · " + esc(p.note) : ""}</span>
       <button data-pick="${esc(p.id)}" data-name="${esc(p.name)}" data-note="${esc(p.note)}">이 후원으로 채우기</button></div>`);
-    const paid = d.paid.slice().reverse().map(p => `<div class="row"><span><b class="mono">${esc(p.order_id)}</b> · ${esc(p.nickname)} · ${won(p.amount)} · ${p.method === "bank" ? "계좌" : "BMC"} · 공개 이름 ${esc(p.row.name)}${p.dm_user_id ? ` · DM 해금 대상 <span class="mono">${esc(p.dm_user_id)}</span>` : ""}</span>
+    const paid = d.paid.slice().reverse().map(p => `<div class="row"><span><b class="mono">${esc(p.order_id)}</b> · ${esc(p.nickname)} · ${won(p.amount)} · ${p.method === "bank" ? "계좌" : "BMC"} · 공개 이름 ${esc(p.row.name)}${p.dm_user_id ? ` · DM <span class="mono">${esc(p.dm_user_id)}</span> ${dmState(p.order_id)} <button data-dm="unlock" data-o="${esc(p.order_id)}">해금</button> <button data-dm="revoke" data-o="${esc(p.order_id)}">회수</button>` : ""}</span>
       <span class="small mute">${ago(new Date(p.at))} · ${esc(p.commit)} <button class="danger" data-undo="${esc(p.order_id)}">되돌리기</button></span></div>`);
     setTimeout(bind, 0);
     return `<h1>봉봉봉 입금 확인</h1>
@@ -47,6 +51,10 @@
     document.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => {
       form.method.value = "bmc"; form.pending_id.value = b.dataset.pick;
       form.public_name.value = b.dataset.name; form.note.value = b.dataset.note; form.order_id.focus();
+    });
+    document.querySelectorAll("[data-dm]").forEach(b => b.onclick = async () => {
+      await api(`/api/shop-pay/${encodeURIComponent(b.dataset.o)}/dm/${b.dataset.dm}`, {});
+      AT.render();
     });
     document.querySelectorAll("[data-undo]").forEach(b => b.onclick = async () => {
       if (!confirm(`${b.dataset.undo} 확인을 되돌릴까? 명예의 전당에서 빠진다.`)) return;
