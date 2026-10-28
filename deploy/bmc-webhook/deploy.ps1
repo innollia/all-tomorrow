@@ -39,6 +39,7 @@ if (-not $?) {
   aws lambda update-function-configuration --function-name $N --region $R --environment "file://$here\env.json" --query LastUpdateStatus --output text
   aws lambda wait function-updated --function-name $N --region $R
 }
-Remove-Item "$here\env.json", "$here\fn.zip", "$here\trust.json", "$here\ddb.json" -ErrorAction SilentlyContinue
+Start-Sleep 10   # 설정 갱신 직후 몇 초는 옛 환경 변수로 응답한다(2026-10-29 실측)
+Remove-Item "$here\env.json","$here\fn.zip", "$here\trust.json", "$here\ddb.json" -ErrorAction SilentlyContinue
 $url = aws lambda get-function-url-config --function-name $N --region $R --query FunctionUrl --output text
 "url: $url"
