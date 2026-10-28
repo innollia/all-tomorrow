@@ -100,3 +100,32 @@ def test_dm_unlock_requests_are_polled_and_acked_by_eve(tmp_path, monkeypatch) -
     assert c.post("/api/shop-pay/BONG-1028-AB12/dm/revoke").json()["action"] == "revoke"
     assert c.get("/internal/edge/eve/access-requests", headers=edge).json()["requests"][0]["action"] == "revoke"
     assert c.get("/api/shop-pay").json()["access"][0]["state"] == "unlocked"
+
+
+def test_bmc_pending_is_pulled_from_eve_and_acked_on_confirm_or_dismiss(tmp_path, monkeypatch) -> None:
+    import httpx
+    eve = {"supports": [{"id": "s1", "supporter_name": "콩", "amount": 5, "currency": "USD", "note": "화이팅",
+                         "supported_at": "2026-10-29T00:00:00+00:00", "received_at": "2026-10-29T00:00:01+00:00"},
+                        {"id": "s2", "supporter_name": "익명", "amount": 3, "currency": "USD", "note": "",
+                         "supported_at": "", "received_at": "2026-10-29T00:01:00+00:00"}]}
+    acked = []
+
+    def handle(req: httpx.Request) -> httpx.Response:
+        assert req.headers["authorization"] == "Bearer edge-secret"
+        if req.url.path == "/internal/edge/bmc/pending":
+            return httpx.Response(200, json={"supports": [s for s in eve["supports"] if s["id"] not in acked]})
+        acked.extend(json.loads(req.content)["ids"])
+        return httpx.Response(200, json={"ok": True, "acked": 1})
+    real = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handle)))
+    monkeypatch.setenv("ALL_TOMORROW_EVE_URL", "https://eve.example/")
+    monkeypatch.setenv("ALL_TOMORROW_EDGE_TOKEN", "edge-secret")
+    c, _, _ = client(tmp_path, monkeypatch)
+    c.post("/api/login", json={"username": "owner", "password": "correct horse"})
+    d = c.get("/api/shop-pay").json()
+    assert d["eve_error"] == "" and [p["id"] for p in d["pending"]] == ["eve:s1", "eve:s2"]
+    c.post("/api/shop-pay", json={**PAY, "method": "bmc", "public_name": "콩", "pending_id": "eve:s1"})
+    assert c.delete("/api/shop-pay/pending/eve:s2").json() == {"ok": True}
+    assert acked == ["s1", "s2"] and c.get("/api/shop-pay").json()["pending"] == []
+    monkeypatch.setenv("ALL_TOMORROW_EVE_URL", "")
+    assert "설정" in c.get("/api/shop-pay").json()["eve_error"]

@@ -51,6 +51,39 @@ class AccessAck(BaseModel):
     error: str = Field(default="", max_length=500)
 
 
+def eve_base() -> str:
+    """Eve AWS 호스트 공개 주소. BMC 웹후크는 그쪽이 받아 쌓고 콘솔이 가져간다(GET /internal/edge/bmc/pending, POST .../ack)."""
+    env = os.environ.get("ALL_TOMORROW_EVE_URL", "").strip()
+    f = Path.home() / ".all-tomorrow" / "eve-url"
+    return (env or (f.read_text(encoding="utf-8").strip() if f.exists() else "")).rstrip("/")
+
+
+class EveBmc:
+    """Eve가 쌓아 둔 BMC 후원 확인 대기를 엣지 토큰으로 가져오고, 처리한 것을 ack한다."""
+
+    def __init__(self, base=eve_base, token=lambda: os.environ.get("ALL_TOMORROW_EDGE_TOKEN", ""), client=None) -> None:
+        self.base, self.token, self.client = base, token, client
+
+    def call(self, method: str, path: str, **kw) -> dict[str, Any]:
+        import httpx
+        base, token = self.base(), self.token()
+        if not base or not token:
+            raise RuntimeError("Eve 주소나 엣지 토큰이 설정되지 않았다")
+        c = self.client or httpx.Client(timeout=8)
+        r = c.request(method, base + path, headers={"Authorization": f"Bearer {token}"}, **kw)
+        r.raise_for_status()
+        return r.json()
+
+    def pending(self) -> list[dict[str, Any]]:
+        return [{"id": f"eve:{x['id']}", "name": str(x.get("supporter_name") or "")[:40], "amount": x.get("amount"),
+                 "currency": str(x.get("currency") or ""), "note": str(x.get("note") or "")[:80], "live": True,
+                 "received_at": x.get("received_at") or x.get("supported_at") or ""}
+                for x in self.call("GET", "/internal/edge/bmc/pending").get("supports", [])]
+
+    def ack(self, ids: list[str]) -> None:
+        self.call("POST", "/internal/edge/bmc/ack", json={"ids": ids})
+
+
 def shop_repo() -> Path:
     return Path(os.environ.get("ALL_TOMORROW_SHOP_REPO", r"C:\projects\innollia.github.io"))
 
@@ -131,14 +164,35 @@ def pending_from_bmc(event: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def build_router(ctx: ConsoleContext, repo: ShopRepo | None = None) -> APIRouter:
+def build_router(ctx: ConsoleContext, repo: ShopRepo | None = None, eve: EveBmc | None = None) -> APIRouter:
     ledger = Ledger(ctx.feature_dir("shop-pay"))
     shop = repo or ShopRepo(shop_repo())
+    bmc = eve or EveBmc()
     router = APIRouter()
 
     @router.get("/api/shop-pay")
-    async def listing(_: str = Depends(ctx.current_user)) -> dict[str, Any]:
-        return ledger.load()
+    def listing(_: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        data = ledger.load()
+        try:   # Eve 쪽 대기가 원본이다. 환불되면 거기서 빠지므로 매번 새로 받아 바꿔 끼운다.
+            fresh = bmc.pending()
+            data["pending"] = [x for x in data["pending"] if not x["id"].startswith("eve:")] + fresh
+            ledger.save(data)
+            data["eve_error"] = ""
+        except Exception as e:  # noqa: BLE001 - 못 받으면 마지막으로 받은 목록을 보여 준다
+            data["eve_error"] = str(e)[:200]
+        return data
+
+    def take_pending(data: dict[str, Any], pending_id: str) -> None:
+        if pending_id.startswith("eve:"):
+            bmc.ack([pending_id[4:]])
+        data["pending"] = [x for x in data["pending"] if x["id"] != pending_id]
+
+    @router.delete("/api/shop-pay/pending/{pending_id}")
+    def dismiss(pending_id: str, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        data = ledger.load()
+        take_pending(data, pending_id)
+        ledger.save(data)
+        return {"ok": True}
 
     @router.post("/api/shop-pay")
     def confirm(p: Payment, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
@@ -150,7 +204,11 @@ def build_router(ctx: ConsoleContext, repo: ShopRepo | None = None) -> APIRouter
         commit = shop.change(lambda rows: [*rows, row], f"상점: 입금 확인 {p.order_id}")
         data["paid"].append({**p.model_dump(exclude={"pending_id"}), "row": row, "commit": commit,
                              "at": datetime.now(UTC).isoformat(timespec="seconds")})
-        data["pending"] = [x for x in data["pending"] if x["id"] != p.pending_id]
+        if p.pending_id:
+            try:
+                take_pending(data, p.pending_id)
+            except Exception:  # noqa: BLE001 - 공개 기록은 이미 올라갔다. ack는 다음에 '대기에서 빼기'로 다시 한다.
+                pass
         if p.dm_user_id:
             add_request(data, p.dm_user_id, "unlock", p.order_id)
         ledger.save(data)

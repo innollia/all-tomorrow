@@ -12,7 +12,7 @@
       return !r ? "" : !r.done ? `<span class="pill warn">${r.action === "unlock" ? "해금" : "회수"} 대기</span>`
         : r.ok ? `<span class="pill">${r.state === "revoked" ? "회수됨" : "해금됨"}</span>` : `<span class="pill warn">실패 ${esc(r.error)}</span>`; };
     const pending = d.pending.map(p => `<div class="row"><span>${esc(p.name || "이름 없음")} · ${esc(String(p.amount))} ${esc(p.currency)}${p.live ? "" : ' <span class="pill warn">테스트</span>'}${p.note ? " · " + esc(p.note) : ""}</span>
-      <button data-pick="${esc(p.id)}" data-name="${esc(p.name)}" data-note="${esc(p.note)}">이 후원으로 채우기</button></div>`);
+      <span><button data-pick="${esc(p.id)}" data-name="${esc(p.name)}" data-note="${esc(p.note)}">이 후원으로 채우기</button> <button data-skip="${esc(p.id)}">대기에서 빼기</button></span></div>`);
     const paid = d.paid.slice().reverse().map(p => `<div class="row"><span><b class="mono">${esc(p.order_id)}</b> · ${esc(p.nickname)} · ${won(p.amount)} · ${p.method === "bank" ? "계좌" : "BMC"} · 공개 이름 ${esc(p.row.name)}${p.dm_user_id ? ` · DM <span class="mono">${esc(p.dm_user_id)}</span> ${dmState(p.order_id)} <button data-dm="unlock" data-o="${esc(p.order_id)}">해금</button> <button data-dm="revoke" data-o="${esc(p.order_id)}">회수</button>` : ""}</span>
       <span class="small mute">${ago(new Date(p.at))} · ${esc(p.commit)} <button class="danger" data-undo="${esc(p.order_id)}">되돌리기</button></span></div>`);
     setTimeout(bind, 0);
@@ -29,7 +29,7 @@
         <input name="pending_id" type="hidden">
         <button class="primary">입금 확인</button><div id="pay-msg" class="small"></div>
       </form>
-      ${pending.length ? `<h2>BMC 확인 대기</h2>${list(pending)}` : ""}
+      <h2>BMC 확인 대기</h2>${d.eve_error ? `<div class="small warn">Eve에서 못 받음: ${esc(d.eve_error)}</div>` : ""}${pending.length ? list(pending) : '<div class="empty">없음</div>'}
       <h2>확인한 입금</h2>${paid.length ? list(paid) : '<div class="empty">아직 없다.</div>'}`;
   };
 
@@ -54,6 +54,11 @@
     });
     document.querySelectorAll("[data-dm]").forEach(b => b.onclick = async () => {
       await api(`/api/shop-pay/${encodeURIComponent(b.dataset.o)}/dm/${b.dataset.dm}`, {});
+      AT.render();
+    });
+    document.querySelectorAll("[data-skip]").forEach(b => b.onclick = async () => {
+      if (!confirm("이 후원을 확인 대기에서 뺄까? 명예의 전당에는 안 올라간다.")) return;
+      await api(`/api/shop-pay/pending/${encodeURIComponent(b.dataset.skip)}`, undefined, "DELETE");
       AT.render();
     });
     document.querySelectorAll("[data-undo]").forEach(b => b.onclick = async () => {
