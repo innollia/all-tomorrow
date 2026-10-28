@@ -29,7 +29,7 @@
         <input name="pending_id" type="hidden">
         <button class="primary">입금 확인</button><div id="pay-msg" class="small"></div>
       </form>
-      <h2>BMC 확인 대기</h2>${d.eve_error ? `<div class="small warn">Eve에서 못 받음: ${esc(d.eve_error)}</div>` : ""}${pending.length ? list(pending) : '<div class="empty">없음</div>'}
+      <h2>BMC 확인 대기</h2>${d.eve_error ? `<div class="small warn">BMC 대기 못 받음: ${esc(d.eve_error)}</div>` : ""}${pending.length ? list(pending) : '<div class="empty">없음</div>'}
       <h2>확인한 입금</h2>${paid.length ? list(paid) : '<div class="empty">아직 없다.</div>'}`;
   };
 

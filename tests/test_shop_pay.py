@@ -118,8 +118,8 @@ def test_bmc_pending_is_pulled_from_eve_and_acked_on_confirm_or_dismiss(tmp_path
         return httpx.Response(200, json={"ok": True, "acked": 1})
     real = httpx.Client
     monkeypatch.setattr(httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handle)))
-    monkeypatch.setenv("ALL_TOMORROW_EVE_URL", "https://eve.example/")
-    monkeypatch.setenv("ALL_TOMORROW_EDGE_TOKEN", "edge-secret")
+    monkeypatch.setenv("ALL_TOMORROW_BMC_URL", "https://eve.example/")
+    monkeypatch.setenv("ALL_TOMORROW_BMC_TOKEN", "edge-secret")
     c, _, _ = client(tmp_path, monkeypatch)
     c.post("/api/login", json={"username": "owner", "password": "correct horse"})
     d = c.get("/api/shop-pay").json()
@@ -127,5 +127,6 @@ def test_bmc_pending_is_pulled_from_eve_and_acked_on_confirm_or_dismiss(tmp_path
     c.post("/api/shop-pay", json={**PAY, "method": "bmc", "public_name": "콩", "pending_id": "eve:s1"})
     assert c.delete("/api/shop-pay/pending/eve:s2").json() == {"ok": True}
     assert acked == ["s1", "s2"] and c.get("/api/shop-pay").json()["pending"] == []
-    monkeypatch.setenv("ALL_TOMORROW_EVE_URL", "")
+    monkeypatch.setenv("ALL_TOMORROW_BMC_URL", "")
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     assert "설정" in c.get("/api/shop-pay").json()["eve_error"]

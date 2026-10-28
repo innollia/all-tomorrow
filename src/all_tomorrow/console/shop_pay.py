@@ -51,24 +51,29 @@ class AccessAck(BaseModel):
     error: str = Field(default="", max_length=500)
 
 
-def eve_base() -> str:
-    """Eve AWS 호스트 공개 주소. BMC 웹후크는 그쪽이 받아 쌓고 콘솔이 가져간다(GET /internal/edge/bmc/pending, POST .../ack)."""
-    env = os.environ.get("ALL_TOMORROW_EVE_URL", "").strip()
-    f = Path.home() / ".all-tomorrow" / "eve-url"
-    return (env or (f.read_text(encoding="utf-8").strip() if f.exists() else "")).rstrip("/")
+def _setting(env: str, name: str) -> str:
+    v = os.environ.get(env, "").strip()
+    f = Path.home() / ".all-tomorrow" / name
+    return v or (f.read_text(encoding="utf-8").strip() if f.exists() else "")
+
+
+def bmc_base() -> str:
+    """BMC 웹후크를 받아 쌓는 AWS Lambda(Function URL, ap-northeast-2 bmc-webhook). 콘솔은
+    GET /internal/edge/bmc/pending으로 가져가고 POST .../ack로 지운다. 이 콘솔 전용 토큰으로만 열린다."""
+    return _setting("ALL_TOMORROW_BMC_URL", "bmc-pull-url").rstrip("/")
 
 
 class EveBmc:
-    """Eve가 쌓아 둔 BMC 후원 확인 대기를 엣지 토큰으로 가져오고, 처리한 것을 ack한다."""
+    """AWS에 쌓인 BMC 후원 확인 대기를 가져오고, 처리한 것을 ack한다."""
 
-    def __init__(self, base=eve_base, token=lambda: os.environ.get("ALL_TOMORROW_EDGE_TOKEN", ""), client=None) -> None:
+    def __init__(self, base=bmc_base, token=lambda: _setting("ALL_TOMORROW_BMC_TOKEN", "bmc-pull.token"), client=None) -> None:
         self.base, self.token, self.client = base, token, client
 
     def call(self, method: str, path: str, **kw) -> dict[str, Any]:
         import httpx
         base, token = self.base(), self.token()
         if not base or not token:
-            raise RuntimeError("Eve 주소나 엣지 토큰이 설정되지 않았다")
+            raise RuntimeError("BMC 대기 주소나 토큰이 설정되지 않았다")
         c = self.client or httpx.Client(timeout=8)
         r = c.request(method, base + path, headers={"Authorization": f"Bearer {token}"}, **kw)
         r.raise_for_status()
