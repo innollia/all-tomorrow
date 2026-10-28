@@ -1,8 +1,10 @@
+# BMC 웹후크 Lambda 배포/갱신. 비밀값은 ~/.all-tomorrow의 파일에서만 읽고 출력하지 않는다.
+# 사용자가 bmc-webhook.secret을 넣으면 다시 돌려 반영한다(없으면 임시 값 bmc-webhook.temp.secret).
 $ErrorActionPreference = "Continue"
 $here = $PSScriptRoot; $R = "ap-northeast-2"; $N = "bmc-webhook"; $AT = "$HOME\.all-tomorrow"
-function Rand { -join ((1..40) | % { "{0:x}" -f (Get-Random -Max 16) }) }
+function Rand { $b = New-Object byte[] 24; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b | % { $_.ToString("x2") }) }
 $pullF = "$AT\bmc-pull.token"; if (-not (Test-Path $pullF)) { Set-Content -NoNewline -Encoding ascii $pullF (Rand) }
-$secF = "$AT\bmc-webhook.secret"; $tmpF = "$here\temp.secret"
+$secF = "$AT\bmc-webhook.secret"; $tmpF = "$AT\bmc-webhook.temp.secret"
 if (Test-Path $secF) { $sec = (Get-Content $secF -Raw).Trim(); "secret: user file" } else { if (-not (Test-Path $tmpF)) { Set-Content -NoNewline -Encoding ascii $tmpF (Rand) }; $sec = (Get-Content $tmpF -Raw).Trim(); "secret: TEMP" }
 $pull = (Get-Content $pullF -Raw).Trim()
 
@@ -35,6 +37,6 @@ if (-not $?) {
   aws lambda update-function-configuration --function-name $N --region $R --environment "file://$here\env.json" --query LastUpdateStatus --output text
   aws lambda wait function-updated --function-name $N --region $R
 }
-Remove-Item "$here\env.json"
+Remove-Item "$here\env.json", "$here\fn.zip", "$here\trust.json", "$here\ddb.json" -ErrorAction SilentlyContinue
 $url = aws lambda get-function-url-config --function-name $N --region $R --query FunctionUrl --output text
 "url: $url"
