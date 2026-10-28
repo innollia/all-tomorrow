@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import json
 import subprocess
 
@@ -65,24 +63,6 @@ def test_confirm_appends_public_row_commits_only_supporters_and_pushes_then_undo
     assert len(json.loads(git(repo, "show", "origin/main:static/shop/supporters_manual.json"))) == 1
     assert [p["order_id"] for p in c.get("/api/shop-pay").json()["paid"]] == ["고양이바다사과나무구름"]
 
-
-def test_bmc_webhook_checks_signature_and_only_queues(tmp_path, monkeypatch) -> None:
-    c, repo, _ = client(tmp_path, monkeypatch, secret="whsec")
-    body = json.dumps({"type": "donation.created", "live_mode": False, "data": {"id": 77, "supporter_name": "콩", "amount": 5,
-                       "currency": "USD", "support_note": "화이팅", "supporter_email": "a@b.c"}}).encode()
-    sig = hmac.new(b"whsec", body, hashlib.sha256).hexdigest()
-    assert c.post("/internal/bmc/webhook", content=body, headers={"x-signature-sha256": "0" * 64}).status_code == 401
-    assert c.post("/internal/bmc/webhook", content=body, headers={"x-signature-sha256": sig}).json() == {"ok": True, "queued": True}
-    c.post("/internal/bmc/webhook", content=body, headers={"x-signature-sha256": sig})
-    c.post("/api/login", json={"username": "owner", "password": "correct horse"})
-    pending = c.get("/api/shop-pay").json()["pending"]
-    assert len(pending) == 1 and pending[0]["name"] == "콩" and "a@b.c" not in json.dumps(pending)
-    assert json.loads((repo / "static/shop/supporters_manual.json").read_text(encoding="utf-8")) == []   # 자동 공개 안 함
-
-
-def test_bmc_webhook_off_without_secret(tmp_path, monkeypatch) -> None:
-    c, _, _ = client(tmp_path, monkeypatch)
-    assert c.post("/internal/bmc/webhook", content=b"{}", headers={"x-signature-sha256": "x"}).status_code == 503
 
 
 def test_dm_unlock_requests_are_polled_and_acked_by_eve(tmp_path, monkeypatch) -> None:

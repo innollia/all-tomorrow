@@ -1,11 +1,13 @@
 # BMC 웹후크 Lambda 배포/갱신. 비밀값은 ~/.all-tomorrow의 파일에서만 읽고 출력하지 않는다.
-# 사용자가 bmc-webhook.secret을 넣으면 다시 돌려 반영한다(없으면 임시 값 bmc-webhook.temp.secret).
+# 사용자가 key-pool.env에 BMC_WEBHOOK_SECRET=... 를 넣으면 다시 돌려 반영한다(없으면 임시 값 bmc-webhook.temp.secret).
 $ErrorActionPreference = "Continue"
 $here = $PSScriptRoot; $R = "ap-northeast-2"; $N = "bmc-webhook"; $AT = "$HOME\.all-tomorrow"
 function Rand { $b = New-Object byte[] 24; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b | % { $_.ToString("x2") }) }
 $pullF = "$AT\bmc-pull.token"; if (-not (Test-Path $pullF)) { Set-Content -NoNewline -Encoding ascii $pullF (Rand) }
 $secF = "$AT\bmc-webhook.secret"; $tmpF = "$AT\bmc-webhook.temp.secret"
-if (Test-Path $secF) { $sec = (Get-Content $secF -Raw).Trim(); "secret: user file" } else { if (-not (Test-Path $tmpF)) { Set-Content -NoNewline -Encoding ascii $tmpF (Rand) }; $sec = (Get-Content $tmpF -Raw).Trim(); "secret: TEMP" }
+$poolLine = if (Test-Path "$AT\key-pool.env") { Get-Content "$AT\key-pool.env" | ? { $_ -match '^\s*BMC_WEBHOOK_SECRET\s*=' } | Select-Object -Last 1 }
+if ($poolLine) { $sec = ($poolLine -replace '^\s*BMC_WEBHOOK_SECRET\s*=\s*', '').Trim().Trim('"', "'"); "secret: key-pool.env" }
+elseif (Test-Path $secF) { $sec = (Get-Content $secF -Raw).Trim(); "secret: user file" } else { if (-not (Test-Path $tmpF)) { Set-Content -NoNewline -Encoding ascii $tmpF (Rand) }; $sec = (Get-Content $tmpF -Raw).Trim(); "secret: TEMP" }
 $pull = (Get-Content $pullF -Raw).Trim()
 
 aws dynamodb describe-table --table-name $N --region $R --query Table.TableStatus --output text 2>$null
