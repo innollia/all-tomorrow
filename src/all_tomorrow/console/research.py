@@ -137,7 +137,7 @@ class ResearchStore:
         return topic
 
     def revise(self, topic_id: str, *, title: str | None = None, ask: str | None = None, reason: str | None = None,
-               repeat_days: float | None = None) -> dict[str, Any]:
+               repeat_days: float | None = None, project_id: str | None = None) -> dict[str, Any]:
         """메타인지가 자기가 넣은 주제만 고친다. 사용자가 끈 주제는 건드리지 않는다(켜기는 사용자 몫)."""
         with self._lock():
             topics = self.topics()
@@ -148,7 +148,7 @@ class ResearchStore:
                 raise ValueError("사용자가 넣은 주제는 고치지 않는다")
             if not topic.get("enabled", True) or any(d["id"] == topic_id for d in self.declined()):
                 raise ValueError("사용자가 끈 주제다")
-            for name, value in (("title", title), ("ask", ask), ("reason", reason)):
+            for name, value in (("title", title), ("ask", ask), ("reason", reason), ("project_id", project_id)):
                 if value is not None and value.strip():
                     topic[name] = value.strip()
             if repeat_days is not None:

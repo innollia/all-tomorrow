@@ -221,9 +221,10 @@ def build_prompt(base: Path, entry: dict, cfg: dict) -> str:
 
 
 def mcp_config(base: Path) -> Path:
-    """oracle·all-tomorrow만. DP7 Python으로 띄운다(Syncthing .venv 실행기는 예약 작업에서 안 뜬 적이 있다)."""
+    """oracle·all-tomorrow·research(조사 목록). DP7 Python으로 띄운다(Syncthing .venv 실행기는 예약 작업에서 안 뜬 적이 있다)."""
     servers = {"oracle": {"type": "stdio", "command": sys.executable, "args": ["-m", "all_tomorrow.overseer.oracle_mcp"]},
-               "all-tomorrow": {"type": "stdio", "command": sys.executable, "args": ["-m", "all_tomorrow.mcp_server"]}}
+               "all-tomorrow": {"type": "stdio", "command": sys.executable, "args": ["-m", "all_tomorrow.mcp_server"]},
+               "research": {"type": "stdio", "command": sys.executable, "args": ["-m", "all_tomorrow.overseer.research_mcp"]}}
     path = base / "metacog-mcp.json"
     save(path, {"mcpServers": servers})
     return path

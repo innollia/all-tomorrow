@@ -1,6 +1,8 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from all_tomorrow.console.research import ResearchStore, TopicPatch, TopicRequest, save_runs
+from all_tomorrow.overseer import research_mcp
 from all_tomorrow.web import Auth, create_app
 
 
@@ -60,3 +62,31 @@ def test_store_survives_missing_or_broken_files(tmp_path) -> None:
     assert store.topics() == []
     topic = store.create(TopicRequest(ask="x"))
     assert store.update(topic["id"], TopicPatch(move=1))["id"] == topic["id"]
+
+
+def test_metacog_topics_are_marked_and_user_declines_stick(tmp_path):
+    store = ResearchStore(tmp_path / "research")
+    mine = store.create_followup("I-1", "경쟁 도구 가격")
+    topic = store.suggest("엔진 플러그인 시장", "Godot·Unity 에셋 스토어의 AI 도구 현황", "I-1 종합본의 '시장' 칸이 비어 있음", idea_id="I-1")
+    assert topic["source"] == "metacog" and topic["idea_id"] == "I-1" and topic["run_now_at"] is None
+    with pytest.raises(ValueError):
+        store.revise(mine["id"], ask="바꿈")          # 사용자가 넣은 주제는 메타인지가 고치지 않는다
+    store.update(topic["id"], TopicPatch(enabled=False))
+    assert store.declined()[0]["how"] == "끈"
+    with pytest.raises(ValueError):
+        store.revise(topic["id"], ask="다시")
+    store.delete(topic["id"])
+    with pytest.raises(ValueError, match="지운"):
+        store.suggest("엔진 플러그인 시장!", "다른 말", "근거")   # 이름만 조금 바꿔 다시 넣지 못한다
+    store.delete(mine["id"])
+    assert [d["id"] for d in store.declined()] == [topic["id"]]   # 사용자 주제를 지운 것은 거절 기록이 아니다
+
+
+def test_mcp_lists_source_and_declined(tmp_path, monkeypatch):
+    monkeypatch.setattr(research_mcp, "research_dir", lambda: tmp_path / "research")
+    added = research_mcp.add_topic("t", "조사", "근거", idea_id="I-1")
+    research_mcp.update_topic(added["id"], reason="새 근거", project_id="new-game")
+    listed = research_mcp.list_topics()
+    assert listed["topics"][0]["source"] == "metacog" and listed["topics"][0]["reason"] == "새 근거"
+    assert listed["topics"][0]["project_id"] == "new-game"
+    assert listed["declined_by_user"] == []

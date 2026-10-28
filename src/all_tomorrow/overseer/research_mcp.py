@@ -33,8 +33,8 @@ def add_topic(title: str, ask: str, reason: str, idea_id: str = "", project_id: 
 
 
 def update_topic(topic_id: str, title: str | None = None, ask: str | None = None, reason: str | None = None,
-                 repeat_days: float | None = None) -> dict[str, Any]:
-    return _store().revise(topic_id, title=title, ask=ask, reason=reason, repeat_days=repeat_days)
+                 repeat_days: float | None = None, project_id: str | None = None) -> dict[str, Any]:
+    return _store().revise(topic_id, title=title, ask=ask, reason=reason, repeat_days=repeat_days, project_id=project_id)
 
 
 def main() -> None:
@@ -55,9 +55,11 @@ def main() -> None:
 
     @mcp.tool
     def update_research_topic(topic_id: str, title: str | None = None, ask: str | None = None,
-                              reason: str | None = None, repeat_days: float | None = None) -> dict[str, Any]:
-        """메타인지가 넣은 주제를 고친다. 사용자가 넣은 주제와 사용자가 끈 주제는 고칠 수 없다."""
-        return update_topic(topic_id, title, ask, reason, repeat_days)
+                              reason: str | None = None, repeat_days: float | None = None,
+                              project_id: str | None = None) -> dict[str, Any]:
+        """메타인지가 넣은 주제를 고친다(project_id를 바꾸면 Codex가 그 프로젝트 폴더에서 조사한다).
+        사용자가 넣은 주제와 사용자가 끈 주제는 고칠 수 없다."""
+        return update_topic(topic_id, title, ask, reason, repeat_days, project_id)
 
     mcp.run()
 

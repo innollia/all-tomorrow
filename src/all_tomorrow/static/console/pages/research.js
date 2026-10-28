@@ -2,7 +2,7 @@
 // 조사 목록: 놀 때 Codex가 조사할 주제를 사용자가 정해 둔다. 위에 있는 주제가 먼저 돈다.
 // API: /api/research/* (console/research.py). 실행기: overseer/idle_research.py(PC 미사용 10분, Codex 잔량 80% 미만).
 (() => {
-  const { $, view, esc, api, toast, ago, list } = AT;
+  const { $, view, esc, api, toast, ago } = AT;
   AT.nav.push({ section: "기획", label: "조사 목록", href: "#/research", order: 40 });
   AT.navAlias = Object.assign(AT.navAlias || {}, { "/research-run": "/research" });
   const STATUS = { RUNNING: "도는 중", SUCCESS: "끝", FAILED: "실패", INTERRUPTED: "끊김", LOST: "잃어버림" };
@@ -13,10 +13,10 @@
     + `<span class="mute">${ago(new Date(r.started * 1000))}</span>`
     + (r.result_file ? `<a href="#/research-run/${encodeURIComponent(r.id)}">결과 보기</a>` : r.error ? `<span class="mute">${esc(r.error.slice(0, 80))}</span>` : "") + `</div>`;
 
-  const card = (t, i) => `<div class="card" data-topic="${esc(t.id)}">
+  const card = (t, i) => `<div class="card" style="margin-top:10px" data-topic="${esc(t.id)}">
     <div class="row" style="justify-content:space-between;gap:8px"><span class="t">${esc(t.title)}</span>
       <span class="mute small">${esc(t.project_id)} · ${repeatText(t.repeat_days)}${t.enabled ? "" : " · 꺼짐"}</span></div>
-    ${t.source === "metacog" ? `<div class="small"><span class="dot">메타인지 제안</span> <span class="mute">${esc(t.reason || "")}</span> · 끄거나 지우면 다시 넣지 않는다</div>` : ""}
+    ${t.source === "metacog" ? `<div class="small" style="margin-top:6px"><span class="pill">메타인지 제안</span> <span class="mute">끄거나 지우면 다시 넣지 않는다</span><div class="mute" style="margin-top:4px">근거: ${esc(t.reason || "")}</div></div>` : ""}
     ${t.idea_id ? `<div class="small"><a href="#/idea/${encodeURIComponent(t.idea_id)}">아이디어 ${esc(t.idea_id)}의 추가 조사</a> · 끝나면 그 아이디어의 자유 자료로 들어간다</div>` : ""}<div class="small" style="white-space:pre-wrap;margin:6px 0">${esc(t.ask)}</div>
     ${t.runs.map(runLine).join("")}
     <div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">
@@ -41,7 +41,7 @@
           <button type="submit">추가</button>
         </div>
       </form>
-      ${list(topics.map(card))}`;
+      ${topics.length ? topics.map(card).join("") : `<div class="empty">없음</div>`}`;
   };
   AT.refresh["/research"] = 60000;
 
