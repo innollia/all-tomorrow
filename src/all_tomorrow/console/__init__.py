@@ -29,6 +29,7 @@ class ConsoleContext:
     current_user: Callable[..., str]   # FastAPI dependency: returns the logged-in user or raises 401
     data_dir: Path                      # per-feature state lives in data_dir/<feature>
     collector_token: str | None = None  # bearer token the PC-side collectors push with
+    verify_edge: Callable[[str | None], None] | None = None  # edge bots (Eve) push with the edge token
 
     def feature_dir(self, name: str) -> Path:
         path = self.data_dir / name

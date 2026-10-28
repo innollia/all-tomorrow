@@ -448,6 +448,7 @@ def create_app(
         current_user=current_user,
         data_dir=Path(console_data_dir or os.environ.get("ALL_TOMORROW_CONSOLE_DATA", ".artifacts/console")),
         collector_token=collector_token,
+        verify_edge=auth.verify_edge_token,
     ))
 
     from all_tomorrow.api_logging import FailureLogMiddleware
