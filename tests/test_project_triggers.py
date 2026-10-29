@@ -145,7 +145,8 @@ def test_endpoint_auth_registry_and_validation(tmp_path, monkeypatch):
 def test_prompt_and_claude_cli_contract(tmp_path):
     _, definition = setup(tmp_path)
     prompt = prompt_for("study", definition, [call()])
-    for text in ["단순 질문", "기록·계획 수정", "--to", "mark", "@멘션", "직전 몇 개", "message_id", "정기 실행이 아니라"]:
+    for text in ["단순 질문", "기록·계획 수정", "--to", "mark", "@멘션", "직전 몇 개", "message_id", "정기 실행이 아니라",
+                 "git push는 하지 않는다"]:
         assert text in prompt
     worker = ClaudeWorker(allowed_roots=(str(tmp_path),))
     argv = worker.build_argv(prompt)
