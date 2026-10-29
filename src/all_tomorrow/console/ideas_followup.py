@@ -185,7 +185,7 @@ SYNTH = """너는 사업 아이디어 조사를 정리하는 담당이다. 새�
 
 ## 규칙
 - 웹 검색을 하지 않는다. 파일을 읽거나 고치지 않는다. 아래 글만 보고 답한다. 없는 것을 지어내지 않는다.
-- 종합본만 답한다. 인사·설명 없이 아래 형식으로만 쓴다. 전체 {limit}자 이하. 넘치면 덜 중요한 주장부터 뺀다.
+- 종합본만 답한다. 인사·설명 없이 아래 형식으로만 쓴다. 글자 수 상한은 없다. 줄이려고 주장·항목을 빼지 않는다(같은 것을 합치는 것만 줄이는 방법이다).
 - 출처는 입력의 id로 적는다: R<번호>=하위 과제 결과, M<번호>=자유 자료. 예: [R3, M2]. URL은 꼭 필요한 한두 개만.
 - 서로 다른 입력에서 같은 주장은 한 줄로 합치고 id를 모두 단다. 같은 말을 두 번 쓰지 않는다.
 - 뭉뚱그리지 않는다. "가격 사례가 조사됐다", "부품이 확인됐다"처럼 내용 없이 쓰지 말고, 결정에 쓰일 항목을 이름째 남긴다:
@@ -224,7 +224,6 @@ SYNTH = """너는 사업 아이디어 조사를 정리하는 담당이다. 새�
 [{new_label}]
 {new}
 """
-SYNTH_LIMIT = 5000
 
 
 def synth_prompt(idea: dict[str, Any], job: dict[str, Any]) -> str:
@@ -233,7 +232,9 @@ def synth_prompt(idea: dict[str, Any], job: dict[str, Any]) -> str:
     new = "\n\n".join(f"### {i['label']}\n{i['summary']}" for i in job["new"])
     if job["previous"]:
         mode = ("- [이전 종합본]을 바탕으로 [새 압축본]을 더해 고쳐 쓴다. 새 압축본이 이전 종합과 겹치면 id만 덧붙이고, "
-                "부딪치면 어긋나는 주장에 올린다. 이전 종합본의 내용은 근거 없이 지우지 않는다.")
+                "부딪치면 어긋나는 주장에 올린다. 이전 종합본의 내용은 근거 없이 지우지 않는다. "
+                "이전 종합본의 '정해진 것' 줄은 지우거나 바꾸지 않는다. 새 압축본의 결론이 정해진 것과 부딪치면 정해진 것은 그대로 두고 "
+                "'## 어긋나는 주장'에 '- 충돌(정해진 것): 정해진 것 … ↔ 새 결론 … [id]'로 올린다. 새 결과가 이전 '빈 곳'을 채웠으면 그 줄을 빈 곳에서 뺀다.")
         previous = f"\n[이전 종합본]\n{job['previous']}\n"
         label = "새 압축본"
     else:
@@ -243,5 +244,5 @@ def synth_prompt(idea: dict[str, Any], job: dict[str, Any]) -> str:
     grounds = "\n\n".join([*(["### 사용자 원문 방향 (direction.md)\n" + g["direction"]] if g.get("direction") else []),
                             *(["### 관제가 사용자와 정한 것 (direction-notes.md 중 이 아이디어)\n" + g["decided"]] if g.get("decided") else []),
                             *(f"### [분석:{d['name']}]\n{d['text']}" for d in g.get("docs", []))]) or "(없음)"
-    return SYNTH.format(limit=SYNTH_LIMIT, mode=mode, context=build_context(idea, synth=False), grounds=grounds,
+    return SYNTH.format(mode=mode, context=build_context(idea, synth=False), grounds=grounds,
                         previous=previous, new_label=label, new=new)

@@ -1,6 +1,6 @@
 """아이디어 정리본 = 짧은 종합본: 결과도 압축하고, 종합은 이전 종합본 + 새 압축본으로만, 원문은 따로 보관."""
 from all_tomorrow.console import ideas_followup
-from all_tomorrow.console.ideas import BRIEF_MAX, SYNTH_MAX, IdeaStore
+from all_tomorrow.console.ideas import BRIEF_MAX, IdeaStore
 from all_tomorrow.overseer import control_brief
 
 from test_idea_followup import NOW, env  # noqa: F401  (pytest fixture)
@@ -72,7 +72,7 @@ def test_brief_stays_small_and_context_reads_only_the_synthesis(tmp_path) -> Non
     assert len(brief.encode("utf-8")) <= BRIEF_MAX and "결과원문표식QQ" not in brief and "M20" in brief.split("## 자료 목록")[1]
     store.set_synthesis(iid, "## 한 줄 결론\n작게 시작한다\n" + "주장 " * 4000, store.synth_job(iid)["sigs"])
     brief = (tmp_path / "ideas" / "briefs" / f"{iid}.md").read_text(encoding="utf-8")
-    assert len(brief.encode("utf-8")) <= BRIEF_MAX and "여기서 줄임" in brief and len(store.get(iid)["synth"]) < SYNTH_MAX + 50
+    assert len(brief.encode("utf-8")) <= BRIEF_MAX and "여기서 줄임" in brief and store.get(iid)["synth"].count("주장") == 4000   # the stored synthesis is never cut
     context = ideas_followup.build_context(store.get(iid))
     assert "작게 시작한다" in context and "자료요약" not in context and "결과원문표식QQ" not in context
     assert "결론: 작게 시작한다" in store.recent_summary() and control_brief.recent_ideas

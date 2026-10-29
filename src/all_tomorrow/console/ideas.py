@@ -59,7 +59,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from all_tomorrow.console import ConsoleContext, ideas_followup, ideas_intake, ideas_jev, jev
+from all_tomorrow.console import ConsoleContext, ideas_followup, ideas_intake, ideas_jev, ideas_rounds, jev
 from all_tomorrow.console.research import ResearchStore, load_runs
 
 META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사업·프로젝트로 할 만한지 판단할 자료를 모으려 한다.
@@ -154,7 +154,6 @@ META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사�
 """
 
 SHORT = 300         # a material this short is its own summary
-SYNTH_MAX = 6500    # hard cap on a synthesis in characters (the prompt asks for 5000; Korean is ~3 bytes a character)
 BRIEF_MAX = 32_000  # hard cap on the brief file in bytes
 BRIEF_IDEA = 3000   # characters of the idea text in the brief's '## 아이디어'
 GROUND_DOC_MAX = 8000  # characters of each linked analysis handed to the synthesis
@@ -328,6 +327,9 @@ class IdeaStore:
             if "paras" not in {row["name"] for row in db.execute("PRAGMA table_info(plans)")}:
                 # Jev's paragraph filter: [{text, p, keep}]; "[]" = not filtered (the raw text is still in `text`)
                 db.execute("ALTER TABLE plans ADD COLUMN paras TEXT NOT NULL DEFAULT '[]'")
+            # Research rounds (console.ideas_rounds): what each round asked and the synthesis it started from.
+            db.execute("""CREATE TABLE IF NOT EXISTS rounds (id INTEGER PRIMARY KEY, idea_id TEXT NOT NULL, n INTEGER NOT NULL,
+                topics TEXT NOT NULL, synth_before TEXT NOT NULL, created_at TEXT NOT NULL)""")
 
     @contextmanager
     def db(self) -> Iterator[sqlite3.Connection]:
@@ -676,9 +678,10 @@ class IdeaStore:
         base = default_dir()
         read = lambda path: path.read_text(encoding="utf-8").strip() if path.is_file() else ""
         direction = read(base / "direction.md")
-        keys = [idea["id"], idea["title"].strip(" .")]
+        squash = lambda s: re.sub(r"\s+", "", s).lower()   # "AI 게임개발 프로그램" names the idea titled "ai게임개발 프로그램."
+        keys = [squash(k) for k in (idea["id"], idea["title"].strip(" ."))]
         sections = re.split(r"(?m)^(?=## )", read(base / "direction-notes.md"))
-        decided = "\n\n".join(x.strip() for x in sections if x.startswith("## ") and any(k and k in x for k in keys))
+        decided = "\n\n".join(x.strip() for x in sections if x.startswith("## ") and any(k and k in squash(x) for k in keys))
         docs = []
         folder = self.base / "chat-analysis"
         for path in sorted(folder.glob("*.md")) if folder.is_dir() else []:
@@ -725,10 +728,11 @@ class IdeaStore:
         return [i for i in ids if self.synth_job(i)]
 
     def set_synthesis(self, idea_id: str, text: str, sigs: list[str]) -> bool:
+        # No length cut: each round builds on this text, so a cut would lose more every round.
         text = text.strip()
-        if len(text) > SYNTH_MAX:
-            text = text[:SYNTH_MAX].rstrip() + "\n…(종합본이 길어 여기서 줄임)"
         with self.db() as db:
+            prev = db.execute("SELECT synth FROM ideas WHERE id = ?", (idea_id,)).fetchone()
+            text = ideas_rounds.keep_decided(prev["synth"], text) if prev and text else text
             if not text or not db.execute("SELECT 1 FROM ideas WHERE id = ?", (idea_id,)).fetchone():
                 return False
             db.execute("UPDATE ideas SET synth = ?, synth_at = ?, synth_keys = ? WHERE id = ?",
@@ -829,7 +833,7 @@ class IdeaStore:
         with self.db() as db:
             for f in db.execute("SELECT file FROM materials WHERE idea_id = ? AND file != ''", (idea_id,)).fetchall():
                 Path(f["file"]).unlink(missing_ok=True)
-            for table, column in (("results", "idea_id"), ("pastes", "idea_id"), ("plans", "idea_id"), ("materials", "idea_id"), ("ideas", "id")):
+            for table, column in (("results", "idea_id"), ("pastes", "idea_id"), ("plans", "idea_id"), ("rounds", "idea_id"), ("materials", "idea_id"), ("ideas", "id")):
                 db.execute(f"DELETE FROM {table} WHERE {column} = ?", (idea_id,))
         (self.briefs / f"{idea_id}.md").unlink(missing_ok=True)
         (self.raws / f"{idea_id}.md").unlink(missing_ok=True)
@@ -1020,6 +1024,10 @@ class AssignRequest(BaseModel):
     subtask_id: str = Field(max_length=8)
 
 
+class RoundPaste(BaseModel):
+    slots: list[str] = Field(default_factory=list, max_length=60)
+
+
 class MoveRequest(BaseModel):
     idea_id: str = Field(max_length=40)
 
@@ -1084,7 +1092,26 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
         return {**found(idea_id), "brief": store.brief(idea_id), "brief_path": str(store.briefs / f"{idea_id}.md"),
                 "compressing": compressing,
                 "raw_path": str(store.raws / f"{idea_id}.md"),
-                "followups": research.followups(idea_id)}
+                "followups": research.followups(idea_id), "rounds": ideas_rounds.view(store, found(idea_id))}
+
+    @router.post("/{idea_id}/rounds")
+    async def open_round(idea_id: str, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        """다음 바퀴: 지금 종합본의 빈 곳·충돌·추정으로 주제별 자료봉 프롬프트를 만든다."""
+        found(idea_id)
+        try:
+            return ideas_rounds.open_round(store, idea_id)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+
+    @router.post("/{idea_id}/rounds/{n}/results")
+    async def round_results(idea_id: str, n: int, body: RoundPaste, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        found(idea_id)
+        try:
+            return {"materials": await asyncio.to_thread(ideas_rounds.add_results, store, idea_id, n, body.slots)}
+        except LookupError as error:
+            raise HTTPException(404, "no such round") from error
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
 
     @router.post("/{idea_id}/followup/prompt")
     async def followup_prompt(idea_id: str, body: FollowupRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:

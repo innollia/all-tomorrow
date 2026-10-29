@@ -120,6 +120,18 @@
     const synthCard = `<div class="card" style="margin-bottom:16px"><div class="row"><span class="t" style="flex:1">종합</span>${waiting ? `<span class="pill warn">압축 대기 ${waiting}</span>` : ""}${i.synth_at ? `<span class="small mute">${ago(i.synth_at)}</span>` : ""}</div>
       ${i.synth ? `<pre class="idea-text" style="margin-top:8px">${md(i.synth)}</pre>` : '<div class="small mute" style="margin-top:8px">아직 종합 전. 결과·자료가 압축되면 Codex가 이 아이디어 하나의 짧은 종합본을 만든다.</div>'}
       <div class="row" style="margin-top:10px"><button class="primary" data-icopy="overseer">관제에게 가져가기</button><button data-icopy="brief">정리본 복사</button></div></div>`;
+    // 조사 바퀴: 종합본의 빈 곳·충돌·추정 → 주제별 자료봉 프롬프트 → 결과 붙여넣기 → 압축·재종합. 상한 없음.
+    const rounds = i.rounds || [], last = rounds[rounds.length - 1];
+    const roundCard = !i.synth ? "" : `<div class="card" style="margin-bottom:16px"><div class="row"><span class="t" style="flex:1">조사 바퀴 ${rounds.length || ""}</span>
+      ${!last || last.state !== "붙여넣기 대기" ? `<button class="primary" data-iround="open">${last ? "다음 바퀴 준비" : "첫 바퀴 준비"}</button>` : ""}</div>
+      ${rounds.slice().reverse().map(r => `<details class="idea-item"${r === last ? " open" : ""}><summary><span class="row"><b>바퀴 ${r.n}</b>
+        <span class="pill${r.state === "통합됨" ? "" : " warn"}">${esc(r.state)}</span>${r.low ? '<span class="pill">더 돌릴 필요 낮음</span>' : ""}
+        <span style="flex:1" class="small mute">물은 것 ${r.asked.length} · 붙인 결과 ${r.materials.length} · 새로 나온 것 ${r.new}</span><span class="small mute">${ago(r.created_at)}</span></span></summary>
+        ${r.asked.map(q => `<div class="row small" style="margin-top:6px;flex-wrap:wrap"><span style="flex:1;min-width:200px"><b>${esc(q.qid)}</b> <span class="pill">${esc(q.kind)}</span> ${esc(q.topic)}</span><button data-iqcopy="${r.n}:${esc(q.qid)}">프롬프트 복사</button></div>`).join("")}
+        ${r.state === "붙여넣기 대기" || r === last ? `<form data-iround-paste="${r.n}" style="margin-top:8px"><textarea rows="5" placeholder="자료봉 답을 붙여넣기. 여러 개면 한 칸에 이어 붙여도 되고 '바퀴 ${r.n} · Q…' 줄로 나뉜다" style="font-size:16px;width:100%"></textarea>
+          <div class="row" style="margin-top:6px"><button class="primary">바퀴 ${r.n}에 넣기</button></div></form>` : ""}
+        ${r.changed.length ? `<details style="margin-top:8px"><summary class="small">바뀐 결론 ${r.changed.length}곳</summary>${r.changed.map(c => `<div class="small" style="margin-top:6px"><b>${esc(c.section)}</b>${c.gone.map(x => `<div class="mute">− ${esc(x)}</div>`).join("")}${c.came.map(x => `<div>+ ${esc(x)}</div>`).join("")}</div>`).join("")}</details>` : ""}
+      </details>`).join("") || '<div class="small mute" style="margin-top:6px">종합본의 빈 곳·충돌·추정 주장으로 다음 자료봉 질문을 만든다.</div>'}</div>`;
     // 막 만든 아이디어: 할 일은 자료봉에 프롬프트를 주는 것뿐이라 그 버튼을 맨 위에 둔다.
     const fresh = !i.plan && !i.results.length;
     const promptCard = fresh ? `<div class="card" style="margin-bottom:16px"><div class="t">자료봉에게 줄 프롬프트</div>
@@ -128,7 +140,7 @@
     return `<h1>${esc(i.title)}</h1>
       <div class="sub">${ago(i.created_at)} 생성 · 자료 ${i.materials.length} · 결과 ${i.results.length}</div>
       ${i.candidate ? `<div class="card row" style="margin-bottom:12px"><span class="small" style="flex:1">새 아이디어 후보. 맞으면 확정하고, 아니면 맨 아래에서 삭제한다.</span><button data-iadopt="1">아이디어로 확정</button></div>` : ""}
-      ${promptCard}${synthCard}
+      ${promptCard}${synthCard}${roundCard}
       <div class="idea-two">
       ${intakeForm([], i.id)}
       <div class="card">
@@ -203,6 +215,12 @@
             }
           }
         } finally { b.disabled = false; }
+      } else if (d.iround) {
+        b.disabled = true;
+        try { const r = await api(`${base}/rounds`, {}); toast(`바퀴 ${r.n}: 질문 ${r.asked.length}개`); AT.render(); } finally { b.disabled = false; }
+      } else if (d.iqcopy) {
+        const [n, qid] = d.iqcopy.split(":"), r = (current.rounds || []).find(x => String(x.n) === n);
+        const q = r && r.asked.find(x => x.qid === qid); if (q) copy(q.prompt);
       } else if (d.iadopt) { await api(`${base}/adopt`, {}); toast("확정함"); AT.render(); }
       else if (d.idelMat) {
         if (!confirm("이 자료를 지운다. 되돌릴 수 없다.")) return;
@@ -248,6 +266,15 @@
     const key = DRAFTED[e.target.id]?.(); if (key) draft.set(key, e.target.value);
   });
   view.addEventListener("submit", async e => {
+    if (e.target.dataset.iroundPaste && current) {
+      e.preventDefault();
+      const n = e.target.dataset.iroundPaste, text = e.target.querySelector("textarea").value.trim(); if (!text) return;
+      // 한 칸에 여러 답을 이어 붙였으면 '바퀴 n · Q…' 머리줄마다 나눈다.
+      const slots = text.split(/(?=^\s*바퀴\s*\d+\s*·\s*Q\d+)/m).map(s => s.trim()).filter(Boolean);
+      try { const r = await api(`/api/ideas/${encodeURIComponent(current.id)}/rounds/${n}/results`, { slots }); toast(`바퀴 ${n}에 ${r.materials.length}건. 압축 뒤 다시 종합한다`); AT.render(); }
+      catch (err) { toast("실패: " + err.message); }
+      return;
+    }
     if (e.target.id === "idea-intake") {
       e.preventDefault();
       const text = $("#intake-text").value.trim(), picked = Array.from($("#intake-files").files);
