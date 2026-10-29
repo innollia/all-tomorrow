@@ -16,6 +16,7 @@
 |---|---|---|
 | `C:\projects\eve-scene-runtime` | Eve scene/runtime, Notion relay, Discord bot, Manager bridge, MCP server | 가장 중요한 기존 integration source. 도메인 정본은 계속 이 저장소가 소유하고 중앙은 adapter로 호출한다. |
 | `C:\Users\fixme\Desktop\discordbot` | 하나비(하나비#5352) Discord bot — Python, RisuAI 연동, 바탕화면 '하나비 실행/종료' 바로가기(`Start-Hanabi.ps1`). 사용자와 친구들이 씀 | Eve(ss0)와 다른 봇. 이 PC에서 돈다. 과거 작업은 Codex 세션. |
+| Discord 호출 작업 스레드 (Eve `.env` `EVE_PROJECT_THREADS` → DP7 `/internal/edge/project-trigger` → `config/project-triggers.json`) | `gamedesign-study`(📅 매일 할 일, 멘션 시만), `pai-games`(🎮 파이 게임 작업실, 모든 메시지), `joibongbang`(🎮 조이봉방: 도이 잡일, 모든 메시지, `C:\projects\joibongbang` → `innollia.github.io/joibongbang`) | 작업자 git push는 `projects.local.json`에서 `team_repo: false`인 저장소만 된다(joibongbang 등록됨, pai-games 미등록). |
 | AWS ap-northeast-2 Lambda `bmc-webhook` + DynamoDB `bmc-webhook` (코드 `all-tomorrow/deploy/bmc-webhook/`) | Buy Me a Coffee 웹후크 수신(Function URL `/webhooks/bmc`, 서명 검증) → 확인 대기. 콘솔이 `/internal/edge/bmc/pending`·`/ack`로 가져감(토큰 `~/.all-tomorrow/bmc-pull.token`, 시크릿 key-pool.env `BMC_WEBHOOK_SECRET`) | 봉봉봉 상점 입금. DP7이 꺼져 있어도 쌓인다. 반영은 `deploy.ps1`. |
 | Eve 호스트 cloudflared (토큰 방식, 서비스 `http://localhost:3000`) | Cloudflare 터널 | 2026-10-29 기준 공개 호스트 이름 없음 → 밖에서 안 닿음. 이 PC에 Cloudflare 토큰 없음. |
 | `C:\projects\nycko_ref` | 별도의 소규모 Discord bot | 현재 중앙화 대상인지 불명. 즉시 통합하지 않는다. |
