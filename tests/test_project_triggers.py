@@ -153,7 +153,8 @@ def test_prompt_and_claude_cli_contract(tmp_path):
     assert argv[-2:] == ["--", prompt]
     assert argv[argv.index("--permission-mode") + 1] == "bypassPermissions"
     assert "--strict-mcp-config" not in argv and "--setting-sources" not in argv and "--allowedTools" not in argv
-    assert "Bash(git push:*)" in argv[argv.index("--disallowedTools") + 1]
+    deny = argv[argv.index("--disallowedTools") + 1]
+    assert "Bash(rm -rf:*)" in deny and "git push" not in deny   # push is guarded per repository by push_guard
     assert worker.parse_output('{"type":"result","subtype":"success","result":"OK"}')["output"] == "OK"
     with pytest.raises(RuntimeError):
         worker.parse_output('{"type":"result","subtype":"error_during_execution","is_error":true}')

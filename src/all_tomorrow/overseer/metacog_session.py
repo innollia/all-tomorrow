@@ -41,8 +41,9 @@ JOURNAL = "metacog-journal.md"
 WORKDIR = Path(os.environ.get("ALL_TOMORROW_METACOG_SESSION_CWD", r"C:\projects"))
 
 # 권한은 사용자 터미널과 같게(사용자 설정·MCP·전체 도구, bypassPermissions). 사용자 규칙에서 나온 차단만 남긴다:
-# git push, 비밀값 파일 읽기, rm -rf / reset --hard / git clean. 나머지 "먼저 묻는 일"은 overseer-role.md가 정한다.
-DENY = CLAUDE_DENY
+# 비밀값 파일 읽기, rm -rf / reset --hard / git clean. 메타인지는 관제 감사 전까지 브랜치에만 커밋하므로 git push는
+# 저장소와 상관없이 막는다(작업자는 push_guard가 팀 저장소만 막는다). 나머지 "먼저 묻는 일"은 overseer-role.md가 정한다.
+DENY = [*CLAUDE_DENY, "Bash(git push:*)", "PowerShell(git push:*)"]
 
 
 def settings() -> dict:

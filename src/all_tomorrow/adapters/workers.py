@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from all_tomorrow.adapters import push_guard
 from all_tomorrow.contracts import (
     ContractError,
     WorkerAdapter,
@@ -331,9 +332,9 @@ async def _run_process_safe(
 
 
 # Workers get the same powers as the user's own terminal (user decision 2026-10-27). The only blocks kept
-# come from the user's rules: no git push, no reading/printing secret files, no rm -rf / reset --hard / git clean.
-CLAUDE_DENY = ["Bash(git push:*)", "PowerShell(git push:*)",
-               "Bash(rm -rf:*)", "PowerShell(rm -rf:*)", "Bash(git reset --hard:*)", "PowerShell(git reset --hard:*)",
+# come from the user's rules: no push to a team repository (push_guard, for every worker), no reading/printing
+# secret files, no rm -rf / reset --hard / git clean.
+CLAUDE_DENY = ["Bash(rm -rf:*)", "PowerShell(rm -rf:*)", "Bash(git reset --hard:*)", "PowerShell(git reset --hard:*)",
                "Bash(git clean:*)", "PowerShell(git clean:*)",
                "Read(~/.all-tomorrow/key-pool.env)", "Read(**/key-pool.env)", "Read(~/.claude/.credentials.json)",
                "Read(**/.env)", "Bash(cat:*key-pool*)", "PowerShell(Get-Content:*key-pool*)"]
@@ -358,6 +359,7 @@ def _worker_environment(extra: dict[str, str], key_pool: Path | None = None) -> 
     hidden = {n.upper() for n in secret_names(key_pool)}
     environment = {k: v for k, v in os.environ.items()
                    if k.upper() not in hidden and k.upper() != "CLAUDECODE" and not k.upper().startswith("CLAUDE_CODE_")}
+    environment.update(push_guard.git_environment(environment))
     environment.update(extra)
     environment.setdefault("HOME", str(Path.home()))
     return environment
