@@ -18,6 +18,21 @@ from all_tomorrow.overseer.store import default_dir, SessionStore
 log = logging.getLogger("all_tomorrow.overseer")
 
 
+def trim_log(path: Path, max_bytes: int = 2_000_000, keep_bytes: int = 500_000) -> None:
+    """Keep only the tail of a log that grew past max_bytes. Several processes append to the same
+    file, so a rotating handler's rename fails on Windows; trimming at start is enough."""
+    try:
+        if path.stat().st_size <= max_bytes:
+            return
+        with path.open("rb") as file:
+            file.seek(-keep_bytes, os.SEEK_END)
+            tail = file.read()
+        tail = tail[tail.find(b"\n") + 1:]
+        path.write_bytes(tail)
+    except OSError:
+        pass  # 다른 프로세스가 쓰는 중이거나 파일이 없으면 다음 시작 때 다시 줄인다.
+
+
 @contextmanager
 def singleton(path: Path, wait: float = 0.0):
     # OS 파일 잠금은 프로세스가 죽으면 해제된다. 새 lease/queue를 만들지 않는다.
@@ -161,6 +176,7 @@ def main(argv=None):
     os.chdir(REPO)
     base = Path(os.environ.get("ALL_TOMORROW_OVERSEER_DIR", default_dir()))
     base.mkdir(parents=True, exist_ok=True)
+    trim_log(base / (args.component + ".log"))
     logging.basicConfig(filename=base / (args.component + ".log"), encoding="utf-8", level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     # API는 /End 직후 /Run(또는 watchdog 재시작)으로 바로 다시 뜬다. 이전 프로세스가 잠금과 포트를

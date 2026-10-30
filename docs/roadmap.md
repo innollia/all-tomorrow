@@ -93,7 +93,7 @@ All Tomorrow는 범용 인프라를 다시 구현하는 프로젝트가 아니�
 
 ## 콘솔 기능 이식
 
-2026-10-19 사용자 요청으로 만든 콘솔 기능을 main으로 옮기는 중이다. 처음 구현은 main의 Stage 1–3·device agent 이전에 갈라진 `feat/stage-00d-close`에서 했고, `feat/port-console-features`로 이식한다(2026-10-19). Stage 표의 상태와는 별개다.
+2026-10-19 사용자 요청으로 만든 콘솔 기능이다. 처음 구현은 `feat/stage-00d-close`에서 했고 `feat/port-console-features`를 거쳐 지금은 main에 있다(`src/all_tomorrow/console/`, `mcp_server.py`, 2026-10-30 확인). 두 브랜치는 병합되지 않은 채 남아 있으니 새 작업은 main에서 한다. 아래 상태는 각 기록의 남은 일 기준이며 Stage 표의 상태와는 별개다.
 
 | 작업 | 상태 | 기록 |
 |---|---|---|

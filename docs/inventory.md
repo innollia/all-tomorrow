@@ -23,6 +23,22 @@
 | `C:\projects\TINProject` | Godot 게임 프로젝트, Antigravity/OpenCode 작업 규칙 | 일반 project 등록 및 lesson 재사용의 향후 검증 후보. Control Plane 코드를 넣지 않는다. |
 | `C:\projects\all-tomorrow` | 새 Personal AI Control Plane | 중앙 project/task/run/pipeline/event authority의 소유자. |
 
+## AWS 실물 (2026-10-30 전 리전 조사·정리)
+
+계정 761558630442. 17개 리전 전부 조회했고 리소스는 ap-northeast-2(서울)와 전역(S3·IAM)에만 있다.
+
+| 리소스 | 서비스하는 것 | 처리 |
+|---|---|---|
+| EC2 `i-06a074175cdfb40f7` eve-runtime-host (t4g.micro, gp3 16GB, 공인 IP 3.34.96.75, SG `eve-runtime-sg` SSH만 지정 IP) | Eve 본체 | 유지 |
+| EC2 `i-034a2f4ca37b9e293` all-tomorrow-node (t3.small, gp3 20GB, EIP 3.37.100.44 연결됨, SG `all-tomorrow-sg` 22/80/443 전체 공개) | Snow Day 대사 툴 `https://snowday.3.37.100.44.sslip.io/`(동료용, 200 확인), All Tomorrow 컨테이너, Postgres 일일 백업 | 유지 |
+| Lambda `bmc-webhook` + DynamoDB `bmc-webhook` | 봉봉봉 상점 입금 웹후크 | 유지 |
+| 로그 그룹 `/aws/lambda/bmc-webhook` | 위 Lambda 로그 | 보존 기간 없음 → 90일로 설정 |
+| S3 `all-tomorrow-backups-761558630442` (버저닝, 약 4.8MB) | Postgres 일일 덤프, `deploy/snowday.tgz` | 수명 규칙 추가: 이전 버전 30일 후 삭제, 미완료 업로드 7일, `all_tomorrow-*.dump` 180일 후 만료 |
+| ECR `all-tomorrow` (이미지 18개, 약 1.1GB, 수명 정책 없음) | node 컨테이너 이미지(`docs/deploy/aws-single-node.md`) | 유지. 태그 없는 항목은 다중 아키텍처 매니페스트의 일부일 수 있어 지우지 않았다(월 약 $0.1) |
+
+없음: 스냅샷·AMI·분리된 볼륨·미연결 EIP·NAT·로드밸런서·RDS·Lightsail·Secrets Manager·Route53·CloudFront·IAM 사용자(액세스 키 없음).
+남은 판단: `all-tomorrow-sg`의 SSH(22)가 0.0.0.0/0에 열려 있다. 비용 문제는 아니고, 접속 경로(SSM 사용 가능)를 확인한 뒤 좁힐지 정한다.
+
 ## `eve-scene-runtime`에서 재사용할 수 있는 표면
 
 ### Discord edge 기반

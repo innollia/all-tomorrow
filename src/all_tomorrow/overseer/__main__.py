@@ -148,6 +148,9 @@ def main(argv: list[str] | None = None) -> int:
 
     base = args.dir or default_dir()
     base.mkdir(parents=True, exist_ok=True)
+    from all_tomorrow.overseer.runtime import trim_log
+    trim_log(base / "overseer.log")
+    trim_log(base / "gateway.log")
     handlers = [logging.FileHandler(base / "overseer.log", encoding="utf-8")]
     if sys.stdout is not None:
         handlers.append(logging.StreamHandler(sys.stdout))
