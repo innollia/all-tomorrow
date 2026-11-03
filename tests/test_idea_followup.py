@@ -276,3 +276,15 @@ def test_long_paste_of_several_reports_becomes_one_material_per_report(tmp_path)
     added = c.post("/api/ideas/intake", json={"text": text, "idea_id": iid}).json()["added"]
     titles = [m["title"] for m in c.get(f"/api/ideas/{iid}").json()["materials"]]
     assert len(added) == 4 and "(2/4) 상용화 부품 지도" in titles and "(4/4) 맞춤화 데이터 및 법률 조사" in titles
+
+
+def test_compress_runs_past_research_quota_but_not_past_short_cap(env) -> None:
+    base, folder, ideas_dir, calls, results, tick = env
+    store = IdeaStore(ideas_dir)
+    iid = store.create("a", "b")
+    store.add_material(iid, {"kind": "paste", "label": "붙여넣기", "url": "", "title": "t", "body": RAW, "note": ""})
+    usage = '{"providers":[{"id":"codex","status":"connected","windows":[{"label":"Weekly","percent":%d,"resets_at":null}]}]}'
+    (base / "subscription-usage.json").write_text(usage % 97, encoding="utf-8")
+    assert tick(idle=None) == "idle" and not calls                      # 95% 넘으면 압축도 쉰다
+    (base / "subscription-usage.json").write_text(usage % 87, encoding="utf-8")
+    assert tick(idle=None) == "compress"                                # 조사 한도 80%는 넘었어도 압축은 돈다

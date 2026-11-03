@@ -56,6 +56,8 @@ def settings() -> dict:
     return {"idle_seconds": float(env("ALL_TOMORROW_RESEARCH_IDLE_SECONDS", "600")),
             "daily": int(env("ALL_TOMORROW_RESEARCH_DAILY", "8")),
             "max_percent": float(env("ALL_TOMORROW_RESEARCH_MAX_PERCENT", "80")),
+            # 압축·종합은 몇 분짜리라 조사보다 높은 선까지 돈다. 주간 87%에서 하루 넘게 압축이 멈췄다(2026-11-03).
+            "short_max_percent": float(env("ALL_TOMORROW_RESEARCH_SHORT_MAX_PERCENT", "95")),
             "timeout": int(env("ALL_TOMORROW_RESEARCH_TIMEOUT", "1800"))}
 
 
@@ -340,6 +342,16 @@ def _finish(folder: Path, run: dict, info: dict, base: Path) -> None:
         run["error"] = str(error)[:300]
 
 
+_short_wait = {"reason": ""}
+
+
+def _note_blocked(reason: str) -> None:
+    """압축·종합이 사용량 때문에 못 도는 이유를 바뀔 때만 한 줄 남긴다(예전엔 말없이 하루를 건너뛰었다)."""
+    if reason != _short_wait["reason"]:
+        _short_wait["reason"] = reason
+        log.info("압축·종합 대기: %s", reason)
+
+
 def tick(base: Path, idle: float | None, *, now: float | None = None,
          start: Callable[..., dict] | None = None, read: Callable[[str], dict] | None = None,
          folder: Path | None = None) -> str:
@@ -367,8 +379,9 @@ def tick(base: Path, idle: float | None, *, now: float | None = None,
     running = [r for r in runs if r.get("status") == "RUNNING"]
     cfg = settings()
     # '지금 압축'을 누른 것은 조사가 오래 돌거나 멈춰 있어도 바로 시작한다(압축은 짧고 웹 검색이 없다).
+    short_ok, short_reason = quota_ok(base, cfg["short_max_percent"], now)
     rushed = None if any(r.get("kind") in ("compress", "synth") for r in running) else next_compress(folder, runs, now, True)
-    if rushed and quota_ok(base, cfg["max_percent"], now)[0]:
+    if rushed and short_ok:
         started = _start_compress(folder, rushed, runs, now, start, cfg)
         if started != "none":
             return started
@@ -378,15 +391,17 @@ def tick(base: Path, idle: float | None, *, now: float | None = None,
         return "paused"
     # 압축·종합은 짧은 일이라 PC가 쉬는지·하루 횟수와 상관없이 주제보다 먼저. 종합은 압축할 것이 없을 때만.
     job = next_compress(folder, runs, now)
-    if job and quota_ok(base, cfg["max_percent"], now)[0]:
+    if job and short_ok:
         started = _start_compress(folder, job, runs, now, start, cfg)
         if started != "none":
             return started
     synth = None if job else next_synth(folder, runs, now)
-    if synth and quota_ok(base, cfg["max_percent"], now)[0]:
+    if synth and short_ok:
         started = _start_synth(folder, synth, runs, now, start, cfg)
         if started != "none":
             return started
+    if (job or synth) and not short_ok:
+        _note_blocked(short_reason)
     if len([r for r in runs if now - r["started"] < 86400 and r.get("kind") not in ("compress", "synth")]) >= cfg["daily"]:
         return "budget"
     idle_ok = idle is not None and idle >= cfg["idle_seconds"]
