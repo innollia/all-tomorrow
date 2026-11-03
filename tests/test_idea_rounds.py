@@ -76,3 +76,83 @@ def test_direction_notes_match_title_ignoring_case_and_spaces(tmp_path, monkeypa
     iid = store.create("ai게임개발 프로그램.", "본문")
     decided = store.grounds(store.get(iid))["decided"]
     assert "완성된 프로그램" in decided and "무관" not in decided
+
+
+ROBLOX = """## 정해진 것
+- 정해짐: 로블록스로 만든다. [원문]
+## 주장
+- AI NPC 원가는 하루 $0.03이다. [R30] (추정)
+## 어긋나는 주장
+- 원문의 "AI여친"은 Roblox 일반 콘텐츠 금지와 부딪친다. [원문, R32]
+## 빈 곳
+- S1·S2는 불완전 상태다. 실제 Studio 실행·빌드·성능 측정 결과가 없다. [R31]
+- 개발자 나이·국적·사업자 형태, 대상 국가·연령이 미확정이다. [R32]
+- 한국어권 반야생 게임의 수요·이용자 수가 없다. [R33]
+"""
+
+
+def test_round_asks_only_the_web_what_the_web_can_answer_and_takes_my_questions(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ALL_TOMORROW_OVERSEER_DIR", str(tmp_path / "ov"))
+    store = IdeaStore(tmp_path / "ideas")
+    iid = store.create("로블록스", "로블록스 AI NPC 생존 게임")
+    store.add_material(iid, {"kind": "paste", "label": "붙여넣기", "url": "", "title": "첫 자료", "body": "자료", "note": ""})
+    store.set_synthesis(iid, ROBLOX, store.synth_job(iid)["sigs"])
+    ideas_rounds.set_asks(store, iid, "한국 로블록스 유저 연령대\n\n- 비슷한 AI NPC 게임 매출\n")
+
+    r = ideas_rounds.open_round(store, iid)
+    got = [(q["qid"], q["kind"], q["to"], "prompt" in q) for q in r["asked"]]
+    assert got == [("Q1", "내 질문", "web", True), ("Q2", "내 질문", "web", True),
+                   ("Q3", "모름", "local", False), ("Q4", "모름", "user", False), ("Q5", "모름", "web", True),
+                   ("Q6", "충돌", "web", True), ("Q7", "근거 약함", "web", True)]
+    assert "한국 로블록스 유저 연령대" in r["asked"][0]["prompt"] and "'내 질문'이면" in r["asked"][0]["prompt"]
+    assert not any("나이" in q.get("prompt", "").split("[정해진 것]")[0] for q in r["asked"])
+    assert store.get(iid)["asks"] == ""   # taken into the round
+
+    # A question written while the round waits for its paste shows up in that round at once, with a prompt.
+    ideas_rounds.set_asks(store, iid, "일본 시장도")
+    [rnd] = ideas_rounds.view(store, store.get(iid))
+    assert rnd["asked"][-1]["qid"] == "Q8" and rnd["asked"][-1]["kind"] == "내 질문" and "바퀴 1 · Q8" in rnd["asked"][-1]["prompt"]
+    ideas_rounds.add_results(store, iid, 1, ["바퀴 1 · Q8 · 내 질문\n## 한 줄 결론\n일본 로블록스 이용자 많다"])
+    assert store.get(iid)["asks"] == ""
+    assert [q["qid"] for q in ideas_rounds.view(store, store.get(iid))[0]["asked"]][-1] == "Q8"
+
+    # The user's answer to what was put to them becomes something decided for the next synthesis.
+    sig = store.grounds(store.get(iid))["sig"]
+    ideas_rounds.set_answer(store, iid, 1, "Q4", "한국 개인, 대상은 13세 이상 한국")
+    try:
+        ideas_rounds.set_answer(store, iid, 1, "Q5", "웹 질문에는 답 칸이 없다")
+        raise AssertionError("answered a web question")
+    except LookupError:
+        pass
+    assert ideas_rounds.view(store, store.get(iid))[0]["asked"][3]["answer"] == "한국 개인, 대상은 13세 이상 한국"
+    g = store.grounds(store.get(iid))
+    assert g["sig"] != sig and "13세 이상" in g["answers"]
+    store.set_summary(store.get(iid)["materials"][0]["id"], "## 새로 더해진 것\n- 일본 이용자 많다")
+    job = store.synth_job(iid)
+    assert job["previous"] == ""   # a new answer rebuilds like a changed direction
+    assert "바퀴 물음에 직접 답한 것" in ideas_followup.synth_prompt(store.get(iid), job)
+
+    # Answered: the same item is not put to the user again.
+    store.set_synthesis(iid, ROBLOX, job["sigs"])
+    second = ideas_rounds.open_round(store, iid)["asked"]
+    assert not any("나이" in q["topic"] for q in second)
+    store.delete_idea(iid)
+    with store.db() as db:
+        assert not db.execute("SELECT 1 FROM round_answers").fetchone()
+
+
+def test_route_uses_jev_but_never_sends_the_founder_to_the_web(tmp_path, monkeypatch) -> None:
+    store = IdeaStore(tmp_path / "ideas", use_jev=True)
+    found = [{"kind": "모름", "topic": "개발자 국적이 없다"}, {"kind": "충돌", "topic": "R11 집계 10/12와 목록 11개가 다르다"},
+             {"kind": "모름", "topic": "경쟁작 가격"}, {"kind": "모름", "topic": "애매한 것"}]
+    answers = {"g0": {"probabilities": {"웹 조사": 0.9, "사용자에게 묻기": 0.05, "직접 확인": 0.05}},
+               "g1": {"probabilities": {"웹 조사": 0.2, "사용자에게 묻기": 0.1, "직접 확인": 0.7}},
+               "g2": {"probabilities": {"웹 조사": 0.8, "사용자에게 묻기": 0.1, "직접 확인": 0.1}},
+               "g3": {"probabilities": {"웹 조사": 0.3, "사용자에게 묻기": 0.4, "직접 확인": 0.3}}}
+    monkeypatch.setattr(ideas_rounds.jev, "ask", lambda state, questions: answers)
+    assert ideas_rounds.route(store, {"title": "t", "text": "x"}, found) == ["user", "local", "web", "web"]
+
+    def down(state, questions):
+        raise ideas_rounds.jev.JevError("down")
+    monkeypatch.setattr(ideas_rounds.jev, "ask", down)
+    assert ideas_rounds.route(store, {"title": "t", "text": "x"}, found) == ["user", "web", "web", "web"]

@@ -120,18 +120,27 @@
     const synthCard = `<div class="card" style="margin-bottom:16px"><div class="row"><span class="t" style="flex:1">종합</span>${waiting ? `<span class="pill warn">압축 대기 ${waiting}</span>` : ""}${i.synth_at ? `<span class="small mute">${ago(i.synth_at)}</span>` : ""}</div>
       ${i.synth ? `<pre class="idea-text" style="margin-top:8px">${md(i.synth)}</pre>` : '<div class="small mute" style="margin-top:8px">아직 종합 전. 결과·자료가 압축되면 Codex가 이 아이디어 하나의 짧은 종합본을 만든다.</div>'}
       <div class="row" style="margin-top:10px"><button class="primary" data-icopy="overseer">관제에게 가져가기</button><button data-icopy="brief">정리본 복사</button></div></div>`;
-    // 조사 바퀴: 종합본의 빈 곳·충돌·추정 → 주제별 자료봉 프롬프트 → 결과 붙여넣기 → 압축·재종합. 상한 없음.
-    const rounds = i.rounds || [], last = rounds[rounds.length - 1];
+    // 조사 바퀴: 종합본의 빈 곳·충돌·추정 → 웹으로 답할 것만 주제별 자료봉 프롬프트, 나머지는 나에게 묻는 것 → 결과 붙여넣기 → 압축·재종합. 상한 없음.
+    // 내 질문은 적는 대로 저장되어, 기다리는 바퀴가 있으면 거기에, 없으면 다음 바퀴 맨 앞에 들어간다.
+    const rounds = i.rounds || [], last = rounds[rounds.length - 1], paused = last && last.state === "붙여넣기 대기";
+    const ROUTE = { user: "나에게 묻기", local: "직접 확인" };
+    const webQ = r => r.asked.filter(q => q.to === "web"), meQ = r => r.asked.filter(q => q.to !== "web");
+    const asksBox = `<div style="margin-top:8px"><div class="small"><b>내 질문</b> <span class="mute">한 줄에 하나. 적는 대로 저장되고 ${paused ? `바퀴 ${last.n}에 바로 들어간다` : "다음 바퀴 맨 앞에 들어간다"}</span></div>
+      <textarea id="idea-asks" rows="3" placeholder="더 알고 싶은 것. 대충 써도 된다. 예: 한국 로블록스 유저 연령대 / 비슷한 AI NPC 게임 매출" style="font-size:16px;width:100%;margin-top:4px">${esc(i.asks || "")}</textarea></div>`;
     const roundCard = !i.synth ? "" : `<div class="card" style="margin-bottom:16px"><div class="row"><span class="t" style="flex:1">조사 바퀴 ${rounds.length || ""}</span>
-      ${!last || last.state !== "붙여넣기 대기" ? `<button class="primary" data-iround="open">${last ? "다음 바퀴 준비" : "첫 바퀴 준비"}</button>` : ""}</div>
+      ${!paused ? `<button class="primary" data-iround="open">${last ? "다음 바퀴 준비" : "첫 바퀴 준비"}</button>` : ""}</div>
+      ${asksBox}
       ${rounds.slice().reverse().map(r => `<details class="idea-item"${r === last ? " open" : ""}><summary><span class="row"><b>바퀴 ${r.n}</b>
         <span class="pill${r.state === "통합됨" ? "" : " warn"}">${esc(r.state)}</span>${r.low ? '<span class="pill">더 돌릴 필요 낮음</span>' : ""}
-        <span style="flex:1" class="small mute">물은 것 ${r.asked.length} · 붙인 결과 ${r.materials.length} · 새로 나온 것 ${r.new}</span><span class="small mute">${ago(r.created_at)}</span></span></summary>
-        ${r.asked.map(q => `<div class="row small" style="margin-top:6px;flex-wrap:wrap"><span style="flex:1;min-width:200px"><b>${esc(q.qid)}</b> <span class="pill">${esc(q.kind)}</span> ${esc(q.topic)}</span><button data-iqcopy="${r.n}:${esc(q.qid)}">프롬프트 복사</button></div>`).join("")}
-        ${r.state === "붙여넣기 대기" || r === last ? `<form data-iround-paste="${r.n}" style="margin-top:8px"><textarea rows="5" placeholder="자료봉 답을 붙여넣기. 여러 개면 한 칸에 이어 붙여도 되고 '바퀴 ${r.n} · Q…' 줄로 나뉜다" style="font-size:16px;width:100%"></textarea>
+        <span style="flex:1" class="small mute">웹 조사 ${webQ(r).length} · 나에게 묻는 것 ${meQ(r).length} · 붙인 결과 ${r.materials.length} · 새로 나온 것 ${r.new}</span><span class="small mute">${ago(r.created_at)}</span></span></summary>
+        ${webQ(r).map(q => `<div class="row small" style="margin-top:6px;flex-wrap:wrap"><span style="flex:1;min-width:200px"><b>${esc(q.qid)}</b> <span class="pill">${esc(q.kind)}</span> ${esc(q.topic)}</span><button data-iqcopy="${r.n}:${esc(q.qid)}">프롬프트 복사</button></div>`).join("")}
+        ${meQ(r).length ? `<div class="small" style="margin-top:10px"><b>나에게 묻는 것</b> <span class="mute">웹으로는 답이 없다. 적는 대로 저장되고 다음 종합에서 정해진 것이 된다</span></div>
+          ${meQ(r).map(q => `<div class="small" style="margin-top:6px"><b>${esc(q.qid)}</b> <span class="pill">${ROUTE[q.to] || esc(q.to)}</span> ${esc(q.topic)}
+            <textarea data-ianswer="${r.n}:${esc(q.qid)}" rows="2" placeholder="${q.to === "local" ? "직접 해 본 결과, 또는 아직이면 비워 둔다" : "내 답"}" style="font-size:16px;width:100%;margin-top:4px">${esc(q.answer || "")}</textarea></div>`).join("")}` : ""}
+        ${webQ(r).length && (r.state === "붙여넣기 대기" || r === last) ? `<form data-iround-paste="${r.n}" style="margin-top:8px"><textarea rows="5" placeholder="자료봉 답을 붙여넣기. 여러 개면 한 칸에 이어 붙여도 되고 '바퀴 ${r.n} · Q…' 줄로 나뉜다" style="font-size:16px;width:100%"></textarea>
           <div class="row" style="margin-top:6px"><button class="primary">바퀴 ${r.n}에 넣기</button></div></form>` : ""}
         ${r.changed.length ? `<details style="margin-top:8px"><summary class="small">바뀐 결론 ${r.changed.length}곳</summary>${r.changed.map(c => `<div class="small" style="margin-top:6px"><b>${esc(c.section)}</b>${c.gone.map(x => `<div class="mute">− ${esc(x)}</div>`).join("")}${c.came.map(x => `<div>+ ${esc(x)}</div>`).join("")}</div>`).join("")}</details>` : ""}
-      </details>`).join("") || '<div class="small mute" style="margin-top:6px">종합본의 빈 곳·충돌·추정 주장으로 다음 자료봉 질문을 만든다.</div>'}</div>`;
+      </details>`).join("") || '<div class="small mute" style="margin-top:6px">종합본의 빈 곳·충돌·추정 주장과 내 질문으로 다음 자료봉 질문을 만든다. 웹으로 답할 수 없는 것(내 신상·내가 정할 것·직접 돌려 봐야 아는 것)은 나에게 묻는다.</div>'}</div>`;
     // 막 만든 아이디어: 할 일은 자료봉에 프롬프트를 주는 것뿐이라 그 버튼을 맨 위에 둔다.
     const fresh = !i.plan && !i.results.length;
     const promptCard = fresh ? `<div class="card" style="margin-bottom:16px"><div class="t">자료봉에게 줄 프롬프트</div>
@@ -262,8 +271,24 @@
       toast("과제 " + sel.value + "로 정함"); AT.render();
     } catch (err) { toast("실패: " + err.message); }
   });
+  // 내 질문·나에게 묻는 것의 답: 저장 단추 없이 적는 대로 저장한다(잠깐 멈추면).
+  const saving = {};
+  const autosave = (key, path, text) => {
+    clearTimeout(saving[key]);
+    saving[key] = setTimeout(() => api(path, { text }, "PUT").catch(err => toast("저장 실패: " + err.message)), 700);
+  };
   view.addEventListener("input", e => {
     const key = DRAFTED[e.target.id]?.(); if (key) draft.set(key, e.target.value);
+    if (!current) return;
+    const base = `/api/ideas/${encodeURIComponent(current.id)}`;
+    if (e.target.id === "idea-asks") autosave("asks", `${base}/asks`, e.target.value);
+    const ans = e.target.dataset.ianswer;
+    if (ans) { const [n, qid] = ans.split(":"); autosave(ans, `${base}/rounds/${n}/answers/${qid}`, e.target.value); }
+  });
+  view.addEventListener("focusout", e => {   // 기다리는 바퀴에 들어간 내 질문의 프롬프트를 보이게 다시 그린다
+    if (e.target.id !== "idea-asks" || !current) return;
+    const r = current.rounds || [], last = r[r.length - 1];
+    if (last && last.state === "붙여넣기 대기" && e.target.value !== (current.asks || "")) setTimeout(() => AT.render(), 900);
   });
   view.addEventListener("submit", async e => {
     if (e.target.dataset.iroundPaste && current) {

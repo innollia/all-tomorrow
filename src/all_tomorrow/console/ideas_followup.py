@@ -203,7 +203,7 @@ SYNTH = """너는 사업 아이디어 조사를 정리하는 담당이다. 새�
 ## 한 줄 결론
 (입력이 알아낸 사실의 요약. 권고·평가 없이)
 ## 정해진 것
-(사용자가 이미 정한 것. "- 정해짐: … [방향]" 또는 "[원문]". 없으면 "없음")
+(사용자가 이미 정한 것. "- 정해짐: … [방향]", "[원문]" 또는 사용자가 바퀴 물음에 답한 것이면 "[답]". 없으면 "없음")
 ## 사용자 구상
 (원문에 사용자가 적은 기능·구조·운영 구상을 빠짐없이 짧게. 원문 표현을 살리고 평가하지 않는다. 사용자가 부정확·가볍다고 한 것은 그렇게 표시. 정해진 것과 겹치면 뺀다)
 ## 질문별 답
@@ -243,6 +243,7 @@ def synth_prompt(idea: dict[str, Any], job: dict[str, Any]) -> str:
     g = job.get("grounds") or {}
     grounds = "\n\n".join([*(["### 사용자 원문 방향 (direction.md)\n" + g["direction"]] if g.get("direction") else []),
                             *(["### 관제가 사용자와 정한 것 (direction-notes.md 중 이 아이디어)\n" + g["decided"]] if g.get("decided") else []),
+                            *(["### 사용자가 조사 바퀴 물음에 직접 답한 것 (근거는 [답]으로 단다)\n" + g["answers"]] if g.get("answers") else []),
                             *(f"### [분석:{d['name']}]\n{d['text']}" for d in g.get("docs", []))]) or "(없음)"
     return SYNTH.format(mode=mode, context=build_context(idea, synth=False), grounds=grounds,
                         previous=previous, new_label=label, new=new)

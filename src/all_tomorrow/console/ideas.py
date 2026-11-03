@@ -330,6 +330,12 @@ class IdeaStore:
             # Research rounds (console.ideas_rounds): what each round asked and the synthesis it started from.
             db.execute("""CREATE TABLE IF NOT EXISTS rounds (id INTEGER PRIMARY KEY, idea_id TEXT NOT NULL, n INTEGER NOT NULL,
                 topics TEXT NOT NULL, synth_before TEXT NOT NULL, created_at TEXT NOT NULL)""")
+            if "asks" not in {row["name"] for row in db.execute("PRAGMA table_info(ideas)")}:
+                # the user's own questions for the next round, one per line, as typed (ideas_rounds.mine)
+                db.execute("ALTER TABLE ideas ADD COLUMN asks TEXT NOT NULL DEFAULT ''")
+            # The user's answers to round questions the web cannot answer; grounds() hands them to the synthesis as decided.
+            db.execute("""CREATE TABLE IF NOT EXISTS round_answers (idea_id TEXT NOT NULL, n INTEGER NOT NULL, qid TEXT NOT NULL,
+                topic TEXT NOT NULL, answer TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (idea_id, n, qid))""")
 
     @contextmanager
     def db(self) -> Iterator[sqlite3.Connection]:
@@ -672,8 +678,8 @@ class IdeaStore:
 
     def grounds(self, idea: dict[str, Any]) -> dict[str, Any]:
         """What the user already decided, for the synthesis: direction.md (the user's own words), the sections of
-        direction-notes.md (what the overseer settled with the user) that name this idea, and the analyses in
-        chat-analysis/ that those sections or the analysis itself point at."""
+        direction-notes.md (what the overseer settled with the user) that name this idea, the user's answers to
+        round questions put to them, and the analyses in chat-analysis/ that those sections or the analysis itself point at."""
         from all_tomorrow.overseer.store import default_dir
         base = default_dir()
         read = lambda path: path.read_text(encoding="utf-8").strip() if path.is_file() else ""
@@ -689,8 +695,11 @@ class IdeaStore:
             if path.name in decided or idea["id"] in body:
                 docs.append({"name": path.name, "text": body if len(body) <= GROUND_DOC_MAX
                              else body[:GROUND_DOC_MAX].rstrip() + "\n…(분석이 길어 여기서 줄임)"})
-        sig = hashlib.sha1("\0".join([direction, decided, *(d["name"] + d["text"] for d in docs)]).encode()).hexdigest()[:12]
-        return {"direction": direction, "decided": decided, "docs": docs, "sig": "G:" + sig}
+        with self.db() as db:
+            answers = "\n".join(f"- 물음 (바퀴 {a['n']} {a['qid']}): {a['topic']}\n  사용자 답: {a['answer']}" for a in db.execute(
+                "SELECT * FROM round_answers WHERE idea_id = ? AND answer != '' ORDER BY n, qid", (idea["id"],)))
+        sig = hashlib.sha1("\0".join([direction, decided, answers, *(d["name"] + d["text"] for d in docs)]).encode()).hexdigest()[:12]
+        return {"direction": direction, "decided": decided, "answers": answers, "docs": docs, "sig": "G:" + sig}
 
     def synth_sigs(self, idea: dict[str, Any], inputs: list[dict[str, Any]] | None = None) -> list[str]:
         """Everything a synthesis is made of: the compressed inputs, the idea text and the user's decided direction."""
@@ -833,7 +842,7 @@ class IdeaStore:
         with self.db() as db:
             for f in db.execute("SELECT file FROM materials WHERE idea_id = ? AND file != ''", (idea_id,)).fetchall():
                 Path(f["file"]).unlink(missing_ok=True)
-            for table, column in (("results", "idea_id"), ("pastes", "idea_id"), ("plans", "idea_id"), ("rounds", "idea_id"), ("materials", "idea_id"), ("ideas", "id")):
+            for table, column in (("results", "idea_id"), ("pastes", "idea_id"), ("plans", "idea_id"), ("rounds", "idea_id"), ("round_answers", "idea_id"), ("materials", "idea_id"), ("ideas", "id")):
                 db.execute(f"DELETE FROM {table} WHERE {column} = ?", (idea_id,))
         (self.briefs / f"{idea_id}.md").unlink(missing_ok=True)
         (self.raws / f"{idea_id}.md").unlink(missing_ok=True)
@@ -1028,6 +1037,10 @@ class RoundPaste(BaseModel):
     slots: list[str] = Field(default_factory=list, max_length=60)
 
 
+class TextBody(BaseModel):
+    text: str = Field(default="", max_length=20_000)
+
+
 class MoveRequest(BaseModel):
     idea_id: str = Field(max_length=40)
 
@@ -1099,9 +1112,26 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
         """다음 바퀴: 지금 종합본의 빈 곳·충돌·추정으로 주제별 자료봉 프롬프트를 만든다."""
         found(idea_id)
         try:
-            return ideas_rounds.open_round(store, idea_id)
+            return await asyncio.to_thread(ideas_rounds.open_round, store, idea_id)   # Jev sorts what the web can answer
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
+
+    @router.put("/{idea_id}/asks")
+    async def asks(idea_id: str, body: TextBody, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        """내 질문: 적는 대로 저장한다. 기다리는 바퀴가 있으면 거기에, 없으면 다음 바퀴 맨 앞에 들어간다."""
+        found(idea_id)
+        ideas_rounds.set_asks(store, idea_id, body.text)
+        return {"ok": True}
+
+    @router.put("/{idea_id}/rounds/{n}/answers/{qid}")
+    async def round_answer(idea_id: str, n: int, qid: str, body: TextBody, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        """사용자에게 묻는 것의 답: 적는 대로 저장하고, 다음 종합에서 '정해진 것'의 근거가 된다."""
+        found(idea_id)
+        try:
+            ideas_rounds.set_answer(store, idea_id, n, qid, body.text)
+        except LookupError as error:
+            raise HTTPException(404, "no such question") from error
+        return {"ok": True}
 
     @router.post("/{idea_id}/rounds/{n}/results")
     async def round_results(idea_id: str, n: int, body: RoundPaste, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
