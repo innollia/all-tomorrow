@@ -399,6 +399,113 @@ def _load_antigravity(db: Path, cid: str) -> Session:
         con.close()
 
 
+# Antigravity CLI (agy, ~/.gemini/antigravity-cli since 2026-11): the summaries db has no
+# full-text index, so text comes from conversations/<id>.db steps, whose payloads are protobuf.
+# Field paths were read off real payloads: step 14 = user input, 15 = agent turn, 132 = tool
+# result, 17 = error.
+_AGY_USER, _AGY_AGENT, _AGY_RESULT, _AGY_ERROR = 14, 15, 132, 17
+
+
+def _pb_strings(b: bytes, path: str = "", depth: int = 0) -> list[tuple[str, str]] | None:
+    """Every UTF-8 leaf of a protobuf message as (field path, text); None if b is not a message."""
+    def varint(i: int) -> tuple[int, int]:
+        n = shift = 0
+        while True:
+            x = b[i]
+            i += 1
+            n |= (x & 0x7F) << shift
+            shift += 7
+            if x < 0x80:
+                return n, i
+    out: list[tuple[str, str]] = []
+    i = 0
+    try:
+        while i < len(b):
+            key, i = varint(i)
+            num, wire = key >> 3, key & 7
+            if wire == 0:
+                _, i = varint(i)
+            elif wire == 1:
+                i += 8
+            elif wire == 5:
+                i += 4
+            elif wire == 2:
+                n, i = varint(i)
+                chunk, i = b[i:i + n], i + n
+                sub = _pb_strings(chunk, f"{path}.{num}", depth + 1) if depth < 8 else None
+                if sub:
+                    out += sub
+                else:
+                    try:
+                        text = chunk.decode("utf-8")
+                    except UnicodeDecodeError:
+                        continue
+                    if text.strip():
+                        out.append((f"{path}.{num}", text))
+            else:
+                return None
+    except IndexError:
+        return None
+    return out if i == len(b) else None
+
+
+def antigravity_cli_sessions(root: Path) -> Iterator[Listing]:
+    db = root / "conversation_summaries.db"
+    if not db.is_file():
+        return
+    con = _ro(db)
+    try:
+        rows = con.execute("select conversation_id, title, last_modified_time, step_count, workspace_uris, "
+                           "agent_name, parent_conversation_id from conversation_summaries").fetchall()
+    finally:
+        con.close()
+    for cid, title, modified, steps, workspaces, agent, parent in rows:
+        if (root / "conversations" / f"{cid}.db").is_file():
+            yield Listing("antigravity", cid, f"{modified}:{steps}",
+                          lambda r=(cid, title, modified, workspaces, agent, parent): _load_antigravity_cli(root, *r))
+
+
+def _load_antigravity_cli(root: Path, cid: str, title: str, modified: str, workspaces: str,
+                          agent: str, parent: str) -> Session:
+    s = Session("antigravity", cid, title=title or "", parent_id=parent or None,
+                agent=f"antigravity:{agent}" if agent else "antigravity")
+    s.cwd = _first_workspace(workspaces)
+    s.stamp(str(modified or ""))
+    con = _ro(root / "conversations" / f"{cid}.db")
+    try:
+        steps = con.execute("select step_type, step_payload from steps order by idx").fetchall()
+    finally:
+        con.close()
+    for kind, payload in steps:
+        fields = _pb_strings(payload or b"") or []
+        first = lambda p: next((t for f, t in fields if f == p), "")   # noqa: E731
+        if kind == _AGY_USER:
+            s.user(first(".19.2"))
+        elif kind == _AGY_AGENT:
+            s.said(first(".20.1"))
+            names = [t for f, t in fields if f == ".20.7.2"]
+            args = [t for f, t in fields if f == ".20.7.3"]
+            for name, arg in zip(names, args):
+                s.tool(name, arg)
+        elif kind == _AGY_RESULT:
+            out = first(".140.2.1")
+            if _FAILED_OUTPUT.search(out):
+                s.failed(out)
+        elif kind == _AGY_ERROR:
+            if err := first(".24.3.2"):
+                s.failed(err)
+    return s
+
+
+def _chain(*its: Iterator[Listing]) -> Iterator[Listing]:
+    """Later sources win on the same id: the CLI store also lists conversations the app store has."""
+    seen: dict[str, Listing] = {}
+    for it in its:
+        for listing in it:
+            seen[listing.session_id] = listing
+    yield from seen.values()
+
+
 def _first_workspace(raw: object) -> str:
     if not raw:
         return ""
@@ -419,6 +526,7 @@ class Roots:
     opencode_db: Path
     kiro: Path
     antigravity_db: Path
+    antigravity_cli: Path | None = None
 
     @classmethod
     def default(cls, home: Path | None = None) -> "Roots":
@@ -429,6 +537,7 @@ class Roots:
             opencode_db=home / ".local" / "share" / "opencode" / "opencode.db",
             kiro=home / ".kiro" / "sessions" / "cli",
             antigravity_db=home / ".gemini" / "antigravity" / "conversation_summaries.db",
+            antigravity_cli=home / ".gemini" / "antigravity-cli",
         )
 
     def listings(self) -> dict[str, Callable[[], Iterator[Listing]]]:
@@ -437,5 +546,6 @@ class Roots:
             "codex": lambda: codex_sessions(self.codex),
             # OpenCode is no longer collected (user, 2026-10-20: "오픈코드는 버려"); the adapter stays for reuse.
             "kiro": lambda: kiro_sessions(self.kiro),
-            "antigravity": lambda: antigravity_sessions(self.antigravity_db),
+            "antigravity": lambda: _chain(antigravity_sessions(self.antigravity_db),
+                                          antigravity_cli_sessions(self.antigravity_cli) if self.antigravity_cli else iter(())),
         }

@@ -20,7 +20,9 @@ from all_tomorrow.overseer.redact import Redactor
 log = logging.getLogger("all_tomorrow.overseer")
 
 CHUNK_CHARS = 20000
-MODEL_GROUPS = ("g-nemotron-super", "g-gpt-oss-120b", "g-gemma")
+# g-nemotron-super lost its free OpenRouter model (404, 2026-11); every failure fell to g-fast, a reasoning
+# model that spent the whole 4000-token budget thinking and replied with empty content.
+MODEL_GROUPS = ("g-nemotron-ultra", "g-gpt-oss-120b", "g-gemma")
 PROMPT_VERSION = "1"
 
 SYSTEM = """너는 개발 세션 기록에서 다시 쓸 수 있는 문제 해결 노하우를 뽑는 정리자다.
@@ -153,7 +155,7 @@ def pending_sessions(con, limit: int, quiet_minutes: int = 30) -> list[tuple[str
 
 def distill_session(con, source: str, session_id: str, *, redact: Redactor, secrets: frozenset[str],
                     chat: Chat | None = None) -> int:
-    chat = chat or (lambda g, s, u: chat_json(g, s, u, max_tokens=4000, temperature=0.2))
+    chat = chat or (lambda g, s, u: chat_json(g, s, u, max_tokens=16000, temperature=0.2))
     row = con.execute("select fingerprint, project, agent, models, title, text from sessions "
                       "where source=? and session_id=?", (source, session_id)).fetchone()
     if row is None:
