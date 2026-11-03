@@ -282,9 +282,10 @@ def test_user_judgments_promote_and_retire_staff(store) -> None:
         store.put_proposal(f"t{n}-p", f"t{n}", f"t{n}-i1", {"title": "x"})
         store.decide_proposal(f"t{n}-p", "APPROVED", "", "owner")
     actions = {a["staff_id"]: a["action"] for a in evaluation.apply_policy(store, roster)}
-    assert actions == {"ideator-g1": "promote", "skeptic-g1": "promote", "visionary-g1": "retire"}
+    # ideator already sits on the top tier (g-nemotron-ultra), so it has nowhere to be promoted to
+    assert actions == {"skeptic-g1": "promote", "visionary-g1": "retire"}
     assert store.active_staff("visionary")["id"] == "visionary-g2"
-    assert store.active_staff("ideator")["model_group"] == "g-gpt-oss-120b"
+    assert store.active_staff("skeptic")["model_group"] == "g-nemotron-ultra"
     assert store.active_staff("skeptic")["access_level"] == 3  # promotion widens access (base 2)
     assert store.active_staff("visionary")["access_level"] == 1  # replacement starts at the role's base
     # promoted members start over: the same samples do not promote them again
