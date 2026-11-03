@@ -61,7 +61,7 @@ $watchAction = New-ScheduledTaskAction -Execute $Python `
 $watchTriggers = @($triggers) + (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
     -RepetitionInterval (New-TimeSpan -Minutes 1))
 $watchSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 3) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -TaskName "$TaskPrefix-api-watchdog" -Action $watchAction -Trigger $watchTriggers `
     -Principal $principal -Settings $watchSettings -Force | Out-Null
 Start-ScheduledTask -TaskName "$TaskPrefix-api-watchdog"

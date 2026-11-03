@@ -205,5 +205,6 @@ Eve 연결 추가분: 중앙 `src/all_tomorrow/overseer/{discord_edge,reports,lo
   - `overseer/anomaly_watch.py`: 서버 점검(5분 안팎)마다 API 헬스 깜빡임(1시간 6번), 서버 3회 연속 unknown, 로그 같은 경고 반복(1시간 6번), 메모리 고갈(커밋 85% 이상 또는 남은 메모리 1GB 미만, 3회 연속)을 보고 `anomalies.json`(items)에 남기며, 열리면 메타인지 세션을 지문당 한 번 깨운다. 30분 조용하면 닫는다. 지문의 서버 id는 `watch.<대상>`(API가 살 때마다 부르는 `resolve("api")`에 지워지지 않게). 옛 판정기(`metacog.paused`)는 그대로 멈춰 둔다.
   - `console/servers.py`: 예약 작업 상태를 작업 스케줄러 COM(pywin32)으로 읽는다(0.2초). 못 쓰면 PowerShell(제한 12초). Tailscale 응답 지연은 failed가 아니라 unknown. `server_watch.observe`의 HTTP 시간 초과도 unknown(연결 거부만 failed). 11/4 0시 페이징 중 멀쩡한 8765를 감시가 다시 켜려 했다(새 프로세스는 포트가 이미 쓰여 바로 끝났다).
   - `api_watchdog.healthy`: 제한 3초 → 8초.
+  - 감시 예약 작업 실행 제한 1분 → 3분(`scripts/dp7-up.ps1`, 지금 작업에도 적용). 페이징 중에는 파이썬이 뜨는 데만 1분을 넘겨 00:21 뒤 서버 점검이 끝나지 못하고 잘렸다. 겹쳐 돌지 않는 것(IgnoreNew)은 그대로다.
   - `mcp_server.py`: 작업자 모듈(dbos·sqlalchemy)을 도구 호출 때만 불러온다. 프로세스당 136MB → 96MB.
 - **남은 것(사용자 결정).** Remote Control이 켜진 세션은 대화가 끝나도 CLI와 MCP가 살아 있다. 다 쓴 세션의 Remote Control을 끄거나 보관하면 세션당 ~1GB가 돌아온다.
