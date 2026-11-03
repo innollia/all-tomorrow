@@ -138,11 +138,11 @@ def safe_wake(base: Path, incident: Incident) -> str:
         return "error"
 
 
-def resolve(base: Path, server_id: str) -> list[str]:
-    """서버가 살아났다 = 상태가 바뀌었다. 그 서버의 지문을 지운다(다음 이상은 다시 깨운다)."""
+def resolve(base: Path, server_id: str, *, only: str | None = None) -> list[str]:
+    """서버가 살아났다 = 상태가 바뀌었다. 그 서버의 지문을 지운다(다음 이상은 다시 깨운다). only면 그 지문 하나만."""
     state = load_state(base)
     incidents = state.get("incidents", {})
-    gone = [fp for fp in incidents if fp.split(":", 1)[0] == server_id]
+    gone = [fp for fp in incidents if fp.split(":", 1)[0] == server_id and only in (None, fp)]
     if gone:
         for fp in gone:
             closed = incidents.pop(fp)

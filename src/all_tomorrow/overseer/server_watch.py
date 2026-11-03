@@ -72,6 +72,9 @@ def observe(service) -> tuple[str, str]:
         try:
             with httpx.Client(timeout=3, trust_env=False, follow_redirects=False) as client:
                 code = client.get(health.target).status_code
+        except httpx.TimeoutException:
+            # 늦은 응답은 죽은 것이 아니다(11/4 0시 페이징 중 멀쩡한 8765를 다시 켜려 했다). 계속되면 anomaly_watch가 본다.
+            return "unknown", "HTTP 응답 지연"
         except httpx.HTTPError:
             return "failed", "HTTP 응답 없음"
         return ("ok", f"HTTP {code}") if 200 <= code < 300 else ("failed", f"HTTP {code}")
@@ -335,4 +338,9 @@ def run(base: Path) -> None:
     results = sweep(base)
     if results:
         log.info("server sweep: %s", results)
+        try:   # 문턱 아래 이상(깜빡임·확인 불가·반복 경고·메모리)도 점검마다 본다
+            from all_tomorrow.overseer import anomaly_watch
+            anomaly_watch.run(base)
+        except Exception as error:
+            log.error("anomaly watch failed: %s", type(error).__name__)
     boot_report(base)

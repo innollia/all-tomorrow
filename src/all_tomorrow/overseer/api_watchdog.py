@@ -20,7 +20,8 @@ def healthy() -> bool:
     port = int(os.environ.get("ALL_TOMORROW_PORT", "5476"))
     try:
         # 새 연결로 accept까지 확인한다. 프록시/리다이렉트로 다른 서버를 검사하지 않는다.
-        with httpx.Client(timeout=3, trust_env=False) as client:
+        # 3초는 PC가 페이징 중일 때 살아 있는 API도 실패로 봤다(11/3 22시대). 감시 작업 1분 안에 들게 8초.
+        with httpx.Client(timeout=8, trust_env=False) as client:
             response = client.get(f"http://127.0.0.1:{port}/healthz")
             return response.status_code == 200 and response.json().get("ok") is True
     except (httpx.HTTPError, ValueError, AttributeError):

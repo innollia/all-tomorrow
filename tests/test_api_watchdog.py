@@ -78,7 +78,7 @@ def test_health_probe(monkeypatch, status, body, expected):
     def handler(request):
         assert request.url.path == "/healthz"
         assert request.url.host == "127.0.0.1"
-        assert request.extensions["timeout"]["read"] == 3
+        assert request.extensions["timeout"]["read"] == 8
         return httpx.Response(status, json=body) if body != "bad json" else httpx.Response(status, text=body)
     def client(**kwargs):
         assert kwargs["trust_env"] is False

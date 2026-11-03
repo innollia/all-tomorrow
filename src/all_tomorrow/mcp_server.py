@@ -23,7 +23,8 @@ from uuid import uuid4
 
 from fastmcp import FastMCP
 
-from all_tomorrow.local_workers import ADAPTERS, EXECUTABLES, discover_executable, list_workers, load_config
+# local_workers(작업자 어댑터 → dbos·sqlalchemy)는 도구를 부를 때만 불러온다. Remote Control 세션마다 이 서버가
+# 떠 있어서, 시작 때 불러오면 프로세스마다 메모리 ~80MB가 더 든다(2026-11-04 세션 22개 × 136MB).
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROJECTS_PATH = Path(os.environ.get("ALL_TOMORROW_PROJECTS", REPO_ROOT / "config" / "projects.local.json"))
@@ -173,6 +174,7 @@ def project_status(project_id: str) -> dict[str, Any]:
 @mcp.tool
 async def list_local_workers() -> list[dict[str, Any]]:
     """Check which worker CLIs are installed. Does not verify login."""
+    from all_tomorrow.local_workers import list_workers
     return await list_workers(load_config_dict(_worker_config()))
 
 
@@ -181,7 +183,13 @@ def load_config_dict(config: dict[str, Any]) -> dict[str, Any]:
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     path = RUNS_DIR / "_validated-config.json"
     path.write_text(json.dumps(config), encoding="utf-8")
+    from all_tomorrow.local_workers import load_config
     return load_config(path)
+
+
+def discover_executable(worker_id: str) -> str | None:
+    from all_tomorrow.local_workers import discover_executable as find
+    return find(worker_id)
 
 
 def _run_child(run_dir: Path) -> int:
@@ -217,6 +225,7 @@ def dispatch_task(project_id: str, worker: str, task: str) -> dict[str, Any]:
 def start_run(project_id: str, worker: str, task: str, *, worker_options: dict[str, Any] | None = None,
               argv_suffix: list[str] | None = None) -> dict[str, Any]:
     """dispatch_task 본체. 유휴 조사(overseer.idle_research)처럼 워커 설정을 조금 바꿔 띄울 때도 쓴다."""
+    from all_tomorrow.local_workers import ADAPTERS, EXECUTABLES
     if worker not in ADAPTERS:
         raise ValueError(f"worker must be one of {sorted(ADAPTERS)}")
     if not task.strip():

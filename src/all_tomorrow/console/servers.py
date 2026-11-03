@@ -103,19 +103,47 @@ class Registry(Record):
 def load_registry(path: Path = REGISTRY) -> Registry:
     return Registry.model_validate_json(path.read_text(encoding='utf-8'))
 
+TASK_STATES = {0: 'Unknown', 1: 'Disabled', 2: 'Queued', 3: 'Ready', 4: 'Running'}
+
+
+def task_via_com(name: str) -> dict | None:
+    """작업 스케줄러 COM으로 바로 읽는다(0.3초 안팎). PowerShell은 시작만 몇 초라 PC가 바쁘면 4초 제한을 넘겨
+    2026-11-03 감시가 executor·overseer·activity·collect를 내내 unknown으로 봤다. 못 쓰면 None(PowerShell로)."""
+    try:
+        import pythoncom
+        import win32com.client
+    except ImportError:
+        return None
+    def read() -> dict:        # COM 객체는 이 함수가 끝날 때 풀린다(CoUninitialize 전에)
+        scheduler = win32com.client.Dispatch('Schedule.Service')
+        scheduler.Connect()
+        task = scheduler.GetFolder('\\').GetTask(name)
+        return {'state': TASK_STATES.get(task.State, 'Unknown'), 'result': task.LastTaskResult,
+                'ran': task.LastRunTime.year > 2000}
+    pythoncom.CoInitialize()   # 콘솔은 asyncio.to_thread의 일꾼 스레드에서 부른다
+    try:
+        return read()
+    except Exception:          # pywintypes.com_error: 작업 없음·권한 없음
+        return None
+    finally:
+        pythoncom.CoUninitialize()
+
+
 def windows_observation(health: Health) -> tuple[str, str]:
     # Only fixed registry strings enter PowerShell, escaped as literal strings. Never return raw output.
     target = health.target.replace("'", "''")
+    data = task_via_com(health.target) if health.kind == 'windows_task' else None
     if health.kind == 'windows_task':
         script = ("$ErrorActionPreference='Stop'; $t=Get-ScheduledTask -TaskName '" + target +
                   "'; $i=$t | Get-ScheduledTaskInfo; @{state=[string]$t.State; result=$i.LastTaskResult; ran=($i.LastRunTime.Year -gt 2000)} | ConvertTo-Json -Compress")
     else:
         script = ("$ErrorActionPreference='Stop'; $p=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(python|node|all-tomorrow).*' -and $_.CommandLine -and $_.CommandLine.Contains('" + target + "') }); @{found=($p.Count -gt 0)} | ConvertTo-Json -Compress")
-    try:
-        result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script], capture_output=True, text=True, timeout=4, check=True)
-        data = json.loads(result.stdout)
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return 'unknown', 'Windows 조회 불가 (권한·작업 존재 여부 확인 필요)'
+    if data is None:
+        try:
+            result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script], capture_output=True, text=True, timeout=12, check=True)
+            data = json.loads(result.stdout)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return 'unknown', 'Windows 조회 불가 (권한·작업 존재 여부 확인 필요)'
     if health.kind == 'process':
         return ('ok', '프로세스 패턴 확인') if data['found'] else ('failed', '일치하는 프로세스 없음')
     if data['state'] == 'Running':
@@ -143,6 +171,9 @@ def observe_tailscale() -> tuple[str, str]:
         return 'unknown', 'tailscale 실행 파일 없음'
     try:
         state = str(json.loads(_run([exe, 'status', '--json'], 8).stdout)['BackendState'])
+    except subprocess.TimeoutExpired:
+        # PC가 바빠 응답이 늦은 것은 꺼진 것이 아니다. failed로 보면 감시가 멀쩡한 트레이 앱을 다시 켜려 든다.
+        return 'unknown', 'tailscale status 응답 지연 (PC 부하)'
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return 'failed', 'tailscale status 응답 없음 (트레이 앱·서비스 꺼짐 가능)'
     return ('ok', 'BackendState=Running') if state == 'Running' else ('failed', f'BackendState={state}')

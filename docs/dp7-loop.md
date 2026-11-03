@@ -194,3 +194,16 @@ Eve 연결 추가분: 중앙 `src/all_tomorrow/overseer/{discord_edge,reports,lo
 - **옛 경로.** 판정기(`metacog.wake`의 reasoner)와 코드 사본 executor는 지우지 않았고 `metacog.paused`로 멈췄다(이 파일은 executor의 대기 Work 실행도 멈춘다). 은퇴는 다음 단계.
 - **knowhow 정리.** 카드에서 프로젝트별·공통 md를 만드는 `knowhow build`와 그 주기 갱신 제안은 신탁(oracle_ask)과 중복이라 철회했다. 새 프로젝트 시드(`register_project` → `knowhow.seed`)는 남기고 후보를 카드 DB(`overseer.sqlite`·`peers/*.sqlite`의 `cards_fts`)에서 바로 고른다. 이미 만든 `.artifacts/knowhow`는 그대로 둔다.
 - **리허설(2026-10-27 11:35~11:48).** 시험용 서버 목록 사본(인용된 사랑 작업판의 작업 폴더를 없는 경로로)을 key-pool.env의 `ALL_TOMORROW_SERVER_REGISTRY`로 감시에 물리고 점검 간격을 50초로 줄인 뒤 8765 서버를 껐다. 감시가 3번 FileNotFoundError로 실패 → 11:39 막힘 보고 1건 + 세션 깨움(예약 작업에서 떼어 낸 프로세스). 세션은 사람 없이 사본의 잘못된 cwd를 찾아 `C:\projects\TINProject`로 고치고 막힘을 풀고 감시 작업을 다시 돌려 11:46 감시가 서버를 켰다(HTTP 200). 도중에 지침대로 `starts` 키를 지웠다가 감시가 KeyError로 죽는 것을 스스로 찾아 `server_watch.py`에 `setdefault("starts", 0)`을 넣고 시험을 돌렸다(이 수정은 커밋에 포함, 지침 문구도 "starts 0, blocked false로 둔다"로 고침). 23턴·486초(API 106초)·환산 $0.50, 권한 거부 0. 일지 맨 위 기록과 결과 보고 1건이 Eve로 전송됐다. 세션이 저장소에 직접 로컬 커밋을 만들었는데(푸시 없음) 관제가 정리해 다시 커밋했다. 리허설 뒤 key-pool 줄 삭제, 시험 사본은 `C:\projects\_quarantine\metacog-rehearsal-20261027`로 옮김, 실제 감시는 원래 `config/infrastructure.json`·240초로 돌아왔다.
+
+## 2026-11-04 문턱 아래 이상 감시, 점검 시간 초과, MCP 메모리
+
+10/28 05:22 뒤로 메타인지 세션이 한 번도 깨지 않았다. 계기가 "서버를 3번 켜도 안 살아남"(server_watch)과 "API 재기동 한도"(api_watchdog) 둘뿐이었고, 11/3의 이상(API 헬스 실패 22번, 서버 점검이 executor·overseer·activity·collect를 1시간 넘게 `unknown`, 사용량 push 시간 초과 14번)은 모두 그 문턱 아래였다. `anomalies.json`은 10/27에 거둔 옛 이상 장부의 잔재였다.
+
+- **원인(헬스 실패·unknown·push 시간 초과).** PC 메모리 고갈. 11/4 0시 커밋 59.7/68GB, 남은 메모리 677MB, 초당 페이지 3만, CPU 100%. 그 상태에서 API `/healthz`는 20초 넘게 응답하지 않았고, PowerShell `Get-ScheduledTask`는 시작에만 3초 넘게 걸려 점검 제한(4초)을 넘겼다(→ unknown). Tailscale `status`도 8초를 넘겨 "꺼짐"으로 보고 감시가 트레이 앱을 다시 켜려다 `start_failed`가 됐다. 메모리를 쓴 것: Remote Control이 켜진 데스크톱 세션 22개가 각자 Claude CLI(~700MB)와 MCP 서버 4종(all-tomorrow·oracle·antigravity·aws, 세션당 ~300MB)을 계속 들고 있었고, 그 위에 음성 인식 작업(video-factory `asr_long.py`, 5GB) 같은 무거운 작업이 겹쳤다.
+- **MCP "누수"는 아니었다.** python 168개 중 주인 없는 고아는 0개. 모두 살아 있는 Claude CLI 22개(= Remote Control 켜진 세션 22개)의 자식이다. 같은 명령이 2개씩 보이는 것은 venv `python.exe`(실행기, 2MB)가 실제 인터프리터를 자식으로 띄우는 구조라 정상이고, 런타임 컴포넌트도 같다. 세션이 끝나거나 Remote Control을 끄면 같이 내려간다.
+- **고친 것.**
+  - `overseer/anomaly_watch.py`: 서버 점검(5분 안팎)마다 API 헬스 깜빡임(1시간 6번), 서버 3회 연속 unknown, 로그 같은 경고 반복(1시간 6번), 메모리 고갈(커밋 85% 이상 또는 남은 메모리 1GB 미만, 3회 연속)을 보고 `anomalies.json`(items)에 남기며, 열리면 메타인지 세션을 지문당 한 번 깨운다. 30분 조용하면 닫는다. 지문의 서버 id는 `watch.<대상>`(API가 살 때마다 부르는 `resolve("api")`에 지워지지 않게). 옛 판정기(`metacog.paused`)는 그대로 멈춰 둔다.
+  - `console/servers.py`: 예약 작업 상태를 작업 스케줄러 COM(pywin32)으로 읽는다(0.2초). 못 쓰면 PowerShell(제한 12초). Tailscale 응답 지연은 failed가 아니라 unknown. `server_watch.observe`의 HTTP 시간 초과도 unknown(연결 거부만 failed). 11/4 0시 페이징 중 멀쩡한 8765를 감시가 다시 켜려 했다(새 프로세스는 포트가 이미 쓰여 바로 끝났다).
+  - `api_watchdog.healthy`: 제한 3초 → 8초.
+  - `mcp_server.py`: 작업자 모듈(dbos·sqlalchemy)을 도구 호출 때만 불러온다. 프로세스당 136MB → 96MB.
+- **남은 것(사용자 결정).** Remote Control이 켜진 세션은 대화가 끝나도 CLI와 MCP가 살아 있다. 다 쓴 세션의 Remote Control을 끄거나 보관하면 세션당 ~1GB가 돌아온다.
