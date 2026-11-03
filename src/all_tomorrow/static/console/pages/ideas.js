@@ -126,7 +126,7 @@
     const ROUTE = { user: "나에게 묻기", local: "직접 확인" };
     const webQ = r => r.asked.filter(q => q.to === "web"), meQ = r => r.asked.filter(q => q.to !== "web");
     const asksBox = `<div style="margin-top:8px"><div class="small"><b>내 질문</b> <span class="mute">한 줄에 하나. 적는 대로 저장되고 ${paused ? `바퀴 ${last.n}에 바로 들어간다` : "다음 바퀴 맨 앞에 들어간다"}</span></div>
-      <textarea id="idea-asks" rows="3" placeholder="더 알고 싶은 것. 대충 써도 된다. 예: 한국 로블록스 유저 연령대 / 비슷한 AI NPC 게임 매출" style="font-size:16px;width:100%;margin-top:4px">${esc(i.asks || "")}</textarea></div>`;
+      <textarea id="idea-asks" rows="3" placeholder="더 알고 싶은 것. 대충 써도 된다. 예: 경쟁작 가격 더 / 일본에서도 되나" style="font-size:16px;width:100%;margin-top:4px">${esc(i.asks || "")}</textarea></div>`;
     const roundCard = !i.synth ? "" : `<div class="card" style="margin-bottom:16px"><div class="row"><span class="t" style="flex:1">조사 바퀴 ${rounds.length || ""}</span>
       ${!paused ? `<button class="primary" data-iround="open">${last ? "다음 바퀴 준비" : "첫 바퀴 준비"}</button>` : ""}</div>
       ${asksBox}
