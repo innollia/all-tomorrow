@@ -84,3 +84,27 @@ def test_chunks_split_on_line_boundaries() -> None:
     parts = distill.chunks(text, size=1000)
     assert len(parts) > 1 and all(len(p) <= 1100 for p in parts)
     assert "\n".join(parts) == text
+
+
+def test_quota_errors_close_the_gateway_for_the_day_and_use_the_cli(tmp_path) -> None:
+    calls = []
+
+    def spent(group, system, user):
+        calls.append(group)
+        raise distill.LLMError("429 free-models-per-day")
+
+    budget = distill.Budget(tmp_path / "b.json")
+    cli = lambda system, user: ([{"problem": "p"}], "cli:test")
+    assert distill._call(spent, "x", budget, cli) == ([{"problem": "p"}], "cli:test")
+    assert len(calls) == len(distill.MODEL_GROUPS)
+    again = distill.Budget(tmp_path / "b.json")
+    assert not again.gateway_open()
+    assert distill._call(spent, "x", again, cli)[1] == "cli:test"
+    assert len(calls) == len(distill.MODEL_GROUPS)
+
+
+def test_daily_cap_stops_gateway_calls(tmp_path) -> None:
+    budget = distill.Budget(tmp_path / "b.json", daily=1)
+    ok = lambda g, s, u: ([{"problem": "p"}], "dep")
+    assert distill._call(ok, "x", budget, None)[1].endswith(":dep")
+    assert not budget.gateway_open()

@@ -61,22 +61,23 @@ def settings() -> dict:
             "timeout": int(env("ALL_TOMORROW_RESEARCH_TIMEOUT", "1800"))}
 
 
-def quota_ok(base: Path, max_percent: float, now: float) -> tuple[bool, str]:
+def quota_ok(base: Path, max_percent: float, now: float, provider: str = "codex") -> tuple[bool, str]:
     import json
+    name = provider.capitalize()
     try:
         snapshot = json.loads((base / "subscription-usage.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False, "사용량 모름"
-    codex = next((p for p in snapshot.get("providers", []) if p.get("id") == "codex"), None)
+    codex = next((p for p in snapshot.get("providers", []) if p.get("id") == provider), None)
     if not codex or codex.get("status") != "connected":
-        return False, "Codex 사용량 모름"
+        return False, f"{name} 사용량 모름"
     for window in codex.get("windows", []):
         try:
             reset = datetime.fromisoformat(window["resets_at"]).timestamp() if window.get("resets_at") else None
         except ValueError:
             reset = None
         if (reset is None or reset > now) and float(window.get("percent", 0)) >= max_percent:
-            return False, f"Codex {window.get('label')} {window.get('percent'):g}%"
+            return False, f"{name} {window.get('label')} {window.get('percent'):g}%"
     return True, "잔량 있음"
 
 

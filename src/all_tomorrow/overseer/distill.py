@@ -9,11 +9,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
+import subprocess
+import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable
 
-from all_tomorrow.idea_factory.llm import LLMError, chat_json
+from all_tomorrow.idea_factory.llm import LLMError, chat_json, parse_json
 from all_tomorrow.overseer import oracle
 from all_tomorrow.overseer.redact import Redactor
 
@@ -24,6 +29,12 @@ CHUNK_CHARS = 20000
 # model that spent the whole 4000-token budget thinking and replied with empty content.
 MODEL_GROUPS = ("g-nemotron-ultra", "g-gpt-oss-120b", "g-gemma")
 PROMPT_VERSION = "1"
+# 2026-11-03: a 400-session backlog run spent the paid groq credit and every free per-day quota in one go,
+# so the gateway gets a daily call cap and quota errors switch the rest of the day to the subscription CLI.
+GATEWAY_DAILY_CALLS = int(os.environ.get("ALL_TOMORROW_DISTILL_GATEWAY_DAILY", "300"))
+CLI_MAX_PERCENT = float(os.environ.get("ALL_TOMORROW_DISTILL_CLI_MAX_PERCENT", "70"))
+CLI_MODEL = os.environ.get("ALL_TOMORROW_DISTILL_CLI_MODEL", "haiku")
+QUOTA_MARKS = ("402", "429", "no remaining credits", "free-models-per-day", "rate limit", "quota")
 
 SYSTEM = """너는 개발 세션 기록에서 다시 쓸 수 있는 문제 해결 노하우를 뽑는 정리자다.
 기록 형식: [U] 사용자 말, [A] 에이전트 말, [T] 도구 호출, [E] 실패한 도구 출력.
@@ -109,20 +120,89 @@ def _guarded(redact: Redactor, secrets: set[str], text: str) -> str:
     return text
 
 
-def _call(chat: Chat, user: str) -> tuple[list, str]:
-    last: Exception | None = None
-    for group in MODEL_GROUPS:
+class Budget:
+    """Per-day gateway call count in <base>/distill-budget.json, and whether the gateway is spent today."""
+
+    def __init__(self, path: Path | None, daily: int = GATEWAY_DAILY_CALLS):
+        self.path, self.daily = path, daily
+        self.day = datetime.now().strftime("%Y-%m-%d")
+        state = {}
         try:
+            state = json.loads(path.read_text(encoding="utf-8")) if path else {}
+        except (OSError, ValueError):
+            pass
+        same = state.get("day") == self.day
+        self.calls = int(state.get("calls", 0)) if same else 0
+        self.spent = bool(state.get("spent")) if same else False
+
+    def gateway_open(self) -> bool:
+        return not self.spent and self.calls < self.daily
+
+    def note(self, *, call: bool = False, spent: bool = False) -> None:
+        self.calls += call
+        self.spent = self.spent or spent
+        if self.path:
+            self.path.write_text(json.dumps({"day": self.day, "calls": self.calls, "spent": self.spent}),
+                                 encoding="utf-8")
+
+
+def _cards(data) -> list:
+    if isinstance(data, dict):
+        data = data.get("cards", [data])
+    if not isinstance(data, list):
+        raise LLMError(f"expected a list, got {type(data).__name__}")
+    return data
+
+
+def cli_chat(system: str, user: str, timeout: float = 600) -> tuple[list, str]:
+    """Subscription Claude CLI, skipped while a known usage window is at CLI_MAX_PERCENT or more."""
+    from all_tomorrow.overseer.idle_research import quota_ok
+    from all_tomorrow.overseer.store import default_dir
+    ok, reason = quota_ok(default_dir(), CLI_MAX_PERCENT, time.time(), "claude")
+    if not ok and not reason.endswith("사용량 모름"):  # the Claude usage probe often errors; only a known high window stops it
+        raise LLMError(f"cli paused: {reason}")
+    exe = shutil.which("claude")
+    if not exe:
+        raise LLMError("claude cli not found")
+    prompt = system + "\n\n반드시 JSON만 출력한다. 설명 문장은 쓰지 않는다.\n\n" + user
+    try:
+        done = subprocess.run([exe, "-p", "--model", CLI_MODEL, "--output-format", "text"], input=prompt,
+                              capture_output=True, text=True, encoding="utf-8", timeout=timeout,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError) as error:
+        raise LLMError(f"claude cli: {type(error).__name__}") from error
+    if done.returncode != 0:
+        raise LLMError(f"claude cli exit {done.returncode}: {(done.stderr or done.stdout)[-200:]}")
+    return _cards(parse_json(done.stdout)), f"cli:claude-{CLI_MODEL}"
+
+
+def _call(chat: Chat, user: str, budget: Budget | None = None,
+          cli: Callable[[str, str], tuple[list, str]] | None = None) -> tuple[list, str]:
+    last: Exception | None = None
+    budget = budget or Budget(None)
+    quota_hits = 0
+    for group in MODEL_GROUPS if budget.gateway_open() else ():
+        try:
+            budget.note(call=True)
             data, served = chat(group, SYSTEM, user)
-            if isinstance(data, dict):
-                data = data.get("cards", [data])
-            if not isinstance(data, list):
-                raise LLMError(f"expected a list, got {type(data).__name__}")
-            return data, f"{group}:{served}"
+            return _cards(data), f"{group}:{served}"
         except LLMError as error:
             last = error
             log.warning("distill via %s failed: %s", group, str(error)[:200])
-    raise LLMError(str(last))
+            if not any(m in str(error).lower() for m in QUOTA_MARKS):
+                continue
+            quota_hits += 1
+            if quota_hits == len(MODEL_GROUPS):
+                log.warning("gateway quota spent for today; distilling via the subscription CLI")
+                budget.note(spent=True)
+                break
+    if cli is not None:
+        try:
+            return cli(SYSTEM, user)
+        except LLMError as error:
+            last = error
+            log.warning("distill via cli failed: %s", str(error)[:200])
+    raise LLMError(str(last or "gateway closed for today"))
 
 
 def pilot_sessions(con, per_source: int = 2, max_chars: int = 60000) -> list[tuple[str, str]]:
@@ -154,7 +234,8 @@ def pending_sessions(con, limit: int, quiet_minutes: int = 30) -> list[tuple[str
 
 
 def distill_session(con, source: str, session_id: str, *, redact: Redactor, secrets: frozenset[str],
-                    chat: Chat | None = None) -> int:
+                    chat: Chat | None = None, budget: Budget | None = None,
+                    cli: Callable[[str, str], tuple[list, str]] | None = None) -> int:
     chat = chat or (lambda g, s, u: chat_json(g, s, u, max_tokens=16000, temperature=0.2))
     row = con.execute("select fingerprint, project, agent, models, title, text from sessions "
                       "where source=? and session_id=?", (source, session_id)).fetchone()
@@ -170,7 +251,7 @@ def distill_session(con, source: str, session_id: str, *, redact: Redactor, secr
     for i, part in enumerate(parts):
         user = _guarded(redact, secrets, header + f"[기록 {i + 1}/{len(parts)}]\n" + part)
         try:
-            cards, served = _call(chat, user)
+            cards, served = _call(chat, user, budget, cli)
         except LLMError:
             failed += 1
             continue

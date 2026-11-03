@@ -185,15 +185,17 @@ def main(argv: list[str] | None = None) -> int:
             if args.pilot:
                 targets += dist.pilot_sessions(store.con, args.pilot)
             if args.pending:
-                if _ensure_gateway():
-                    targets += dist.pending_sessions(store.con, args.pending)
+                _ensure_gateway()  # down or spent: distill_session falls back to the subscription CLI
+                targets += dist.pending_sessions(store.con, args.pending)
             started = time.monotonic()
+            budget = dist.Budget(base / "distill-budget.json")
             for source, session_id in targets:
                 if scheduled and time.monotonic() - started > DISTILL_BUDGET_SECONDS:
                     log.info("distill time budget used; the rest stays pending")
                     break
                 try:
-                    made = dist.distill_session(store.con, source, session_id, redact=redact, secrets=redact.values)
+                    made = dist.distill_session(store.con, source, session_id, redact=redact, secrets=redact.values,
+                                              budget=budget, cli=dist.cli_chat)
                 except Exception:  # gateway down / quota: leave it pending for the next run
                     log.exception("distill failed %s/%s", source, session_id)
                     continue
