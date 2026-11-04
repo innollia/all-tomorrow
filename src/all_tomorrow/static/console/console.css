@@ -101,3 +101,4 @@ select{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(
 @media (max-width:767px){.idea-two{grid-template-columns:1fr}}
 .idea-h{font-size:15px}
 .pill-btn{min-height:32px;padding:4px 10px;font-size:12px;background:transparent}.pill-btn:hover{background:rgba(255,200,0,.08)}
+.memory-table{max-width:100%;overflow-x:auto;border:1px solid var(--line);border-radius:8px;margin:8px 0 4px}.memory-table table{min-width:640px}.memory-table td{vertical-align:top}.memory-table td.mono,.memory-table th{white-space:nowrap}.memory .bar{max-width:120px}.memory-note{margin-top:16px}
