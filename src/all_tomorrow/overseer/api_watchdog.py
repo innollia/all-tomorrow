@@ -16,7 +16,8 @@ from all_tomorrow.overseer.workspace import save
 log = logging.getLogger(__name__)
 
 
-def healthy() -> bool:
+def healthy() -> bool | None:
+    """True=살아 있음, False=거절·오류, None=시간 초과(PC 부하일 수 있다. 실패로 세되 기록에 timeout을 남긴다)."""
     port = int(os.environ.get("ALL_TOMORROW_PORT", "5476"))
     try:
         # 새 연결로 accept까지 확인한다. 프록시/리다이렉트로 다른 서버를 검사하지 않는다.
@@ -24,6 +25,8 @@ def healthy() -> bool:
         with httpx.Client(timeout=8, trust_env=False) as client:
             response = client.get(f"http://127.0.0.1:{port}/healthz")
             return response.status_code == 200 and response.json().get("ok") is True
+    except httpx.TimeoutException:
+        return None
     except (httpx.HTTPError, ValueError, AttributeError):
         return False
 
@@ -103,7 +106,8 @@ def check_once(base: Path, *, task="AllTomorrow-DP7-api", probe=healthy,
     if state.get("blocked"):
         wake_session(base, task, wake)   # 앞서 다른 세션이 돌아 미뤄졌으면 다시 시도(같은 지문은 한 번만)
         return "blocked"  # 관제가 상태 파일을 지우기 전에는 재시작하지 않는다.
-    if probe():
+    alive = probe()
+    if alive:
         state["failures"] = 0
         save(path, state)
         try:
@@ -116,7 +120,7 @@ def check_once(base: Path, *, task="AllTomorrow-DP7-api", probe=healthy,
     attempts = [at for at in state.get("attempts", []) if now - at < 3600]
     state["attempts"] = attempts
     save(path, state)
-    record(base, "health_failed", failures=state["failures"])
+    record(base, "health_failed", failures=state["failures"], **({"timeout": True} if alive is None else {}))
     if state["failures"] < 3:
         return "unhealthy"
     if len(attempts) >= 3:

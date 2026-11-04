@@ -2,27 +2,27 @@
 
 메타인지 세션(metacog_session)은 server_watch가 서버를 3번 켜도 안 살아나거나 api_watchdog가 재기동 한도에
 닿을 때만 깨어났다. 2026-10-28 뒤로는 그런 일이 없어서, 11/3 API 헬스 실패 22번, 서버 점검 unknown 1시간 넘게,
-사용량 push 시간 초과 14번, PC 메모리 고갈이 있었는데도 아무도 깨지 않았다(마지막 세션 10/28 05:22).
+사용량 push 시간 초과 14번이 있었는데도 아무도 깨지 않았다(마지막 세션 10/28 05:22).
 
-서버 점검(server_watch.sweep, 5분 안팎)마다 한 번 아래를 본다. 모델 호출·PowerShell 없이 파일과 Windows API만 읽는다.
-- API 헬스 깜빡임: api-watchdog.jsonl에서 지난 1시간 health_failed가 HEALTH_FAILS번 이상.
-- 서버 확인 불가: server-watch.json에서 같은 서버가 STREAK번 연속 unknown.
-- 로그 반복 경고: overseer·executor·collect 로그에서 지난 1시간 같은 WARNING/ERROR가 LOG_REPEATS번 이상.
-- PC 메모리 고갈: 커밋이 한도의 COMMIT_RATIO 이상이거나 남은 메모리가 AVAIL_MB 미만인 것이 STREAK번 연속.
+PC 메모리 부족·부하는 이상이 아니다(사용자 판단, 2026-11-04). 부하로 생긴 시간 초과는 점검이 unknown으로 두고
+여기서도 세지 않는다: 메모리를 이상으로 열었더니 메타인지가 사용자에게 '세션 닫을까요' 같은 답할 근거 없는 질문만 보냈다.
+
+서버 점검(server_watch.sweep, 5분 안팎)마다 한 번 아래를 본다. 모델 호출 없이 파일만 읽는다.
+- API 헬스 깜빡임: api-watchdog.jsonl에서 지난 1시간 시간 초과가 아닌 health_failed가 HEALTH_FAILS번 이상.
+- 서버 확인 불가: server-watch.json에서 같은 서버가 STREAK번 연속 unknown(응답 지연 때문인 것은 뺀다).
+- 로그 반복 경고: overseer·executor·collect 로그에서 지난 1시간 같은 WARNING/ERROR가 LOG_REPEATS번 이상
+  (TimeoutError 같은 시간 초과 경고는 뺀다).
 
 이상마다 지문으로 anomalies.json(items)에 남기고, 열리면 metacog_session.wake로 지문당 한 번 깨운다(하루 상한은
 wake가 지킨다). 조건이 RECOVER번 연속 사라지면 닫고 지문을 풀어, 다시 생기면 새 이상으로 깨운다.
 지문의 서버 id는 'watch.<대상>'이다: api_watchdog가 API가 살 때마다 부르는 resolve(base, "api")에 지워지지 않게.
-비밀값·명령줄은 읽지 않는다(프로세스는 이름별 개수만).
+비밀값은 읽지 않는다.
 """
 from __future__ import annotations
 
-import ctypes
 import json
 import logging
-import os
 import re
-import subprocess
 import time
 from collections import Counter
 from pathlib import Path
@@ -38,11 +38,10 @@ HEALTH_FAILS = 6
 LOG_REPEATS = 6
 STREAK = 3            # 점검 3번(15분 안팎) 연속이어야 연다
 RECOVER = 6           # 30분 안팎 조용해야 닫는다(깜빡이는 이상으로 하루 상한을 다 쓰지 않게)
-COMMIT_RATIO = 0.85
-AVAIL_MB = 1024
 KEEP_CLOSED = 7 * 86400
 LOGS = ("overseer", "executor", "collect")
 LOG_LINE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d),\d+ (WARNING|ERROR) (.+)$")
+SLOW = re.compile(r"timeout|timed out|응답 지연|시간 초과", re.I)   # 부하로 생긴 시간 초과: 이상으로 세지 않는다
 
 
 def tail(path: Path, size: int = 256_000) -> list[str]:
@@ -61,13 +60,13 @@ def health_flapping(base: Path, now: float) -> dict | None:
             entry = json.loads(line)
         except ValueError:
             continue
-        if entry.get("event") == "health_failed" and now - entry.get("at", 0) < WINDOW:
+        if entry.get("event") == "health_failed" and not entry.get("timeout") and now - entry.get("at", 0) < WINDOW:
             fails += 1
     if fails < HEALTH_FAILS:
         return None
     return {"target": "api", "kind": "health_flapping", "title": f"중앙 API 헬스 검사가 지난 1시간 {fails}번 실패",
-            "detail": ("재기동 한도에는 안 닿았지만 /healthz가 자주 응답하지 않는다(시간 초과). API 자체가 막혔는지, "
-                       "PC 전체가 느린지(메모리·CPU) 가른다. 기록 api-watchdog.jsonl·api.log·api-watchdog.log."),
+            "detail": ("재기동 한도에는 안 닿았지만 /healthz가 시간 초과가 아닌 거절·오류로 자주 실패한다. "
+                       "기록 api-watchdog.jsonl·api.log·api-watchdog.log."),
             "facts": {"health_failed_last_hour": fails}, "now": True}
 
 
@@ -80,7 +79,8 @@ def unknown_servers(base: Path) -> list[dict]:
              "detail": (f"server_watch 점검이 연속으로 unknown({entry.get('detail', '')})이라 죽어도 켜지 않는다. "
                         "확인 방법(console/servers.py observe)이 왜 실패하는지 본다."),
              "facts": {"detail": entry.get("detail", "")}}
-            for server, entry in entries.items() if entry.get("status") == "unknown"]
+            for server, entry in entries.items()
+            if entry.get("status") == "unknown" and not SLOW.search(entry.get("detail", ""))]
 
 
 def log_repeats(base: Path, now: float) -> list[dict]:
@@ -95,7 +95,7 @@ def log_repeats(base: Path, now: float) -> list[dict]:
                 at = time.mktime(time.strptime(match.group(1), "%Y-%m-%d %H:%M:%S"))
             except ValueError:
                 continue
-            if now - at < WINDOW:
+            if now - at < WINDOW and not SLOW.search(match.group(3)):
                 counts[re.sub(r"\d+", "N", match.group(3)).strip()[:80]] += 1
         for message, count in counts.items():
             if count >= LOG_REPEATS:
@@ -106,54 +106,9 @@ def log_repeats(base: Path, now: float) -> list[dict]:
     return found
 
 
-class MemoryStatus(ctypes.Structure):
-    _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong), ("total_phys", ctypes.c_ulonglong),
-                ("avail_phys", ctypes.c_ulonglong), ("total_commit", ctypes.c_ulonglong),
-                ("avail_commit", ctypes.c_ulonglong), ("total_virtual", ctypes.c_ulonglong),
-                ("avail_virtual", ctypes.c_ulonglong), ("avail_extended", ctypes.c_ulonglong)]
-
-
-def memory() -> dict | None:
-    if os.name != "nt":
-        return None
-    status = MemoryStatus()
-    status.length = ctypes.sizeof(status)
-    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
-        return None
-    return {"commit_ratio": round(1 - status.avail_commit / status.total_commit, 3),
-            "commit_gb": round((status.total_commit - status.avail_commit) / 2**30, 1),
-            "commit_limit_gb": round(status.total_commit / 2**30, 1), "avail_mb": status.avail_phys // 2**20}
-
-
-def process_counts(limit: int = 8) -> dict:
-    """이름별 프로세스 개수(명령줄은 읽지 않는다)."""
-    try:
-        out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, text=True, timeout=10,
-                             encoding="utf-8", errors="replace",
-                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
-    except (OSError, subprocess.SubprocessError):
-        return {}
-    names = Counter(line.split('","')[0].strip('"') for line in out.splitlines() if line.startswith('"'))
-    return dict(names.most_common(limit))
-
-
-def memory_pressure(probe=memory, counts=process_counts) -> dict | None:
-    status = probe()
-    if not status or (status["commit_ratio"] < COMMIT_RATIO and status["avail_mb"] >= AVAIL_MB):
-        return None
-    return {"target": "host", "kind": "memory_pressure",
-            "title": f"PC 메모리 고갈: 커밋 {status['commit_gb']}/{status['commit_limit_gb']}GB, 남은 메모리 {status['avail_mb']}MB",
-            "detail": ("메모리가 바닥나 페이징으로 API 헬스·PowerShell 점검·사용량 push가 시간 초과된다. 무엇이 쓰는지 본다 "
-                       "(Remote Control로 살아 있는 Claude 세션과 그 MCP 서버, 무거운 작업). 사용자 세션·작업은 끄기 전에 묻는다."),
-            "facts": {**status, "processes": counts()}}
-
-
-def observations(base: Path, now: float, *, memory_probe=memory_pressure) -> list[dict]:
-    found = [*unknown_servers(base), *log_repeats(base, now)]
-    for item in (health_flapping(base, now), memory_probe()):
-        if item:
-            found.append(item)
-    return found
+def observations(base: Path, now: float) -> list[dict]:
+    flapping = health_flapping(base, now)
+    return [*unknown_servers(base), *log_repeats(base, now), *([flapping] if flapping else [])]
 
 
 def check(base: Path, *, now: float | None = None, found: list[dict] | None = None,

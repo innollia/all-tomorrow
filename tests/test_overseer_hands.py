@@ -319,7 +319,7 @@ $source = $source -replace '(?m)^#Requires -RunAsAdministrator\r?\n', ''
     watchdog = tasks["api-watchdog"]
     assert watchdog["principal"]["LogonType"] == "S4U"
     assert watchdog["settings"]["MultipleInstances"] == "IgnoreNew"
-    assert watchdog["settings"]["ExecutionTimeLimit"]["TotalSeconds"] == 60
+    assert watchdog["settings"]["ExecutionTimeLimit"]["TotalSeconds"] == 180   # 페이징 중에도 점검이 잘리지 않게 3분
     assert "RestartCount" not in watchdog["settings"]
     assert any(t.get("RepetitionInterval", {}).get("TotalSeconds") == 60 for t in watchdog["triggers"])
     assert watchdog["action"]["Argument"] == '-m all_tomorrow.overseer.runtime api-watchdog --api-task "Fake-DP7-api"'

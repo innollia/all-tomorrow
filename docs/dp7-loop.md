@@ -207,4 +207,9 @@ Eve 연결 추가분: 중앙 `src/all_tomorrow/overseer/{discord_edge,reports,lo
   - `api_watchdog.healthy`: 제한 3초 → 8초.
   - 감시 예약 작업 실행 제한 1분 → 3분(`scripts/dp7-up.ps1`, 지금 작업에도 적용). 페이징 중에는 파이썬이 뜨는 데만 1분을 넘겨 00:21 뒤 서버 점검이 끝나지 못하고 잘렸다. 겹쳐 돌지 않는 것(IgnoreNew)은 그대로다.
   - `mcp_server.py`: 작업자 모듈(dbos·sqlalchemy)을 도구 호출 때만 불러온다. 프로세스당 136MB → 96MB.
-- **남은 것(사용자 결정).** Remote Control이 켜진 세션은 대화가 끝나도 CLI와 MCP가 살아 있다. 다 쓴 세션의 Remote Control을 끄거나 보관하면 세션당 ~1GB가 돌아온다.
+- **메모리는 이상이 아니다(같은 날 사용자 교정).** 메모리 고갈을 이상으로 열었더니 메타인지가 두 번 깨어 "쉬는 데스크톱 세션 닫아도 될까요(fd01d3da 등 6개), AWS 플러그인 기본으로 꺼 둘까요"를 물었다. 사용자: "가치판단을 할 때 쓸 수 있는 정보가 너무 적어, 사실상 아무 의미 없는 질문이야. 정보를 늘린다 해서 해결되진 않고 메모리 적은 건 애초에 문제가 아니야."
+  - `anomaly_watch`에서 메모리 감시를 뺐다. 열려 있던 `watch.host:memory_pressure`는 닫았다.
+  - 부하로 생긴 시간 초과는 이상으로 세지 않는다: 응답 지연으로 인한 unknown, 시간 초과로 끝난 `health_failed`(`api_watchdog`가 이제 `"timeout": true`를 남긴다), TimeoutError 같은 시간 초과 로그 경고. 점검은 지금처럼 unknown으로 두고 조용히 넘긴다.
+  - 메타인지 세션 프롬프트와 `overseer-role.md`: 정리·설정 가치판단(세션 닫기, 플러그인 끄기, 무엇을 지울지)은 사용자에게 묻지 않는다. 스스로 되돌릴 수 있으면 하고, 아니면 "남은 것"에 기록만 한다.
+  - 이미 보낸 두 질문(보고 `metacog-session-watch-host-memory_pressure-1793720711`·`-1793757960`)은 답 없이 닫힌 것으로 표시했다. 세션·플러그인은 건드리지 않았다.
+  - Remote Control 세션이 메모리를 들고 있는 것은 사실로만 남긴다. 결정할 일로 올리지 않는다.

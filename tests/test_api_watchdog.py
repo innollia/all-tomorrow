@@ -93,7 +93,7 @@ def test_probe_timeout(monkeypatch):
         raise httpx.ReadTimeout("secret")
     monkeypatch.setattr(watchdog.httpx, "Client", lambda **kw: real_client(
         **kw, transport=httpx.MockTransport(handler)))
-    assert watchdog.healthy() is False
+    assert watchdog.healthy() is None      # 시간 초과: 실패로 세되 부하일 수 있어 따로 남긴다
 
 
 def test_restart_is_scoped_and_bounded(monkeypatch):

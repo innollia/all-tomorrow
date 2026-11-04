@@ -47,7 +47,7 @@ def test_fingerprint_survives_api_resolve(tmp_path):
     assert "watch.api:health_flapping" in metacog_session.load_state(tmp_path)["incidents"]
 
 
-def test_detects_health_logs_unknown_and_memory(tmp_path):
+def test_detects_health_logs_unknown_but_not_load_or_memory(tmp_path):
     now = 1_800_000_000.0
     with (tmp_path / "api-watchdog.jsonl").open("w", encoding="utf-8") as file:
         file.write("first line is skipped as partial\n")
@@ -57,19 +57,30 @@ def test_detects_health_logs_unknown_and_memory(tmp_path):
     import time
     stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now - 120))
     (tmp_path / "overseer.log").write_text(
-        "x\n" + "".join(f"{stamp},1 WARNING 사용량 push 실패: TimeoutError\n" for _ in range(anomaly_watch.LOG_REPEATS)),
+        "x\n" + "".join(f"{stamp},1 WARNING 동기화 실패: KeyError\n" for _ in range(anomaly_watch.LOG_REPEATS))
+        + "".join(f"{stamp},1 WARNING 사용량 push 실패: TimeoutError\n" for _ in range(anomaly_watch.LOG_REPEATS)),
         encoding="utf-8")
     (tmp_path / "server-watch.json").write_text(json.dumps(
-        {"servers": {"executor": {"status": "unknown", "detail": "Windows 조회 불가"}, "collect": {"status": "ok"}}}),
-        encoding="utf-8")
-    high = lambda: anomaly_watch.memory_pressure(
-        probe=lambda: {"commit_ratio": 0.9, "commit_gb": 57, "commit_limit_gb": 63, "avail_mb": 600},
-        counts=lambda: {"claude.exe": 45})
-    kinds = {(o["target"], o["kind"]) for o in anomaly_watch.observations(tmp_path, now, memory_probe=high)}
-    assert kinds == {("api", "health_flapping"), ("overseer", "log:사용량 push 실패: TimeoutError"),
-                     ("executor", "unknown"), ("host", "memory_pressure")}
-    calm = lambda: {"commit_ratio": 0.5, "commit_gb": 30, "commit_limit_gb": 63, "avail_mb": 8000}
-    assert anomaly_watch.memory_pressure(probe=calm) is None
+        {"servers": {"executor": {"status": "unknown", "detail": "Windows 조회 불가"},
+                     "tailscale": {"status": "unknown", "detail": "tailscale status 응답 지연 (PC 부하)"},
+                     "collect": {"status": "ok"}}}), encoding="utf-8")
+    kinds = {(o["target"], o["kind"]) for o in anomaly_watch.observations(tmp_path, now)}
+    assert kinds == {("api", "health_flapping"), ("overseer", "log:동기화 실패: KeyError"), ("executor", "unknown")}
+
+
+def test_health_timeouts_are_load_not_anomaly(tmp_path):
+    now = 1_800_000_000.0
+    (tmp_path / "api-watchdog.jsonl").write_text("x\n" + "".join(
+        json.dumps({"at": now - 60 * i, "event": "health_failed", "failures": 1, "timeout": True}) + "\n"
+        for i in range(anomaly_watch.HEALTH_FAILS * 2)), encoding="utf-8")
+    assert anomaly_watch.health_flapping(tmp_path, now) is None
+
+
+def test_api_probe_timeout_is_recorded(tmp_path):
+    from all_tomorrow.overseer import api_watchdog
+    api_watchdog.check_once(tmp_path, probe=lambda: None, recover=lambda *a: None, diagnostics=lambda: "")
+    entry = json.loads((tmp_path / "api-watchdog.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert entry["event"] == "health_failed" and entry["timeout"] is True
 
 
 def test_windows_task_uses_com_before_powershell(monkeypatch):
