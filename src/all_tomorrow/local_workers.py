@@ -69,7 +69,7 @@ def configured_adapters(config: dict[str, Any]) -> dict[str, Any]:
             argv = [discover_executable(worker_id) or EXECUTABLES[worker_id]]
             if worker_id == "opencode":
                 argv.append("run")
-        if not isinstance(argv, list) or not argv or any(not isinstance(a, str) or not a for a in argv):
+        if not isinstance(argv, list) or not argv or not argv[0] or any(not isinstance(a, str) for a in argv):
             raise ValueError(f"Invalid argv for {worker_id}")
         options = dict(entry.get("options", {}))
         # Config stores names, never credential values. Explicit opt-in per worker.
