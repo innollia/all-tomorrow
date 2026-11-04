@@ -21,7 +21,7 @@
 | AWS ap-northeast-2 Lambda `bmc-webhook` + DynamoDB `bmc-webhook` (코드 `all-tomorrow/deploy/bmc-webhook/`) | Buy Me a Coffee 웹후크 수신(Function URL `/webhooks/bmc`, 서명 검증) → 확인 대기. 콘솔이 `/internal/edge/bmc/pending`·`/ack`로 가져감(토큰 `~/.all-tomorrow/bmc-pull.token`, 시크릿 key-pool.env `BMC_WEBHOOK_SECRET`) | 봉봉봉 상점 입금. DP7이 꺼져 있어도 쌓인다. 반영은 `deploy.ps1`. |
 | Eve 호스트 cloudflared (토큰 방식, 서비스 `http://localhost:3000`) | Cloudflare 터널 | 2026-10-29 기준 공개 호스트 이름 없음 → 밖에서 안 닿음. 이 PC에 Cloudflare 토큰 없음. |
 | `C:\projects\nycko_ref` | 별도의 소규모 Discord bot | 현재 중앙화 대상인지 불명. 즉시 통합하지 않는다. |
-| `C:\projects\TINProject` | Godot 게임 프로젝트, Antigravity/OpenCode 작업 규칙 | 일반 project 등록 및 lesson 재사용의 향후 검증 후보. Control Plane 코드를 넣지 않는다. |
+| `C:\projects\TINProject` | Godot 게임 프로젝트, Antigravity/OpenCode 작업 규칙 | 일반 project 등록 및 lesson 재사용의 향후 검증 후보. Control Plane 코드를 넣지 않는다. 소리는 nkido, Strudel은 저작권 문제로 폐기. |
 | `C:\projects\all-tomorrow` | 새 Personal AI Control Plane | 중앙 project/task/run/pipeline/event authority의 소유자. |
 
 ## AWS 실물 (2026-10-30 전 리전 조사·정리)
