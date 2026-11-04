@@ -2,7 +2,7 @@
 
 올투모로우 코드는 얇게 둔다: 언제 깨울지(wake/resolve), 무엇을 들려 보낼지(build_prompt: docs/overseer-role.md
 + 이상 기록), 얼마나 쓸지(하루 횟수·시간·턴 상한), 무엇을 남겼는지(metacog-journal.md 맨 위 + 보고 1건).
-판단·조사·수리는 세션(도구를 가진 Claude)이 하고, 무거운 코딩·조사는 all-tomorrow MCP dispatch_task로 Codex에 맡긴다.
+판단·조사·수리는 세션(도구를 가진 Claude)이 하고, 무거운 코딩·조사는 all-tomorrow MCP dispatch_task로 자동 작업자(auto_worker)에 맡긴다.
 
 - 계기: server_watch(autostart 서버 3번 시작 실패로 재시도 중단)와 api_watchdog(API 재기동 한도).
 - 지문(fingerprint) = 서버 id + 오류 종류. 같은 지문은 한 번만 깨운다. 서버가 살아나면(resolve) 지문을 지워
@@ -186,7 +186,7 @@ PROMPT = """너는 All Tomorrow의 메타인지다. 메타인지 = 사용자 없
   서버 목록(감시가 지금 쓰는 파일) {registry}. 큰 판단 전에는 {base}\\control-brief.md(노션 요약 포함)를 읽는다.
   노션은 읽기만 한다. 비밀값 파일(~/.all-tomorrow/key-pool.env, .env, 자격 증명)은 열지 않는다.
 - 같은 문제로 두 번 실패했거나 처음 보는 오류면 세 번째 시도 전에 oracle_ask(신탁)로 묻는다(project: 작업 폴더 이름).
-- 무거운 코딩·조사는 all-tomorrow MCP dispatch_task(project_id, worker="codex", task)로 맡기고 get_run으로 결과를 확인한다.
+- 무거운 코딩·조사는 all-tomorrow MCP dispatch_task(project_id, worker="{worker}", task)로 맡기고 get_run으로 결과를 확인한다.
 - 이 세션은 감시 예약 작업에서 떼어 낸 프로세스다. 오래 도는 서버를 이 세션의 자식으로 직접 띄우지 않는다(세션이 끝나면 같이 죽는다).
   서버는 감시가 켜게 한다: 원인을 고친 뒤 server-watch.json에서 그 서버 항목을 "starts": 0, "blocked": false로 두고
   `schtasks /Run /TN AllTomorrow-DP7-api-watchdog`(감시 작업)를 실행한다. 감시의 서버 점검은 4분 간격이라
@@ -219,7 +219,8 @@ def registry_path() -> Path:
 
 def build_prompt(base: Path, entry: dict, cfg: dict) -> str:
     role = (REPO / "docs" / "overseer-role.md").read_text(encoding="utf-8")
-    return PROMPT.format(title=entry["title"], fingerprint=entry["fingerprint"], source=entry["source"],
+    from all_tomorrow.overseer import auto_worker
+    return PROMPT.format(worker=auto_worker.worker(), title=entry["title"], fingerprint=entry["fingerprint"], source=entry["source"],
                          detail=entry["detail"], facts=json.dumps(entry.get("facts", {}), ensure_ascii=False),
                          base=base, registry=registry_path(), turns=cfg["turns"], minutes=cfg["minutes"], role=role)
 

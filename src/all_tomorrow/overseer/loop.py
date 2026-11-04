@@ -246,7 +246,13 @@ async def run_worker(task: dict, candidate: Path) -> dict:
     config = json.loads(Path(os.environ.get("ALL_TOMORROW_WORKERS", REPO / "config/workers.local.json"))
                         .read_text(encoding="utf-8"))
     config["allowed_roots"] = [str(candidate)]
-    config["workers"] = {k: v for k, v in config["workers"].items() if k in {"codex", "antigravity"}}
+    from all_tomorrow.overseer import auto_worker
+    auto = auto_worker.worker()
+    config["workers"] = {k: v for k, v in config["workers"].items() if k in {auto, "antigravity"}}
+    if auto == "claude":  # 사용자 설정의 기본 모델이 아니라 값싼 등급으로 고정한다.
+        import shutil
+        config["workers"]["claude"] = {"argv": [shutil.which("claude") or "claude", "--model", auto_worker.WORK_MODEL,
+                                                "--effort", "low"], "options": {"timeout_seconds": 1800}}
     config["workers"].get("codex", {}).setdefault("options", {})["skip_git_repo_check"] = True
     prompt = ("등록된 프로젝트의 운영 문제를 사본에서 고친다. 한국어로 보고한다. 커밋·삭제·비밀값 접근·"
               "권한/비용 확대·창작 방향 변경은 금지. 시험과 제어 경계는 변경하지 마라. "
@@ -264,7 +270,7 @@ async def run_worker(task: dict, candidate: Path) -> dict:
         # 중간에 프로세스가 종료돼도 앞 작업자의 진단은 사본 옆에 남는다.
         save(candidate.parent / "worker-attempts.json", {"attempts": attempts})
 
-    for name, adapter in sorted(configured_adapters(config).items(), key=lambda p: p[0] != "codex"):
+    for name, adapter in sorted(configured_adapters(config).items(), key=lambda p: p[0] != auto):
         result = None
         waiting = cooldowns.until(name)
         if waiting is not None:
@@ -424,7 +430,8 @@ def verify(task: dict, candidate: Path, *, diagnostics=None, redact=None) -> boo
 
 
 def review_change(task: dict, change: ProjectChange, redact) -> bool:
-    from all_tomorrow.overseer.metacog import codex_reasoner, _parse
+    from all_tomorrow.overseer import auto_worker
+    from all_tomorrow.overseer.metacog import claude_reasoner, codex_reasoner, _parse
     import difflib
     diff = "\n".join("\n".join(difflib.unified_diff(
         (change.before / n).read_text(encoding="utf-8", errors="replace").splitlines() if (change.before / n).exists() else [],
@@ -437,7 +444,8 @@ def review_change(task: dict, change: ProjectChange, redact) -> bool:
               "버그·보안·회귀도 심사하라. 오류가 있어도 false. 한국어 JSON {\"ordinary\":true|false}만 출력.\n"
               + task["objective"] + "\n시험 명령도 프로젝트 안의 검증만 하는지 심사하라: "
               + json.dumps(task["verify_argv"]) + "\n" + diff)
-    return _parse(codex_reasoner(redact(prompt), change.artifact)).get("ordinary") is True
+    reasoner = claude_reasoner if auto_worker.worker() == "claude" else codex_reasoner
+    return _parse(reasoner(redact(prompt), change.artifact)).get("ordinary") is True
 
 
 async def execute_pending(store, base: Path, *, registry: dict, redact,

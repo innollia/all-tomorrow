@@ -4,6 +4,7 @@
     "opencode": {"options": {"timeout_seconds": 600}},
     "codex": {"options": {"timeout_seconds": 600, "ignore_user_config": true}},
     "kiro": {"options": {"timeout_seconds": 600}, "env_names": ["KIRO_API_KEY"]},
-    "antigravity": {"options": {"timeout_seconds": 600}}
+    "antigravity": {"options": {"timeout_seconds": 600}},
+    "claude": {"options": {"timeout_seconds": 600}}
   }
 }

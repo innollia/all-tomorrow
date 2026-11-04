@@ -423,11 +423,17 @@ def _parse(text: str) -> dict:
 REASONER_ORDER = ("codex", "antigravity", "claude")
 
 
+def _reasoners(selected: str) -> list[str]:
+    """고른 판단자 다음에 나머지. 자동 작업자가 Codex가 아니면 고르지 않은 Codex는 부르지 않는다."""
+    from all_tomorrow.overseer import auto_worker
+    names = [selected] + [n for n in REASONER_ORDER if n != selected]
+    return names if auto_worker.worker() == "codex" else [n for n in names if n != "codex" or n == selected]
+
+
 def _chain(selected: str) -> list[tuple[str, str, Callable[[str, Path], str]]]:
     """(쿼터 이름, 표시 모델, 호출) 목록. 호출은 테스트가 바꿔 끼운 모듈 함수를 그때 찾는다."""
-    names = [selected] + [n for n in REASONER_ORDER if n != selected]
     chain = []
-    for name in names:
+    for name in _reasoners(selected):
         if name == "codex":
             chain.append(("codex", "default", lambda p, w: codex_reasoner(p, w)))
         elif name == "antigravity":
@@ -539,8 +545,9 @@ def wake(con, base: Path, *, redact, projects: dict | None, notion,
         prompt = PROMPT.format(mark=WAKE_MARK, snapshot_path=snapshot_path, notes_path=notes_path,
                                python_exe=python_exe,
                                direction_paths=", ".join(str(base / n) for n in DIRECTION_FILES))
-        selected = os.environ.get("ALL_TOMORROW_METACOG_REASONER", "codex").strip().lower()
-        if reasoner is None and selected not in {"antigravity", "codex"}:
+        from all_tomorrow.overseer import auto_worker
+        selected = os.environ.get("ALL_TOMORROW_METACOG_REASONER", auto_worker.worker()).strip().lower()
+        if reasoner is None and selected not in {"antigravity", "codex", "claude"}:
             raise ValueError("unsupported metacog reasoner")
         if reasoner is not None:
             judge.update(reasoner="custom", model="default")

@@ -246,6 +246,10 @@ PROMPT_NOTE = """
 FAILED_MARK = "[수집 실패]"
 
 
+# Claude에는 지연 도구 호출 방법 줄이 맞지 않는다.
+CLAUDE_NOTE = "\n".join(line for line in PROMPT_NOTE.split("\n") if "functions.exec" not in line)
+
+
 def codex_args(pages_dir: Path) -> list[str]:
     """codex exec에 read_logged_in_page 도구를 붙이는 -c 설정(--ignore-user-config여도 들어간다)."""
     key = "mcp_servers.chrome_pages"

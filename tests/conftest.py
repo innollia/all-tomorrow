@@ -15,3 +15,9 @@ def _no_real_metacog_session(monkeypatch):
     launched = []
     monkeypatch.setattr(metacog_session, "spawn", lambda base, fp: launched.append((base, fp)))
     return launched
+
+
+@pytest.fixture(autouse=True)
+def _pin_auto_worker(monkeypatch):
+    # 작업자 순서를 검사하는 시험은 Codex 경로 기준이다. Claude 기본값은 test_auto_worker.py가 본다.
+    monkeypatch.setenv("ALL_TOMORROW_AUTO_WORKER", "codex")

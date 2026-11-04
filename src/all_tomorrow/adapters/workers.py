@@ -453,8 +453,8 @@ class CodexWorker:
                                 WorkerStatus.TRAVERSAL_BLOCKED, error=_sanitize_error(error))
         prompt = _build_worker_prompt(request)
         # Codex reads the prompt from stdin ("-"): a Windows command line stops at 32,767 chars and long
-        # idea syntheses went past it. Claude keeps it as an argument.
-        on_stdin = self.worker_id == "codex"
+        # idea syntheses went past it. Claude -p reads stdin the same way.
+        on_stdin = self.worker_id in ("codex", "claude")
         result = await _run_process_safe(
             cmd=self.build_argv("-" if on_stdin else prompt), cwd=cwd, env=self._env,
             timeout_seconds=self._timeout_seconds, output_limit_bytes=self._output_limit_bytes,
@@ -486,8 +486,9 @@ class ClaudeWorker(CodexWorker):
         return "claude"
 
     def build_argv(self, prompt: str) -> list[str]:
-        return [*self._argv, "-p", "--output-format", "json", "--permission-mode", "bypassPermissions",
-                "--disallowedTools", ",".join(CLAUDE_DENY), "--", prompt]
+        cmd = [*self._argv, "-p", "--output-format", "json", "--permission-mode", "bypassPermissions",
+               "--disallowedTools", ",".join(CLAUDE_DENY)]
+        return cmd if prompt == "-" else [*cmd, "--", prompt]
 
     def parse_output(self, output: str) -> dict[str, Any]:
         result = json.loads(output)

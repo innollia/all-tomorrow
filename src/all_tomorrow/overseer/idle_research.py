@@ -1,4 +1,4 @@
-"""놀 때 생산하기: PC가 쉬고 Codex 잔량이 남으면, 사용자가 콘솔 '조사 목록'에 정해 둔 주제를 Codex가 하나씩 조사한다.
+"""놀 때 생산하기: PC가 쉬고 구독 잔량이 남으면, 사용자가 콘솔 '조사 목록'에 정해 둔 주제를 자동 작업자(auto_worker: 지금은 Claude)가 하나씩 조사한다.
 
 - 무엇을 조사할지는 사용자가 정한다(console/research.py, agenda.json). 이 모듈은 언제·얼마나만 정한다.
 - 한 번에 하나. 실행기 예약 작업이 1분마다 tick을 부른다: 끝난 실행을 거두고, 차례가 된 주제를 띄운다.
@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from all_tomorrow.overseer import auto_worker
 from all_tomorrow.console.research import RESULTS, load_runs, load_topics, research_dir, save_runs
 
 log = logging.getLogger(__name__)
@@ -53,11 +55,12 @@ PROMPT = """너는 All Tomorrow의 유휴 조사 담당이다. 사용자가 정�
 
 def settings() -> dict:
     env = os.environ.get
+    research_limit, short_limit = auto_worker.LIMITS[auto_worker.worker()]
     return {"idle_seconds": float(env("ALL_TOMORROW_RESEARCH_IDLE_SECONDS", "600")),
             "daily": int(env("ALL_TOMORROW_RESEARCH_DAILY", "8")),
-            "max_percent": float(env("ALL_TOMORROW_RESEARCH_MAX_PERCENT", "80")),
+            "max_percent": float(env("ALL_TOMORROW_RESEARCH_MAX_PERCENT", research_limit)),
             # 압축·종합은 몇 분짜리라 조사보다 높은 선까지 돈다. 주간 87%에서 하루 넘게 압축이 멈췄다(2026-11-03).
-            "short_max_percent": float(env("ALL_TOMORROW_RESEARCH_SHORT_MAX_PERCENT", "95")),
+            "short_max_percent": float(env("ALL_TOMORROW_RESEARCH_SHORT_MAX_PERCENT", short_limit)),
             "timeout": int(env("ALL_TOMORROW_RESEARCH_TIMEOUT", "1800"))}
 
 
@@ -67,10 +70,11 @@ def quota_ok(base: Path, max_percent: float, now: float, provider: str = "codex"
     try:
         snapshot = json.loads((base / "subscription-usage.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return False, "사용량 모름"
+        return provider == "claude", "사용량 모름"
     codex = next((p for p in snapshot.get("providers", []) if p.get("id") == provider), None)
     if not codex or codex.get("status") != "connected":
-        return False, f"{name} 사용량 모름"
+        # Claude 사용량 조회는 자주 오류를 낸다. 그때마다 막으면 압축이 멈추니 확인된 높은 값만 막는다.
+        return provider == "claude", f"{name} 사용량 모름"
     for window in codex.get("windows", []):
         try:
             reset = datetime.fromisoformat(window["resets_at"]).timestamp() if window.get("resets_at") else None
@@ -223,9 +227,11 @@ def next_synth(folder: Path, runs: list[dict], now: float) -> dict | None:
     return None
 
 
-def short_job_args() -> list[str]:
-    """압축·종합용 Codex 인자: 모든 MCP를 끄고 추론을 낮춘다."""
+def short_job_args(model: str = auto_worker.WORK_MODEL) -> list[str]:
+    """압축·종합용 작업자 인자: 모든 MCP를 끄고 추론을 낮춘다."""
     from all_tomorrow.adapters import chrome_pages
+    if auto_worker.worker() == "claude":
+        return auto_worker.short_args(model)
     return [*chrome_pages.research_mcp_args(keep=frozenset()), "-c", f'model_reasoning_effort="{SHORT_EFFORT}"']
 
 
@@ -245,7 +251,7 @@ def _start_synth(folder: Path, job: dict, runs: list[dict], now: float, start: C
            "sigs": job["sigs"], "incremental": bool(job["previous"]), "title": "종합: " + idea["title"][:40],
            "project_id": "all-tomorrow", "started": now, "status": "RUNNING"}
     try:
-        meta = start("all-tomorrow", "codex", ideas_followup.synth_prompt(idea, job),
+        meta = start("all-tomorrow", auto_worker.worker(), ideas_followup.synth_prompt(idea, job),
                      worker_options={"timeout_seconds": min(cfg["timeout"], 900)},
                      argv_suffix=short_job_args())
     except Exception as error:
@@ -276,9 +282,9 @@ def _start_compress(folder: Path, item: dict, runs: list[dict], now: float, star
     if item["key"].startswith("M"):
         run["material_id"] = item["id"]
     try:
-        meta = start("all-tomorrow", "codex", ideas_followup.compress_prompt(idea, material),
+        meta = start("all-tomorrow", auto_worker.worker(), ideas_followup.compress_prompt(idea, material),
                      worker_options={"timeout_seconds": min(cfg["timeout"], 900)},
-                     argv_suffix=short_job_args())
+                     argv_suffix=short_job_args(auto_worker.COMPRESS_MODEL))
     except Exception as error:
         run.update(status="FAILED", error=type(error).__name__ + ": " + str(error)[:200], finished=now)
         runs.append(run)
@@ -380,7 +386,7 @@ def tick(base: Path, idle: float | None, *, now: float | None = None,
     running = [r for r in runs if r.get("status") == "RUNNING"]
     cfg = settings()
     # '지금 압축'을 누른 것은 조사가 오래 돌거나 멈춰 있어도 바로 시작한다(압축은 짧고 웹 검색이 없다).
-    short_ok, short_reason = quota_ok(base, cfg["short_max_percent"], now)
+    short_ok, short_reason = quota_ok(base, cfg["short_max_percent"], now, auto_worker.worker())
     rushed = None if any(r.get("kind") in ("compress", "synth") for r in running) else next_compress(folder, runs, now, True)
     if rushed and short_ok:
         started = _start_compress(folder, rushed, runs, now, start, cfg)
@@ -409,7 +415,8 @@ def tick(base: Path, idle: float | None, *, now: float | None = None,
     topic = next((t for t in load_topics(folder) if due(t, runs, now, idle_ok)), None)
     if topic is None:
         return "none" if idle_ok else "idle"
-    ok, reason = quota_ok(base, cfg["max_percent"], now)
+    worker = auto_worker.worker()
+    ok, reason = quota_ok(base, cfg["max_percent"], now, worker)
     if not ok:
         return "quota"
     from all_tomorrow import mcp_server
@@ -422,10 +429,14 @@ def tick(base: Path, idle: float | None, *, now: float | None = None,
         run.update(idea_id=topic["idea_id"], request=topic["ask"])
     try:
         from all_tomorrow.adapters import chrome_pages
-        meta = start(project_id, "codex", build_task(topic, runs, folder, cwd) + chrome_pages.PROMPT_NOTE,
-                     worker_options={"timeout_seconds": cfg["timeout"]},
-                     argv_suffix=["-c", 'web_search="live"', *chrome_pages.codex_args(folder / PAGES / run["id"]),
-                                  *chrome_pages.research_mcp_args()])
+        pages = folder / PAGES / run["id"]
+        if worker == "claude":
+            note, suffix = chrome_pages.CLAUDE_NOTE, auto_worker.research_args(pages, sys.executable)
+        else:
+            note = chrome_pages.PROMPT_NOTE
+            suffix = ["-c", 'web_search="live"', *chrome_pages.codex_args(pages), *chrome_pages.research_mcp_args()]
+        meta = start(project_id, worker, build_task(topic, runs, folder, cwd) + note,
+                     worker_options={"timeout_seconds": cfg["timeout"]}, argv_suffix=suffix)
     except Exception as error:
         run.update(status="FAILED", error=type(error).__name__ + ": " + str(error)[:200], finished=now)
         runs.append(run)

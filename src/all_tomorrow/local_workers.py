@@ -14,15 +14,15 @@ from typing import Any
 from uuid import uuid4
 
 from all_tomorrow.adapters.workers import (
-    AntigravityWorker, CodexWorker, KiroWorker, OpenCodeWorker, _worker_environment,
+    AntigravityWorker, ClaudeWorker, CodexWorker, KiroWorker, OpenCodeWorker, _worker_environment,
 )
 from all_tomorrow.contracts import Worker, WorkerRequest, WorkerStatus
 from all_tomorrow.registry import WorkerService
 
 
 ADAPTERS = {"antigravity": AntigravityWorker, "opencode": OpenCodeWorker,
-            "codex": CodexWorker, "kiro": KiroWorker}
-EXECUTABLES = {"antigravity": "agy", "opencode": "opencode", "codex": "codex", "kiro": "kiro-cli"}
+            "codex": CodexWorker, "kiro": KiroWorker, "claude": ClaudeWorker}
+EXECUTABLES = {"antigravity": "agy", "opencode": "opencode", "codex": "codex", "kiro": "kiro-cli", "claude": "claude"}
 
 
 def discover_executable(worker_id: str) -> str | None:
@@ -35,6 +35,7 @@ def discover_executable(worker_id: str) -> str | None:
     patterns = {
         "antigravity": "agy/bin/agy.exe",
         "codex": "OpenAI/Codex/bin/*/codex.exe",
+        "claude": "AnthropicClaude/*/claude.exe",
         "kiro": "Kiro-Cli/kiro-cli.exe",
         "opencode": "npm-cache/_npx/*/node_modules/opencode-ai/bin/opencode.exe",
     }
