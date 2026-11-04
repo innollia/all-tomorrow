@@ -1,7 +1,7 @@
 import json
 
 from all_tomorrow.adapters.workers import ClaudeWorker
-from all_tomorrow.overseer import auto_worker, idle_research, metacog
+from all_tomorrow.overseer import auto_worker, distill, idle_research, metacog
 
 
 def test_setting_switches_every_default(monkeypatch) -> None:
@@ -31,3 +31,13 @@ def test_claude_worker_can_take_the_prompt_on_stdin() -> None:
     worker = ClaudeWorker(allowed_roots=("x",), argv=["claude"])
     assert "--" not in worker.build_argv("-")
     assert worker.build_argv("hi")[-2:] == ["--", "hi"]
+
+
+def test_only_claude_and_codex_sessions_are_distilled(tmp_path) -> None:
+    from test_overseer_distill import _store
+    store = _store(tmp_path, "[U] 빌드 실패\n" + "[A] 로그 " * 400)
+    store.con.execute("update sessions set updated_at = '2026-01-01T00:00:00', n_user = 1")
+    assert distill.pending_sessions(store.con, 10) == [("codex", "c1")]
+    for source in ("antigravity", "kiro"):
+        store.con.execute("update sessions set source = ?", (source,))
+        assert distill.pending_sessions(store.con, 10) == []

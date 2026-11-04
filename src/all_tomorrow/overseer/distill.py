@@ -226,6 +226,7 @@ def pending_sessions(con, limit: int, quiet_minutes: int = 30) -> list[tuple[str
         "select s.source, s.session_id from sessions s left join distilled d "
         "on d.source = s.source and d.session_id = s.session_id "
         "where (d.fingerprint is null or d.fingerprint != s.fingerprint) "
+        "and s.source in ('claude', 'codex') "  # 사용자 결정 2026-11-04: Antigravity는 봇 세션뿐, Kiro는 시행착오가 적다
         "and s.n_user >= 1 and length(s.text) >= 1500 "
         "and coalesce(s.title, '') not like 'You are a memory%' "
         "and coalesce(s.updated_at, '') < strftime('%Y-%m-%dT%H:%M:%S', 'now', ?) "
