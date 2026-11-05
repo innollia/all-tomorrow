@@ -65,12 +65,7 @@ from all_tomorrow.console.research import ResearchStore, load_runs
 META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사업·프로젝트로 할 만한지 판단할 자료를 모으려 한다.
 지금 할 일은 조사 자체가 아니라, 조사를 나눠 맡길 **자기완결 하위 프롬프트**와 그 작업 경계를 만드는 것이다.
 
-## 실행 환경 (하위 프롬프트가 지켜야 할 전제)
-- 하위 프롬프트는 사용자가 서로 다른 새 세션에 하나씩 붙여 동시에 돌린다. 세션끼리 대화할 수 없고, 이 대화도 보지 못한다. 공유 기억이 없다.
-- 실행하는 쪽은 웹사이트와 GitHub에 접근할 수 있고, 의뢰인의 PC·파일에는 접근할 수 없다. 의뢰인에게 되묻지 않고 끝낼 수 있어야 한다.
-- 결과는 사용자가 웹사이트에 붙여넣고 나중에 합친다. 합치는 단계에서 믿을 수 있게, 출처 목록이 아니라 **주장마다** 근거(URL·인용)를 붙인다.
-
-## 분해 순서 (이 순서대로 생각하고 1~3을 답에 적는다)
+""" + ideas_followup.ENV + """## 분해 순서 (이 순서대로 생각하고 1~3을 답에 적는다)
 1. 아이디어 분석: 제품, 고객, 해결하는 문제, 수익 방식, 지금 있는 근거, 중요한 가정. 원문에 없는 것은 "가정"으로 표시한다.
 2. 핵심 불확실성: 맞고 틀림에 따라 성패가 크게 바뀌는데 아직 검증 안 된 가정을 중요한 순으로. 시장·기술·법률·유통 같은 분야는 빠뜨림 점검용일 뿐 고정 목차가 아니다.
 3. 조사 과제: 불확실성마다 과제를 만들고 각각 검사한다 — 단독 실행 가능한가, 다른 결과를 기다려야 하는가, 결과가 실제 결정(할지/말지/어떻게)에 쓰이는가. 결정에 안 쓰이는 과제는 버린다. 과제마다 분류를 붙인다.
@@ -106,38 +101,7 @@ META_PROMPT = """너는 자료조사 총괄이다. 아래 [아이디어]를 사�
 - 글로벌 시장과 국가·언어권별 시장(특히 아이디어 원문 언어의 시장)을 따로 본다. 글로벌에 비슷한 제품이 있어도 그 언어권에서 범주를 대표하는 프로그램이 아직 없으면 따로 판단한다.
 - 그 언어권의 현재 대표 프로그램, 사용자 커뮤니티, 유통 채널, 범주를 선점하는 경로(현지화·커뮤니티·플랫폼)를 글로벌 결론과 분리해 적게 한다.
 
-## 하위 프롬프트 계약 (모든 하위 프롬프트에 아래 필드를 이 이름 그대로 다 넣는다)
-- idea_brief: 아이디어 공통 맥락. 1단계 분석 요약 + 이 과제에 필요한 원문. 다른 세션이 이것만 보고 이해할 수 있게.
-- task_id: {idea_id} / S?
-- objective: 답해야 할 핵심 질문 하나(와 그 답이 바꿀 결정).
-- scope: 반드시 다룰 범위.
-- exclusions: 다루지 않을 것(다른 과제가 맡는 범위 포함).
-- source_policy: 쓸 출처 종류(공식 문서·통계·특허·GitHub·뉴스·커뮤니티 등)와 우선순위, 기준 시점, 검증 조건(예: 숫자는 1차 출처 또는 독립 출처 2곳).
-- deliverables: 꼭 내야 할 산출물(표·목록·수치 등).
-- completion_rule: 상태 판정 기준. 완료 = objective에 근거 있는 답, 불완전 = 일부만 답함(빠진 것을 적음), 실패 = 답할 근거를 못 찾음(시도한 검색과 이유를 적음).
-- 마지막에 아래 [결과 형식]을 글자 그대로(ID만 채워서) 넣고, "답은 이 형식 블록 하나로만 낸다. 출처 없는 주장은 '구분: 추정'으로 적는다"고 적는다.
-
-## 결과 형식 (하위 프롬프트에 그대로 넣을 것)
-```
-=== 자료봉 결과 ===
-아이디어 ID: {idea_id}
-하위과제 ID: S?
-하위과제: (과제 제목)
-상태: 완료 | 불완전 | 실패
----
-## 결론 (3줄 이내)
-## 주장과 근거
-- [C1] (주장 한 문장)
-  - 출처: (URL)
-  - 인용: "(출처 원문에서 그대로 옮긴 한두 문장)"
-  - 구분: 확인 | 추정
-- [C2] …
-## 빠진 것·실패 이유 (상태가 완료가 아니면 반드시)
-## 다음에 확인할 것
-=== 끝 ===
-```
-
-## 네 답의 형식
+""" + ideas_followup.CONTRACT + """## 네 답의 형식
 1~3단계(분석·불확실성·과제 표: ID·제목·분류·결정에 쓰이는 곳·맡은 관점 1~3)를 짧게 적은 뒤, 과제마다 아래처럼 낸다.
 사용자가 코드블록 하나씩 복사해 새 세션에 붙여넣는다. 2차 과제는 제목에 "(2차)"를 붙인다.
 
@@ -333,6 +297,13 @@ class IdeaStore:
             if "asks" not in {row["name"] for row in db.execute("PRAGMA table_info(ideas)")}:
                 # the user's own questions for the next round, one per line, as typed (ideas_rounds.mine)
                 db.execute("ALTER TABLE ideas ADD COLUMN asks TEXT NOT NULL DEFAULT ''")
+            # Additional research the user asked for, split into tasks S{start}…; ideas_rounds.extras reads their state.
+            db.execute("""CREATE TABLE IF NOT EXISTS extras (idea_id TEXT NOT NULL, n INTEGER NOT NULL, questions TEXT NOT NULL, start INTEGER NOT NULL,
+                prompt TEXT NOT NULL, synth_before TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (idea_id, n))""")
+            # 바로 조사: one row per run of a chosen CLI and model. task "" = the decomposition, S6 = one task (overseer.direct_research).
+            db.execute("""CREATE TABLE IF NOT EXISTS extra_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, idea_id TEXT NOT NULL, n INTEGER NOT NULL,
+                task TEXT NOT NULL, worker TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL, run_id TEXT NOT NULL DEFAULT '',
+                error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, started REAL NOT NULL DEFAULT 0, finished REAL NOT NULL DEFAULT 0)""")
             # The user's answers to round questions the web cannot answer; grounds() hands them to the synthesis as decided.
             db.execute("""CREATE TABLE IF NOT EXISTS round_answers (idea_id TEXT NOT NULL, n INTEGER NOT NULL, qid TEXT NOT NULL,
                 topic TEXT NOT NULL, answer TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (idea_id, n, qid))""")
@@ -431,6 +402,7 @@ class IdeaStore:
             pastes = db.execute("SELECT * FROM pastes WHERE idea_id = ? ORDER BY id", (idea_id,)).fetchall()
             plans = db.execute("SELECT * FROM plans WHERE idea_id = ? ORDER BY id DESC", (idea_id,)).fetchall()
             materials = db.execute("SELECT * FROM materials WHERE idea_id = ? ORDER BY id DESC", (idea_id,)).fetchall()
+            asked = ideas_rounds.asked(db, idea_id)
         seen: set[str] = set()
         decoded = []
         for r in results:  # newest first: the first of each subtask is current, the rest were replaced
@@ -439,12 +411,27 @@ class IdeaStore:
         plan_list = [{**dict(p), "paras": json.loads(p["paras"])} for p in plans]
         return {**dict(idea), "candidate": bool(idea["candidate"]), "synth_keys": json.loads(idea["synth_keys"]),
                 "materials": [dict(m) for m in materials],
-                "results": decoded, "pastes": [dict(p) for p in pastes], "plans": plan_list,
+                "results": decoded, "pastes": [dict(p) for p in pastes], "plans": plan_list, "asked": asked,
                 "plan_paras": plan_list[0]["paras"] if plan_list and plan_list[0]["text"] == idea["plan"] else [],
                 "tasks": ideas_jev.plan_tasks(idea["plan"])}
 
     def add_results(self, idea_id: str, raw: str) -> list[dict[str, Any]]:
         return self.add_slots(idea_id, [raw])
+
+    def add_extra(self, idea_id: str, text: str) -> dict[str, Any]:
+        """A 자료봉 answer pasted into the 추가 조사 box. A decomposition (### S6 · …) extends the saved plan so its tasks
+        join the old ones; result blocks, or anything else, are results."""
+        idea = self.get(idea_id) or {}
+        tasks = ideas_jev.plan_tasks(text)
+        if looks_like_results(text) or not tasks:
+            return {"tasks": [], "results": [p["subtask_id"] or "?" for p in self.add_slots(idea_id, [text])]}
+        if text.strip() in idea["plan"]:   # the same answer pasted twice
+            return {"tasks": list(tasks), "results": []}
+        taken = sorted(set(tasks) & {*idea["tasks"], *(r["subtask_id"] for r in idea["results"])})
+        if taken:
+            raise ValueError(f"{', '.join(taken)} 번호가 이미 있다. 쪼개기 프롬프트를 다시 복사해 자료봉에 준다")
+        self.set_plan(idea_id, f"{idea['plan']}\n\n{text.strip()}".strip())
+        return {"tasks": list(tasks), "results": []}
 
     def add_slots(self, idea_id: str, raws: list[str]) -> list[dict[str, Any]]:
         """Save pasted slots (one paste each). Blocks whose task is certain from their own ID labels are
@@ -842,7 +829,7 @@ class IdeaStore:
         with self.db() as db:
             for f in db.execute("SELECT file FROM materials WHERE idea_id = ? AND file != ''", (idea_id,)).fetchall():
                 Path(f["file"]).unlink(missing_ok=True)
-            for table, column in (("results", "idea_id"), ("pastes", "idea_id"), ("plans", "idea_id"), ("rounds", "idea_id"), ("round_answers", "idea_id"), ("materials", "idea_id"), ("ideas", "id")):
+            for table, column in (("results", "idea_id"), ("pastes", "idea_id"), ("plans", "idea_id"), ("rounds", "idea_id"), ("round_answers", "idea_id"), ("extras", "idea_id"), ("extra_jobs", "idea_id"), ("materials", "idea_id"), ("ideas", "id")):
                 db.execute(f"DELETE FROM {table} WHERE {column} = ?", (idea_id,))
         (self.briefs / f"{idea_id}.md").unlink(missing_ok=True)
         (self.raws / f"{idea_id}.md").unlink(missing_ok=True)
@@ -1029,6 +1016,12 @@ class FollowupRequest(BaseModel):
     request: str = Field(min_length=1, max_length=2000)
 
 
+class DirectRun(BaseModel):
+    text: str = Field(default="", max_length=20_000)
+    worker: str = Field(max_length=20)
+    model: str = Field(pattern=r"^\w[\w./:-]{0,120}$")
+
+
 class AssignRequest(BaseModel):
     subtask_id: str = Field(max_length=8)
 
@@ -1095,6 +1088,12 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
             placed = []
         return {"added": placed, "skipped": skipped}
 
+    @router.get("/direct-models")
+    async def direct_models(_: str = Depends(ctx.current_user)) -> list[dict[str, Any]]:
+        """바로 조사의 CLI·모델 고르기."""
+        from all_tomorrow.overseer import direct_research
+        return await asyncio.to_thread(direct_research.models)
+
     @router.get("/{idea_id}")
     async def idea(idea_id: str, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
         runs = [r for r in load_runs(research.folder) if r.get("kind") == "compress"]
@@ -1105,7 +1104,8 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
         return {**found(idea_id), "brief": store.brief(idea_id), "brief_path": str(store.briefs / f"{idea_id}.md"),
                 "compressing": compressing,
                 "raw_path": str(store.raws / f"{idea_id}.md"),
-                "followups": research.followups(idea_id), "rounds": ideas_rounds.view(store, found(idea_id))}
+                "followups": research.followups(idea_id), "rounds": ideas_rounds.view(store, found(idea_id)),
+                "extras": ideas_rounds.extras(store, found(idea_id))}
 
     @router.post("/{idea_id}/rounds")
     async def open_round(idea_id: str, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
@@ -1118,10 +1118,46 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
 
     @router.put("/{idea_id}/asks")
     async def asks(idea_id: str, body: TextBody, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
-        """내 질문: 적는 대로 저장한다. 기다리는 바퀴가 있으면 거기에, 없으면 다음 바퀴 맨 앞에 들어간다."""
+        """추가 조사 칸: 적는 대로 저장한다."""
         found(idea_id)
         ideas_rounds.set_asks(store, idea_id, body.text)
         return {"ok": True}
+
+    @router.post("/{idea_id}/extras")
+    async def open_extra(idea_id: str, body: TextBody, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        """추가 조사 칸의 질문으로 쪼개기 프롬프트를 만든다. 답을 기다리는 쪼개기가 있으면 거기에 질문을 더한다."""
+        found(idea_id)
+        try:
+            return ideas_rounds.open_extra(store, idea_id, body.text)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+
+    @router.post("/{idea_id}/extras/run")
+    async def run_extra(idea_id: str, body: DirectRun, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        """바로 조사: 칸의 질문을 고른 모델이 쪼개고 과제마다 동시에 조사한다."""
+        found(idea_id)
+        try:
+            return ideas_rounds.run_new(store, idea_id, body.text, body.worker, body.model)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+
+    @router.post("/{idea_id}/extras/{n}/run")
+    async def rerun_extra(idea_id: str, n: int, body: DirectRun, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        """이미 있는 추가 조사의 남은 과제(또는 실패한 쪼개기)를 고른 모델로 돌린다."""
+        found(idea_id)
+        try:
+            return ideas_rounds.run_extra(store, idea_id, n, body.worker, body.model)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+
+    @router.post("/{idea_id}/extras/paste")
+    async def extra_paste(idea_id: str, body: PasteRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
+        """추가 조사의 자료봉 답: 쪼개기 답이면 과제에 더하고, 결과면 결과로 넣는다."""
+        found(idea_id)
+        try:
+            return await asyncio.to_thread(store.add_extra, idea_id, body.text)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
 
     @router.put("/{idea_id}/rounds/{n}/answers/{qid}")
     async def round_answer(idea_id: str, n: int, qid: str, body: TextBody, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
@@ -1140,14 +1176,6 @@ def build_router(ctx: ConsoleContext) -> APIRouter:
             return {"materials": await asyncio.to_thread(ideas_rounds.add_results, store, idea_id, n, body.slots)}
         except LookupError as error:
             raise HTTPException(404, "no such round") from error
-        except ValueError as error:
-            raise HTTPException(422, str(error)) from error
-
-    @router.post("/{idea_id}/followup/prompt")
-    async def followup_prompt(idea_id: str, body: FollowupRequest, _: str = Depends(ctx.current_user)) -> dict[str, Any]:
-        """자료봉(GPT)에 붙일 완전한 추가 조사 요청. 아무것도 저장하지 않는다."""
-        try:
-            return {"prompt": ideas_followup.build_prompt(found(idea_id), body.request, "paste")}
         except ValueError as error:
             raise HTTPException(422, str(error)) from error
 

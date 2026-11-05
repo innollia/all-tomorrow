@@ -3,10 +3,13 @@
 다음 바퀴 후보는 종합본의 '빈 곳'(모르는 것), '어긋나는 주장'(충돌), '(추정)' 주장(근거 약함)에서 그대로 뽑고,
 각 후보가 어떻게 답을 얻는지 가른다(route): 웹 조사 / 사용자에게 묻기(본인 신상·본인이 정할 것) / 직접 확인(이 PC에서
 만들고 돌려 봐야 나오는 것). 웹 조사만 자료봉 프롬프트가 되고, 나머지는 화면에서 사용자에게 묻는다. 그 답은
-IdeaStore.grounds로 종합의 '정해진 것' 근거가 된다. 사용자가 적어 둔 '내 질문'(ideas.asks)은 다음 바퀴 맨 앞에 들어가고,
-아직 붙여넣기를 기다리는 바퀴가 있으면 그 바퀴에 바로 보인다. 붙여 넣은 결과는 '바퀴 n 결과' 자유 자료가 되어 평소처럼 Codex가 압축하고, 이전 종합본 + 새 압축본으로
+IdeaStore.grounds로 종합의 '정해진 것' 근거가 된다. 붙여 넣은 결과는 '바퀴 n 결과' 자유 자료가 되어 평소처럼 Codex가 압축하고, 이전 종합본 + 새 압축본으로
 다시 종합한다(IdeaStore.synth_job). 바퀴 기록(물은 것·새로 나온 것·바뀐 결론)은 열 때마다 저장된 것에서 다시 계산한다.
 바퀴 수 상한은 없다.
+
+사용자가 직접 더 알고 싶은 것은 바퀴가 아니라 '추가 조사'(extras)다: 추가 조사 칸(ideas.asks) → 쪼개기 프롬프트 → 자료봉이 과제 S{n}…로
+나눈다 → 사용자가 병렬로 돌린다 → 처음 쪼개기와 같은 과제·결과로 저장되어 압축·종합된다. 사용자가 물은 말은 asked로 종합까지 가서
+'질문별 답'에 물음마다 답이 남는다.
 """
 from __future__ import annotations
 
@@ -15,7 +18,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
-from all_tomorrow.console import jev
+from all_tomorrow.console import ideas_followup, jev
 
 LABEL = "바퀴 {n} 결과"
 LOW_NEW = 3   # 한 바퀴에서 새로 더해진 항목이 이보다 적으면 '더 돌릴 필요 낮음'
@@ -42,7 +45,6 @@ PROMPT = """너는 사업 아이디어 조사 담당이다. 아래 [아이디어
 
 ## 규칙
 - 되묻지 말고 가장 그럴듯한 해석으로 끝까지 조사한다. 이 대화에서 PC나 파일은 볼 수 없고 웹은 볼 수 있다.
-- 종류가 '내 질문'이면 사용자가 직접 짧게 적은 질문이다. "더", "그쪽"처럼 생략된 말은 [아이디어]와 [정해진 것]에서 무엇을 가리키는지 찾아 채운다.
 - [정해진 것]은 사용자가 이미 정했다. 그것을 바꾸라고 권하지 않는다. 찾은 사실이 그것과 부딪치면 그 사실만 '정해진 것과 부딪침'에 적는다.
 - 주장마다 출처 URL과 기준 시점을 붙이고, 확인과 추정을 나눈다. 못 찾으면 못 찾았다고 적는다(시도한 검색어).
 - 찾은 사실만 쓴다. 평가·권고·우선순위는 쓰지 않는다. 인사·맺음말 없이 아래 형식으로만 답한다.
@@ -117,13 +119,6 @@ def route(store: Any, idea: dict[str, Any], found: list[dict[str, str]]) -> list
     return [USER if USER_RE.search(g["topic"]) else picks.get(n) or rule_route(g["topic"]) for n, g in enumerate(found)]
 
 
-def mine(idea: dict[str, Any], start: int, n: int) -> list[dict[str, Any]]:
-    """The user's own questions (one per line of ideas.asks) as web topics with prompts, numbered from Q{start}."""
-    lines = [x.strip(" -*\t") for x in (idea.get("asks") or "").splitlines()]
-    out = [{"kind": MINE, "topic": t, "to": WEB, "qid": f"Q{start + k}"} for k, t in enumerate(x for x in lines if x)]
-    return [{**g, "prompt": prompt(idea, n, g)} for g in out]
-
-
 def prompt(idea: dict[str, Any], n: int, gap: dict[str, str]) -> str:
     decided = section(idea["synth"], "정해진 것") or "없음"
     text = idea["text"].strip()
@@ -184,8 +179,6 @@ def view(store: Any, idea: dict[str, Any]) -> list[dict[str, Any]]:
         # A round with nothing for the web does not wait for a paste.
         state = ("붙여넣기 대기" if any(q["to"] == WEB for q in asked) else "물음만") if not mats else \
             "압축 중" if not done else "통합 중" if not folded and k + 1 == len(rows) else "통합됨"
-        if state == "붙여넣기 대기" and k + 1 == len(rows):   # questions the user writes now join the round still waiting
-            asked += mine(idea, len(asked) + 1, r["n"])
         for q in asked:
             if q["to"] != WEB:
                 q["answer"] = answers.get((r["n"], q["qid"]), "")
@@ -210,23 +203,20 @@ def open_round(store: Any, idea_id: str) -> dict[str, Any]:
         answered = {a["topic"] for a in db.execute("SELECT topic FROM round_answers WHERE idea_id = ? AND answer != ''", (idea_id,))}
     found = [{**g, "to": to} for g, to in zip(found, route(store, idea, found)) if not (to != WEB and g["topic"] in answered)]
     n = (rounds[-1]["n"] if rounds else 0) + 1
-    own = mine(idea, 1, n)
-    if not own and not found:
-        raise ValueError("종합본에 빈 곳·충돌·추정 주장이 없고 적어 둔 내 질문도 없다. 더 물을 것이 없다")
+    if not found:
+        raise ValueError("종합본에 빈 곳·충돌·추정 주장이 없다. 더 물을 것이 없다")
     topics = []
-    for k, g in enumerate([*own, *found], 1):
+    for k, g in enumerate(found, 1):
         g = {**g, "qid": f"Q{k}"}
         topics.append({**g, "prompt": prompt(idea, n, g)} if g["to"] == WEB else g)
     with store.db() as db:
         db.execute("INSERT INTO rounds (idea_id, n, topics, synth_before, created_at) VALUES (?,?,?,?,?)",
                    (idea_id, n, json.dumps(topics, ensure_ascii=False), idea["synth"], datetime.now(UTC).isoformat(timespec="seconds")))
-        if own:
-            db.execute("UPDATE ideas SET asks = '' WHERE id = ?", (idea_id,))
     return {"n": n, "asked": topics}
 
 
 def set_asks(store: Any, idea_id: str, text: str) -> None:
-    """The user's own questions for the next round, as typed (one per line). Saved as they type."""
+    """What the user wants researched next, as typed (one per line). Saved as they type."""
     with store.db() as db:
         if not db.execute("UPDATE ideas SET asks = ? WHERE id = ?", (text, idea_id)).rowcount:
             raise LookupError(idea_id)
@@ -246,36 +236,123 @@ def set_answer(store: Any, idea_id: str, n: int, qid: str, answer: str) -> None:
 
 def add_results(store: Any, idea_id: str, n: int, slots: list[str]) -> list[int]:
     with store.db() as db:
-        if not db.execute("SELECT 1 FROM rounds WHERE idea_id = ? AND n = ?", (idea_id, n)).fetchone():
-            raise LookupError(n)
+        row = db.execute("SELECT topics FROM rounds WHERE idea_id = ? AND n = ?", (idea_id, n)).fetchone()
+    if row is None:
+        raise LookupError(n)
     slots = [s.strip() for s in slots if s.strip()]
     if not slots:
         raise ValueError("붙여넣은 내용이 비어 있다")
-    freeze(store, idea_id, n, slots)
+    topics = {q["qid"]: q["topic"] for q in json.loads(row["topics"])}
     ids = []
     for k, body in enumerate(slots, 1):
         q = re.search(r"바퀴\s*\d+\s*·\s*(Q\d+)", body)
         title = f"바퀴 {n} · {q.group(1) if q else '결과 ' + str(k)}"
+        topic = topics.get(q.group(1), "") if q else ""   # the compression answers this question, the answer rarely repeats it
         ids.append(store.add_material(idea_id, {"kind": "paste", "label": LABEL.format(n=n), "url": "", "title": title,
-                                                "body": body, "note": f"조사 바퀴 {n}"}))
+                                                "body": body, "note": f"조사 바퀴 {n}" + (f" · 물음: {topic[:500]}" if topic else "")}))
     store.write_brief(idea_id)
     return ids
 
 
+def asked(db: Any, idea_id: str) -> list[str]:
+    """Everything the user asked to have researched, with where the answer is, for the synthesis to answer one by one."""
+    out = []
+    for e in db.execute("SELECT * FROM extras WHERE idea_id = ? ORDER BY n", (idea_id,)):
+        out += [f"- {q} [과제 S{e['start']}부터]" for q in json.loads(e["questions"])]
+    for r in db.execute("SELECT n, topics FROM rounds WHERE idea_id = ? ORDER BY n", (idea_id,)).fetchall():
+        for q in json.loads(r["topics"]):
+            mats = db.execute("SELECT id FROM materials WHERE idea_id = ? AND title = ?", (idea_id, f"바퀴 {r['n']} · {q['qid']}")).fetchall()
+            if q["kind"] == MINE and mats:
+                out.append(f"- {q['topic']} [{', '.join('M' + str(m['id']) for m in mats)}]")
+    for m in db.execute("SELECT id, note FROM materials WHERE idea_id = ? AND label = ? ORDER BY id", (idea_id, ideas_followup.LABEL)):
+        out.append(f"- {re.sub(r'^요청 원문: | · 실행 .*$', '', m['note'])} [M{m['id']}]")
+    return out
 
-def freeze(store: Any, idea_id: str, n: int, slots: list[str]) -> None:
-    """Own questions shown live in the waiting round n become part of it once their answer is pasted; the rest keep waiting."""
-    idea = store.get(idea_id)
+
+def task_ids(idea: dict[str, Any]) -> dict[str, str]:
+    """Every task of an idea, from the plan and from results: {S6: title}."""
+    tasks = {sid: t["title"] for sid, t in idea["tasks"].items()}
+    for r in idea["results"]:
+        if r["subtask_id"][1:].isdigit():
+            tasks[r["subtask_id"]] = tasks.get(r["subtask_id"]) or r["subtask_title"]
+    return tasks
+
+
+def _job(job: dict[str, Any]) -> dict[str, Any]:
+    return {"worker": job["worker"], "model": job["model"], "status": job["status"], "error": job["error"],
+            "active": job["status"] in ("WAIT", "RUNNING")}
+
+
+def extras(store: Any, idea: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every 추가 조사 of an idea, oldest first: its questions, its tasks and how far they got."""
     with store.db() as db:
-        row = db.execute("SELECT topics FROM rounds WHERE idea_id = ? AND n = ?", (idea_id, n)).fetchone()
-        latest = db.execute("SELECT MAX(n) FROM rounds WHERE idea_id = ?", (idea_id,)).fetchone()[0]
-        if not idea or not row or latest != n:
-            return
-        topics = json.loads(row["topics"])
-        pasted = {q for s in slots for q in re.findall(r"바퀴\s*\d+\s*·\s*(Q\d+)", s)}
-        live = mine(idea, len(topics) + 1, n)
-        took = [g for g in live if g["qid"] in pasted]
-        if took:
-            db.execute("UPDATE rounds SET topics = ? WHERE idea_id = ? AND n = ?",
-                       (json.dumps(topics + took, ensure_ascii=False), idea_id, n))
-            db.execute("UPDATE ideas SET asks = ? WHERE id = ?", ("\n".join(g["topic"] for g in live if g not in took), idea_id))
+        rows = [dict(e) for e in db.execute("SELECT * FROM extras WHERE idea_id = ? ORDER BY n", (idea["id"],))]
+        jobs = [dict(j) for j in db.execute("SELECT * FROM extra_jobs WHERE idea_id = ? ORDER BY id", (idea["id"],))]
+    known, latest = task_ids(idea), {r["subtask_id"]: r for r in idea["results"] if r["latest"]}
+    out = []
+    for k, e in enumerate(rows):
+        stop = rows[k + 1]["start"] if k + 1 < len(rows) else 100
+        ids = sorted((s for s in known if e["start"] <= int(s[1:]) < stop), key=lambda s: int(s[1:]))
+        got = [latest[s] for s in ids if s in latest]
+        folded = bool(got) and len(got) == len(ids) and all(any(s.startswith(f"R{r['id']}:") for s in idea["synth_keys"]) for r in got)
+        ran = {j["task"]: _job(j) for j in jobs if j["n"] == e["n"]}   # the last run of each task
+        split = ran.get("")
+        state = ("쪼개는 중" if split and split["active"] else "쪼개기 실패" if split and split["status"] == "FAILED" else "쪼개기 답 대기") if not ids \
+            else "조사 중" if any(ran.get(s, {}).get("active") for s in ids) else "결과 대기" if len(got) < len(ids) \
+            else "압축 중" if not all(r["summary"] for r in got) else "통합됨" if folded else "통합 중"
+        after = rows[k + 1]["synth_before"] if k + 1 < len(rows) else (idea["synth"] if folded else "")
+        out.append({"n": e["n"], "start": e["start"], "created_at": e["created_at"], "questions": json.loads(e["questions"]), "prompt": e["prompt"],
+                    "state": state, "split": split, "tasks": [{"id": s, "title": known[s], "done": s in latest, "job": ran.get(s)} for s in ids],
+                    "changed": changes(e["synth_before"], after) if e["synth_before"] and after else []})
+    return out
+
+
+def open_extra(store: Any, idea_id: str, text: str) -> dict[str, Any]:
+    """Turn the questions in the 추가 조사 box into a decomposition prompt. A split still waiting for its answer takes them in."""
+    idea = store.get(idea_id)
+    if idea is None:
+        raise LookupError(idea_id)
+    lines = [q for q in (x.strip(" -*\t") for x in text.splitlines()) if q]
+    done = extras(store, idea)
+    open_one = done[-1] if done and not done[-1]["tasks"] else None
+    if not lines and not open_one:
+        raise ValueError("조사할 질문을 한 줄 적는다")
+    questions = [*(open_one["questions"] if open_one else []), *lines]
+    start = open_one["start"] if open_one else max((int(s[1:]) for s in task_ids(idea)), default=0) + 1
+    n = open_one["n"] if open_one else (done[-1]["n"] if done else 0) + 1
+    prompt = ideas_followup.split_prompt(idea, questions, start)
+    with store.db() as db:
+        db.execute("""INSERT INTO extras (idea_id, n, questions, start, prompt, synth_before, created_at) VALUES (?,?,?,?,?,?,?)
+                      ON CONFLICT(idea_id, n) DO UPDATE SET questions = excluded.questions, prompt = excluded.prompt""",
+                   (idea_id, n, json.dumps(questions, ensure_ascii=False), start, prompt, idea["synth"], datetime.now(UTC).isoformat(timespec="seconds")))
+        db.execute("UPDATE ideas SET asks = '' WHERE id = ?", (idea_id,))
+    return {"n": n, "start": start, "questions": questions, "prompt": prompt}
+
+def run_extra(store: Any, idea_id: str, n: int, worker: str, model: str) -> dict[str, Any]:
+    """Queue what an 추가 조사 still needs for overseer.direct_research: its decomposition, or every task without a result."""
+    from all_tomorrow.overseer.direct_research import WORKERS
+    if worker not in WORKERS:
+        raise ValueError("CLI는 " + ", ".join(WORKERS))
+    idea = store.get(idea_id)
+    extra = next((x for x in extras(store, idea) if x["n"] == n), None)
+    if extra is None:
+        raise ValueError("그런 추가 조사가 없다")
+    if extra["split"] and extra["split"]["active"]:
+        raise ValueError("쪼개는 중이다. 끝나면 과제가 알아서 돈다")
+    tasks = [t["id"] for t in extra["tasks"] if not t["done"] and not (t["job"] and t["job"]["active"])] if extra["tasks"] else [""]
+    if not tasks:
+        raise ValueError("돌릴 과제가 없다")
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    with store.db() as db:
+        for task in tasks:
+            db.execute("INSERT INTO extra_jobs (idea_id, n, task, worker, model, status, created_at) VALUES (?,?,?,?,?,'WAIT',?)",
+                       (idea_id, n, task, worker, model, now))
+    return {"n": n, "tasks": tasks}
+
+
+def run_new(store: Any, idea_id: str, text: str, worker: str, model: str) -> dict[str, Any]:
+    """The 바로 조사 button: the questions in the box become an 추가 조사 and the chosen model starts on it."""
+    last = extras(store, store.get(idea_id))[-1:]
+    if last and last[0]["split"] and last[0]["split"]["active"]:
+        raise ValueError("쪼개는 중이다. 끝난 뒤에 다시 누른다")
+    return run_extra(store, idea_id, open_extra(store, idea_id, text)["n"], worker, model)

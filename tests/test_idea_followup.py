@@ -34,7 +34,7 @@ def test_prompt_has_context_but_only_summaries(tmp_path) -> None:
     store.set_plan(iid, "### S1 · 시장 규모 · 시장\n설명\n### S2 · 경쟁사 가격 · 경쟁\n설명")
     store.add_slots(iid, ["=== 자료봉 결과 ===\n아이디어 ID: " + iid + "\n하위과제 ID: S1\n상태: 완료\n---\n## 결론\n시장은 연 3조원이다\n=== 끝 ==="])
     mid = store.add_material(iid, {"kind": "paste", "label": "붙여넣기", "url": "", "title": "내 조사", "body": RAW, "note": ""})
-    prompt = ideas_followup.build_prompt(store.get(iid), "경쟁사 가격 더", "paste")
+    prompt = ideas_followup.build_prompt(store.get(iid), "경쟁사 가격 더", "codex")
     assert "경쟁사 가격 더" in prompt and "해석한 조사 질문" in prompt and "책을 월 구독으로" in prompt
     assert "시장은 연 3조원" in prompt                       # 이미 답이 나온 것
     assert "S2 경쟁사 가격: 아직 결과 없음" in prompt          # 빈 곳
@@ -49,9 +49,6 @@ def test_prompt_has_context_but_only_summaries(tmp_path) -> None:
 def test_followup_api_and_history(tmp_path) -> None:
     c = login(tmp_path)
     iid = make_idea(c)
-    p = c.post(f"/api/ideas/{iid}/followup/prompt", json={"request": "일본에서도 되나"}).json()["prompt"]
-    assert "일본에서도 되나" in p and "도서 구독 앱" in p
-    assert c.get(f"/api/ideas/{iid}").json()["followups"] == []     # 복사는 아무것도 저장하지 않는다
     t = c.post(f"/api/ideas/{iid}/followups", json={"request": "일본에서도 되나"}).json()
     assert t["idea_id"] == iid and t["run_now_at"] and t["repeat_days"] == 0 and t["ask"] == "일본에서도 되나"
     got = c.get(f"/api/ideas/{iid}").json()["followups"]

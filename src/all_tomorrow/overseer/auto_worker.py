@@ -28,10 +28,10 @@ def short_args(model: str) -> list[str]:
     return ["--model", model, "--effort", "low", "--tools", "", "--mcp-config", '{"mcpServers":{}}', *_CLAUDE_BASE]
 
 
-def research_args(pages_dir: Path, python: str) -> list[str]:
-    """유휴 조사용 인자: 웹 검색과 로그인 페이지 읽기(chrome_pages)만 켠다."""
+def research_args(pages_dir: Path, python: str, model: str = WORK_MODEL) -> list[str]:
+    """조사용 인자: 웹 검색과 로그인 페이지 읽기(chrome_pages)만 켠다."""
     servers = {"mcpServers": {"chrome_pages": {
         "command": python, "args": ["-m", "all_tomorrow.adapters.chrome_pages", "mcp"],
         "env": {"AT_PAGES_DIR": str(pages_dir)}}}}
-    return ["--model", WORK_MODEL, "--effort", "medium", "--tools", "WebSearch,WebFetch,Read,Grep,Glob",
+    return ["--model", model, "--effort", "medium", "--tools", "WebSearch,WebFetch,Read,Grep,Glob",
             "--mcp-config", json.dumps(servers), *_CLAUDE_BASE]

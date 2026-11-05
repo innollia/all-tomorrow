@@ -115,7 +115,11 @@ async def serve(component: str, base: Path):
                 paused = (base / "metacog.paused").exists()
                 if component == "executor":
                     # 유휴 조사(사용자가 콘솔 조사 목록에 정한 주제)는 metacog.paused와 따로 research.paused로 멈춘다.
-                    from all_tomorrow.overseer import idle_research
+                    from all_tomorrow.overseer import direct_research, idle_research
+                    try:   # 바로 조사는 사용자가 누른 일이라 유휴 조사 차례와 상관없이 돈다
+                        await asyncio.to_thread(direct_research.tick, base)
+                    except Exception as error:
+                        log.warning("바로 조사 점검 실패: %s: %s", type(error).__name__, str(error)[:200])
                     try:
                         research = await asyncio.to_thread(idle_research.tick, base, idle)
                         if research in {"started", "finished", "failed"}:

@@ -223,8 +223,9 @@ def dispatch_task(project_id: str, worker: str, task: str) -> dict[str, Any]:
 
 
 def start_run(project_id: str, worker: str, task: str, *, worker_options: dict[str, Any] | None = None,
-              argv_suffix: list[str] | None = None) -> dict[str, Any]:
-    """dispatch_task 본체. 유휴 조사(overseer.idle_research)처럼 워커 설정을 조금 바꿔 띄울 때도 쓴다."""
+              argv_suffix: list[str] | None = None, cwd: Path | None = None) -> dict[str, Any]:
+    """dispatch_task 본체. 유휴 조사(overseer.idle_research)처럼 워커 설정을 조금 바꿔 띄울 때도 쓴다.
+    cwd를 주면 프로젝트 폴더 대신 거기서 돈다(바로 조사의 빈 폴더)."""
     from all_tomorrow.local_workers import ADAPTERS, EXECUTABLES
     if worker not in ADAPTERS:
         raise ValueError(f"worker must be one of {sorted(ADAPTERS)}")
@@ -235,6 +236,9 @@ def start_run(project_id: str, worker: str, task: str, *, worker_options: dict[s
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True)
     raw = _worker_config()
+    workdir = str(cwd) if cwd else project["path"]
+    if workdir not in raw["allowed_roots"]:
+        raw["allowed_roots"].append(workdir)
     if worker_options or argv_suffix:
         entry = raw.setdefault("workers", {}).setdefault(worker, {})
         entry["options"] = {**entry.get("options", {}), **(worker_options or {})}
@@ -244,11 +248,11 @@ def start_run(project_id: str, worker: str, task: str, *, worker_options: dict[s
     (run_dir / "workers.json").write_text(json.dumps(config), encoding="utf-8")
     (run_dir / "task.txt").write_text(task, encoding="utf-8")
     worker_argv = [sys.executable, "-m", "all_tomorrow.local_workers", "--config", str(run_dir / "workers.json"),
-                   "run", worker, "--cwd", project["path"], "--project-id", project_id,
+                   "run", worker, "--cwd", workdir, "--project-id", project_id,
                    "--task-file", str(run_dir / "task.txt")]
     (run_dir / "argv.json").write_text(json.dumps(worker_argv), encoding="utf-8")
     pid, spawn = _spawn_detached(run_dir)
-    meta = {"run_id": run_id, "project_id": project_id, "worker": worker, "cwd": project["path"],
+    meta = {"run_id": run_id, "project_id": project_id, "worker": worker, "cwd": workdir,
             "task_preview": task[:200], "started_at": _now(), "pid": pid, "spawn": spawn}
     (run_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     return {**meta, "status": "RUNNING"}

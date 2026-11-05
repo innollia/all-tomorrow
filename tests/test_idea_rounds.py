@@ -91,40 +91,30 @@ ROBLOX = """## 정해진 것
 """
 
 
-def test_round_asks_only_the_web_what_the_web_can_answer_and_takes_my_questions(tmp_path, monkeypatch) -> None:
+def test_round_asks_only_the_web_what_the_web_can_answer(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("ALL_TOMORROW_OVERSEER_DIR", str(tmp_path / "ov"))
     store = IdeaStore(tmp_path / "ideas")
     iid = store.create("로블록스", "로블록스 AI NPC 생존 게임")
     store.add_material(iid, {"kind": "paste", "label": "붙여넣기", "url": "", "title": "첫 자료", "body": "자료", "note": ""})
     store.set_synthesis(iid, ROBLOX, store.synth_job(iid)["sigs"])
-    ideas_rounds.set_asks(store, iid, "한국 로블록스 유저 연령대\n\n- 비슷한 AI NPC 게임 매출\n")
 
     r = ideas_rounds.open_round(store, iid)
     got = [(q["qid"], q["kind"], q["to"], "prompt" in q) for q in r["asked"]]
-    assert got == [("Q1", "내 질문", "web", True), ("Q2", "내 질문", "web", True),
-                   ("Q3", "모름", "local", False), ("Q4", "모름", "user", False), ("Q5", "모름", "web", True),
-                   ("Q6", "충돌", "web", True), ("Q7", "근거 약함", "web", True)]
-    assert "한국 로블록스 유저 연령대" in r["asked"][0]["prompt"] and "'내 질문'이면" in r["asked"][0]["prompt"]
+    assert got == [("Q1", "모름", "local", False), ("Q2", "모름", "user", False), ("Q3", "모름", "web", True),
+                   ("Q4", "충돌", "web", True), ("Q5", "근거 약함", "web", True)]
     assert not any("나이" in q.get("prompt", "").split("[정해진 것]")[0] for q in r["asked"])
-    assert store.get(iid)["asks"] == ""   # taken into the round
-
-    # A question written while the round waits for its paste shows up in that round at once, with a prompt.
-    ideas_rounds.set_asks(store, iid, "일본 시장도")
-    [rnd] = ideas_rounds.view(store, store.get(iid))
-    assert rnd["asked"][-1]["qid"] == "Q8" and rnd["asked"][-1]["kind"] == "내 질문" and "바퀴 1 · Q8" in rnd["asked"][-1]["prompt"]
-    ideas_rounds.add_results(store, iid, 1, ["바퀴 1 · Q8 · 내 질문\n## 한 줄 결론\n일본 로블록스 이용자 많다"])
-    assert store.get(iid)["asks"] == ""
-    assert [q["qid"] for q in ideas_rounds.view(store, store.get(iid))[0]["asked"]][-1] == "Q8"
+    ideas_rounds.add_results(store, iid, 1, ["바퀴 1 · Q3 · 모름\n## 한 줄 결론\n한국 이용자 수 공개됨"])
+    assert "물음: 한국어권 반야생" in store.get(iid)["materials"][0]["note"]   # the compression knows what was asked
 
     # The user's answer to what was put to them becomes something decided for the next synthesis.
     sig = store.grounds(store.get(iid))["sig"]
-    ideas_rounds.set_answer(store, iid, 1, "Q4", "한국 개인, 대상은 13세 이상 한국")
+    ideas_rounds.set_answer(store, iid, 1, "Q2", "한국 개인, 대상은 13세 이상 한국")
     try:
-        ideas_rounds.set_answer(store, iid, 1, "Q5", "웹 질문에는 답 칸이 없다")
+        ideas_rounds.set_answer(store, iid, 1, "Q3", "웹 질문에는 답 칸이 없다")
         raise AssertionError("answered a web question")
     except LookupError:
         pass
-    assert ideas_rounds.view(store, store.get(iid))[0]["asked"][3]["answer"] == "한국 개인, 대상은 13세 이상 한국"
+    assert ideas_rounds.view(store, store.get(iid))[0]["asked"][1]["answer"] == "한국 개인, 대상은 13세 이상 한국"
     g = store.grounds(store.get(iid))
     assert g["sig"] != sig and "13세 이상" in g["answers"]
     store.set_summary(store.get(iid)["materials"][0]["id"], "## 새로 더해진 것\n- 일본 이용자 많다")
@@ -156,3 +146,103 @@ def test_route_uses_jev_but_never_sends_the_founder_to_the_web(tmp_path, monkeyp
         raise ideas_rounds.jev.JevError("down")
     monkeypatch.setattr(ideas_rounds.jev, "ask", down)
     assert ideas_rounds.route(store, {"title": "t", "text": "x"}, found) == ["user", "web", "web", "web"]
+
+
+SPLIT_ANSWER = """1. 질문 풀기: 갈래 둘.
+| ID | 제목 | 분류 |
+| S3 | 복제 게임 수익 | 독립 |
+| S4 | 최신 유행 | 독립 |
+
+### S3 · 복제 게임 수익 · 독립
+```
+idea_brief ...
+=== 자료봉 결과 ===
+상태: 완료 | 불완전 | 실패
+=== 끝 ===
+```
+
+### S4 · 최신 유행 · 독립
+```
+idea_brief ...
+```
+"""
+
+
+def block(iid, sid, title, body):
+    return f"=== 자료봉 결과 ===\n아이디어 ID: {iid}\n하위과제 ID: {sid}\n하위과제: {title}\n상태: 완료\n---\n## 결론\n{body}\n=== 끝 ==="
+
+
+def test_extra_research_splits_into_tasks_and_every_question_reaches_the_synthesis(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ALL_TOMORROW_OVERSEER_DIR", str(tmp_path / "ov"))
+    store = IdeaStore(tmp_path / "ideas")
+    iid = store.create("로블록스", "로블록스 AI NPC 생존 게임")
+    store.set_plan(iid, "### S1 · 시장 · 독립\n설명\n### S2 · 기술 · 독립\n설명")
+    store.add_results(iid, block(iid, "S1", "시장", "시장 큼"))
+    store.add_results(iid, block(iid, "S2", "기술", "됨"))
+    for r in store.get(iid)["results"]:
+        store.set_summary(f"R{r['id']}", "## 새로 더해진 것\n- 사실")
+    store.set_synthesis(iid, ROBLOX, store.synth_job(iid)["sigs"])
+
+    ideas_rounds.set_asks(store, iid, "마크 복제 맵 수익화 되나\n- 최신 유행은\n\n")
+    try:
+        ideas_rounds.open_extra(store, iid, "  \n")
+        raise AssertionError("nothing to split")
+    except ValueError:
+        pass
+    x = ideas_rounds.open_extra(store, iid, "마크 복제 맵 수익화 되나\n- 최신 유행은\n\n")
+    assert x["n"] == 1 and x["start"] == 3 and x["questions"] == ["마크 복제 맵 수익화 되나", "최신 유행은"]
+    assert "S3부터" in x["prompt"] and f"`{iid}`" in x["prompt"] and "- 마크 복제 맵 수익화 되나" in x["prompt"]
+    assert "=== 자료봉 결과 ===" in x["prompt"] and "completion_rule" in x["prompt"] and "정해짐: 로블록스로 만든다" in x["prompt"]
+    assert store.get(iid)["asks"] == "" and ideas_rounds.extras(store, store.get(iid))[0]["state"] == "쪼개기 답 대기"
+
+    # Another question before the answer came joins the same split, same numbers.
+    x = ideas_rounds.open_extra(store, iid, "일본도")
+    assert x["n"] == 1 and x["start"] == 3 and len(x["questions"]) == 3
+
+    # One box takes both kinds of answer. The decomposition quotes the empty result template and is still a decomposition.
+    assert store.add_extra(iid, SPLIT_ANSWER) == {"tasks": ["S3", "S4"], "results": []}
+    assert store.add_extra(iid, SPLIT_ANSWER)["tasks"] == ["S3", "S4"]    # pasted twice: no harm
+    idea = store.get(iid)
+    assert set(idea["tasks"]) == {"S1", "S2", "S3", "S4"} and idea["plan"].count("### S3") == 1
+    [e] = ideas_rounds.extras(store, idea)
+    assert e["state"] == "결과 대기" and [t["id"] for t in e["tasks"]] == ["S3", "S4"]
+    try:   # 자료봉 renumbered from S1: refused rather than overwriting the old tasks
+        store.add_extra(iid, "### S1 · 다른 것 · 독립\n설명")
+        raise AssertionError("task number reused")
+    except ValueError as error:
+        assert "S1" in str(error)
+
+    assert store.add_extra(iid, block(iid, "S3", "복제 게임 수익", "수익 있음. " * 80) + "\n" + block(iid, "S4", "최신 유행", "시뮬레이터. " * 80))["results"] == ["S3", "S4"]
+    idea = store.get(iid)
+    assert ideas_rounds.extras(store, idea)[0]["state"] == "압축 중"
+    for r in idea["results"][:2]:
+        store.set_summary(f"R{r['id']}", "## 새로 더해진 것\n- " + r["subtask_title"])
+    job = store.synth_job(iid)
+    assert job["previous"] and len(job["new"]) == 2 and "과제 S3 복제 게임 수익" in job["new"][-1]["label"] + job["new"][0]["label"]
+    prompt = ideas_followup.synth_prompt(store.get(iid), job)
+    assert "S4 최신 유행" in prompt and "- 마크 복제 맵 수익화 되나 [과제 S3부터]" in prompt and "물음마다 답한다" in prompt
+    assert ideas_rounds.extras(store, store.get(iid))[0]["state"] == "통합 중"
+    store.set_synthesis(iid, ROBLOX + "- 추가\n", job["sigs"])
+    assert ideas_rounds.extras(store, store.get(iid))[0]["state"] == "통합됨"
+    assert ideas_rounds.open_extra(store, iid, "또 하나")["start"] == 5
+
+    store.delete_idea(iid)
+    with store.db() as db:
+        assert not db.execute("SELECT 1 FROM extras").fetchone()
+
+
+def test_every_past_question_is_listed_for_the_synthesis(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ALL_TOMORROW_OVERSEER_DIR", str(tmp_path / "ov"))
+    store = IdeaStore(tmp_path / "ideas")
+    iid = store.create("로블록스", "본문")
+    # A question that went through an old round and one that Codex researched.
+    with store.db() as db:
+        db.execute("INSERT INTO rounds (idea_id, n, topics, synth_before, created_at) VALUES (?,1,?,'','2026-11-04')",
+                   (iid, '[{"qid": "Q26", "kind": "내 질문", "topic": "마크 복제 맵은 뭐하는 놈들", "to": "web"}, {"qid": "Q1", "kind": "모름", "topic": "빈 곳", "to": "web"}]'))
+    m = ideas_rounds.add_results(store, iid, 1, ["바퀴 1 · Q26 · 내 질문\n" + "답. " * 200])[0]
+    c = store.add_material(iid, ideas_followup.material_item("경쟁사 가격 더", "x" * 400, "run1"))
+    assert store.get(iid)["asked"] == [f"- 마크 복제 맵은 뭐하는 놈들 [M{m}]", f"- 경쟁사 가격 더 [M{c}]"]
+    context = ideas_followup.build_context(store.get(iid))
+    assert "사용자가 더 물은 것" in context and "경쟁사 가격 더" in context
+    assert "물음: 마크 복제 맵" in store.item(m)["note"]
+    assert "물음: 마크 복제 맵" in ideas_followup.compress_prompt(store.get(iid), store.item(m))

@@ -6,6 +6,36 @@
   AT.nav.push({ section: "기획", label: "아이디어 조사", href: "#/ideas", order: 39 });
   AT.navAlias = Object.assign(AT.navAlias || {}, { "/idea": "/ideas" });
   let current = null;  // last opened idea, for the copy buttons
+  let cliModels = null;  // 바로 조사의 CLI·모델: 각 CLI에게 물어 오는 데 몇 초 걸려 화면을 그린 뒤 채운다
+  const pick = {
+    get() { try { return JSON.parse(localStorage.getItem("at-ideas-direct") || "{}"); } catch { return {}; } },
+    set(v) { try { localStorage.setItem("at-ideas-direct", JSON.stringify(v)); } catch {} },
+  };
+  async function fillModels(worker) {
+    const w = $("#idea-worker"), m = $("#idea-model"); if (!w || !m) return;
+    try { cliModels = cliModels || await api("/api/ideas/direct-models"); } catch (err) { toast("모델 목록 실패: " + err.message); return; }
+    const saved = pick.get(), name = worker || saved.worker || cliModels[0].id;
+    w.innerHTML = cliModels.map(c => `<option value="${esc(c.id)}"${c.id === name ? " selected" : ""}>${esc(c.name)}</option>`).join("");
+    const models = (cliModels.find(c => c.id === name) || cliModels[0]).models;
+    m.innerHTML = models.map(x => `<option value="${esc(x.id)}"${x.id === saved.model ? " selected" : ""}>${esc(x.name)}</option>`).join("") || '<option value="">모델 없음</option>';
+    pick.set({ worker: w.value, model: m.value });
+  }
+  let watching = "";
+  async function watchJobs(id) {   // 바로 조사가 도는 동안 화면을 맞춘다. 상태가 바뀔 때만 다시 그린다
+    if (watching === id) return;
+    watching = id;
+    const seen = x => JSON.stringify((x.extras || []).map(e => [e.state, e.tasks.length, e.tasks.filter(t => t.done).length]));
+    let last = current && seen(current);
+    while (location.hash === "#/idea/" + encodeURIComponent(id)) {
+      await new Promise(r => setTimeout(r, 10000));
+      const x = await api(`/api/ideas/${encodeURIComponent(id)}`).catch(() => null);
+      if (!x) continue;
+      if (seen(x) !== last) { last = seen(x); if (document.activeElement && document.activeElement.tagName !== "TEXTAREA") AT.render(); }
+      if (!(x.extras || []).some(e => ["쪼개는 중", "조사 중"].includes(e.state))) break;
+    }
+    watching = "";
+  }
+  const jobName = j => `${j.worker} · ${j.model}`;
   // Unsaved text survives a failed save, a reload or leaving the page (per browser, best effort).
   const draftKey = id => "at-ideas-draft:" + id;
   const draft = {
@@ -15,7 +45,7 @@
   const SLOTS = 7;  // result boxes: 3-5 tasks by default, plus retries and cross-checks
   const slotKey = n => current && current.id + ":paste" + n;
   const DRAFTED = { "intake-text": () => "intake:" + (current && location.hash.startsWith("#/idea/") ? current.id : ""), "idea-title": () => "new-title", "idea-text": () => "new-text",
-    "idea-plan-text": () => current && current.id + ":plan", "fu-text": () => current && current.id + ":fu" };
+    "idea-plan-text": () => current && current.id + ":plan" };
   for (let n = 0; n < SLOTS; n++) DRAFTED["idea-slot-" + n] = () => slotKey(n);
 
   // 자유 자료 넣기: 붙여넣기 칸 하나 + 파일 + 넣기 버튼. 아이디어를 고르지 않으면 서버(Jev)가 맞는 걸 고른다.
@@ -121,15 +151,11 @@
       ${i.synth ? `<pre class="idea-text" style="margin-top:8px">${md(i.synth)}</pre>` : '<div class="small mute" style="margin-top:8px">아직 종합 전. 결과·자료가 압축되면 Codex가 이 아이디어 하나의 짧은 종합본을 만든다.</div>'}
       <div class="row" style="margin-top:10px"><button class="primary" data-icopy="overseer">관제에게 가져가기</button><button data-icopy="brief">정리본 복사</button></div></div>`;
     // 조사 바퀴: 종합본의 빈 곳·충돌·추정 → 웹으로 답할 것만 주제별 자료봉 프롬프트, 나머지는 나에게 묻는 것 → 결과 붙여넣기 → 압축·재종합. 상한 없음.
-    // 내 질문은 적는 대로 저장되어, 기다리는 바퀴가 있으면 거기에, 없으면 다음 바퀴 맨 앞에 들어간다.
     const rounds = i.rounds || [], last = rounds[rounds.length - 1], paused = last && last.state === "붙여넣기 대기";
     const ROUTE = { user: "나에게 묻기", local: "직접 확인" };
     const webQ = r => r.asked.filter(q => q.to === "web"), meQ = r => r.asked.filter(q => q.to !== "web");
-    const asksBox = `<div style="margin-top:8px"><div class="small"><b>내 질문</b> <span class="mute">한 줄에 하나. 적는 대로 저장되고 ${paused ? `바퀴 ${last.n}에 바로 들어간다` : "다음 바퀴 맨 앞에 들어간다"}</span></div>
-      <textarea id="idea-asks" rows="3" placeholder="더 알고 싶은 것. 대충 써도 된다. 예: 경쟁작 가격 더 / 일본에서도 되나" style="font-size:16px;width:100%;margin-top:4px">${esc(i.asks || "")}</textarea></div>`;
     const roundCard = !i.synth ? "" : `<div class="card" style="margin-bottom:16px"><div class="row"><span class="t" style="flex:1">조사 바퀴 ${rounds.length || ""}</span>
       ${!paused ? `<button class="primary" data-iround="open">${last ? "다음 바퀴 준비" : "첫 바퀴 준비"}</button>` : ""}</div>
-      ${asksBox}
       ${rounds.slice().reverse().map(r => `<details class="idea-item"${r === last ? " open" : ""}><summary><span class="row"><b>바퀴 ${r.n}</b>
         <span class="pill${r.state === "통합됨" ? "" : " warn"}">${esc(r.state)}</span>${r.low ? '<span class="pill">더 돌릴 필요 낮음</span>' : ""}
         <span style="flex:1" class="small mute">웹 조사 ${webQ(r).length} · 나에게 묻는 것 ${meQ(r).length} · 붙인 결과 ${r.materials.length} · 새로 나온 것 ${r.new}</span><span class="small mute">${ago(r.created_at)}</span></span></summary>
@@ -140,12 +166,24 @@
         ${webQ(r).length && (r.state === "붙여넣기 대기" || r === last) ? `<form data-iround-paste="${r.n}" style="margin-top:8px"><textarea rows="5" placeholder="자료봉 답을 붙여넣기. 여러 개면 한 칸에 이어 붙여도 되고 '바퀴 ${r.n} · Q…' 줄로 나뉜다" style="font-size:16px;width:100%"></textarea>
           <div class="row" style="margin-top:6px"><button class="primary">바퀴 ${r.n}에 넣기</button></div></form>` : ""}
         ${r.changed.length ? `<details style="margin-top:8px"><summary class="small">바뀐 결론 ${r.changed.length}곳</summary>${r.changed.map(c => `<div class="small" style="margin-top:6px"><b>${esc(c.section)}</b>${c.gone.map(x => `<div class="mute">− ${esc(x)}</div>`).join("")}${c.came.map(x => `<div>+ ${esc(x)}</div>`).join("")}</div>`).join("")}</details>` : ""}
-      </details>`).join("") || '<div class="small mute" style="margin-top:6px">종합본의 빈 곳·충돌·추정 주장과 내 질문으로 다음 자료봉 질문을 만든다. 웹으로 답할 수 없는 것(내 신상·내가 정할 것·직접 돌려 봐야 아는 것)은 나에게 묻는다.</div>'}</div>`;
+      </details>`).join("") || '<div class="small mute" style="margin-top:6px">종합본의 빈 곳·충돌·추정 주장으로 다음 자료봉 질문을 만든다. 웹으로 답할 수 없는 것(내 신상·내가 정할 것·직접 돌려 봐야 아는 것)은 나에게 묻는다.</div>'}</div>`;
+    // 추가 조사: 칸에 적은 질문 → 쪼개기 프롬프트 → 자료봉 → 답(쪼개기든 결과든)을 붙이면 바로 들어간다. 저장 단추 없음.
+    const extras = i.extras || [], lastEx = extras[extras.length - 1];
+    const exLines = extras.slice().reverse().map(x => `<details class="idea-item"${x === lastEx ? " open" : ""}><summary><span class="row"><b>추가 ${x.n}</b>
+        <span class="pill${x.state === "통합됨" ? "" : " warn"}">${esc(x.state)}</span>
+        <span style="flex:1" class="small mute">S${x.start}부터 · 과제 ${x.tasks.length} · 결과 ${x.tasks.filter(t => t.done).length}</span><span class="small mute">${ago(x.created_at)}</span></span></summary>
+        ${x.questions.map(q => `<div class="small" style="margin-top:6px">${esc(q)}</div>`).join("")}
+        ${x.split ? `<div class="small mute" style="margin-top:6px">쪼개기 · ${esc(jobName(x.split))}${x.split.error ? ` · 실패: ${esc(x.split.error)}` : ""}</div>` : ""}
+        ${x.tasks.map(t => { const j = t.job, busy = j && j.active; return `<div class="small" style="margin-top:6px"><b>${esc(t.id)}</b> ${esc(t.title)}${t.done ? "" : ` <span class="pill warn">${busy ? "조사 중" : j && j.status === "FAILED" ? "실패" : "결과 대기"}</span>`}${j ? ` <span class="mute">${esc(jobName(j))}</span>` : ""}${!t.done && j && j.error ? `<div class="mute">${esc(j.error)}</div>` : ""}</div>`; }).join("")}
+        <div class="row" style="margin-top:8px">${x.state === "쪼개는 중" || !(x.tasks.some(t => !t.done && !(t.job && t.job.active)) || !x.tasks.length) ? "" : `<button class="primary" data-iexrun="${x.n}">${x.tasks.length ? "남은 과제" : "쪼개기"} 고른 모델로 돌리기</button>`}<button data-iexcopy="${x.n}">쪼개기 프롬프트 복사</button></div>
+        ${x.changed.length ? `<details style="margin-top:8px"><summary class="small">바뀐 결론 ${x.changed.length}곳</summary>${x.changed.map(c => `<div class="small" style="margin-top:6px"><b>${esc(c.section)}</b>${c.gone.map(y => `<div class="mute">− ${esc(y)}</div>`).join("")}${c.came.map(y => `<div>+ ${esc(y)}</div>`).join("")}</div>`).join("")}</details>` : ""}
+      </details>`);
     // 막 만든 아이디어: 할 일은 자료봉에 프롬프트를 주는 것뿐이라 그 버튼을 맨 위에 둔다.
     const fresh = !i.plan && !i.results.length;
     const promptCard = fresh ? `<div class="card" style="margin-bottom:16px"><div class="t">자료봉에게 줄 프롬프트</div>
       <div class="small mute" style="margin-top:6px">복사해서 자료봉에 붙인다. 자료봉 답은 아래 「자료봉 흐름」의 과제 쪼개기 답 칸에 붙인다.</div>
       <div class="row" style="margin-top:10px"><button class="primary" data-icopy="prompt" style="min-height:44px">전체 프롬프트 복사 (${i.prompt.length.toLocaleString()}자)</button></div></div>` : "";
+    setTimeout(() => { fillModels(); if (extras.some(x => ["쪼개는 중", "조사 중"].includes(x.state))) watchJobs(i.id); });
     return `<h1>${esc(i.title)}</h1>
       <div class="sub">${ago(i.created_at)} 생성 · 자료 ${i.materials.length} · 결과 ${i.results.length}</div>
       ${i.candidate ? `<div class="card row" style="margin-bottom:12px"><span class="small" style="flex:1">새 아이디어 후보. 맞으면 확정하고, 아니면 맨 아래에서 삭제한다.</span><button data-iadopt="1">아이디어로 확정</button></div>` : ""}
@@ -154,9 +192,11 @@
       ${intakeForm([], i.id)}
       <div class="card">
         <div class="t">추가 조사</div>
-        <textarea id="fu-text" rows="6" placeholder="대충 써도 된다. 예: 경쟁사 가격 더 / 일본에서도 되나 / B안 쪽으로" style="font-size:16px;margin-top:8px;width:100%">${esc(draft.get(i.id + ":fu"))}</textarea>
-        <div class="row" style="margin-top:8px"><button class="primary" data-fu="run">Codex로 돌리기</button><button data-fu="copy">자료봉용 복사</button></div>
-        <div id="fu-out" class="small" style="margin-top:8px"></div>
+        <textarea id="idea-asks" rows="6" placeholder="더 알고 싶은 것. 한 줄에 하나, 대충 써도 된다. 예: 경쟁사 가격 더 / 일본에서도 되나 / B안 쪽으로" style="font-size:16px;margin-top:8px;width:100%">${esc(i.asks || "")}</textarea>
+        <div class="row" style="margin-top:8px"><select id="idea-worker" aria-label="조사할 CLI" style="min-height:44px;font-size:16px"></select><select id="idea-model" aria-label="조사할 모델" style="flex:1;min-width:160px;min-height:44px;font-size:16px"></select><button class="primary" data-fu="run" style="min-height:44px">바로 조사</button></div>
+        <div class="small mute" style="margin-top:6px">고른 모델이 질문을 쪼개고 과제마다 동시에 조사한다. 결과는 알아서 들어간다.</div>
+        <div class="row" style="margin-top:8px"><button data-fu="split">쪼개기 프롬프트 복사</button><span class="small mute">자료봉으로 손수 돌릴 때</span></div>
+        ${extras.length ? `<textarea id="idea-extra-paste" rows="4" placeholder="자료봉을 손수 돌렸으면 답을 여기에 붙인다. 쪼개기 답이든 결과든 붙이는 즉시 알아서 들어간다" style="font-size:16px;margin-top:8px;width:100%"></textarea>${list(exLines)}` : ""}
         ${fuLines.length ? `<details style="margin-top:8px"><summary>조사 이력 ${fuLines.length}</summary>${list(fuLines)}</details>` : ""}</div>
       </div>
       <h2>자료 (${i.materials.length})</h2>${list(mats)}
@@ -199,7 +239,8 @@
     try { await navigator.clipboard.writeText(text); }
     catch {  // http without a secure context: fall back to a hidden textarea
       const t = document.createElement("textarea"); t.value = text; document.body.appendChild(t); t.select();
-      document.execCommand("copy"); t.remove();
+      const ok = document.execCommand("copy"); t.remove();
+      if (!ok) { toast("복사가 막혔다. 아래 '쪼개기 프롬프트 복사'를 다시 누른다"); return; }
     }
     toast("복사함 (" + text.length + "자)");
   }
@@ -210,23 +251,25 @@
     if (d.icompress) { e.preventDefault(); compressNow(b, base, d.icompress); return; }   // 줄(details)을 펼치지 않는다
     try {
       if (d.fu) {
-        const request = $("#fu-text").value.trim(); if (!request) { toast("요청을 한 줄 적는다"); return; }
+        const text = $("#idea-asks").value.trim();
+        clearTimeout(saving.asks);   // 아래 요청이 칸을 비운다. 밀린 자동 저장이 되살리지 않게
         b.disabled = true;
         try {
           if (d.fu === "run") {
-            await api(`${base}/followups`, { request }); draft.set(current.id + ":fu", ""); toast("조사 목록에 넣음. 곧 시작"); AT.render();
-          } else {
-            const r = await api(`${base}/followup/prompt`, { request });
-            try { await navigator.clipboard.writeText(r.prompt); toast("복사함 (" + r.prompt.length + "자). 자료봉에 붙인다"); }
-            catch {   // 복사 권한이 없는 브라우저: 글을 보여 주고 직접 복사하게 한다
-              $("#fu-out").innerHTML = '<div class="mute">자동 복사가 막혀 있다. 아래 글을 전체 선택해 복사한다.</div><textarea id="fu-prompt" rows="8" readonly style="font-size:16px;width:100%"></textarea>';
-              const t = $("#fu-prompt"); t.value = r.prompt; t.focus(); t.select();
-            }
-          }
+            const model = $("#idea-model").value; if (!model) { toast("모델을 고른다"); return; }
+            await api(`${base}/extras/run`, { text, worker: $("#idea-worker").value, model }); toast("1분 안에 시작한다"); watchJobs(current.id);
+          } else await copy((await api(`${base}/extras`, { text })).prompt);
+          AT.render();
         } finally { b.disabled = false; }
       } else if (d.iround) {
         b.disabled = true;
         try { const r = await api(`${base}/rounds`, {}); toast(`바퀴 ${r.n}: 질문 ${r.asked.length}개`); AT.render(); } finally { b.disabled = false; }
+      } else if (d.iexrun) {
+        const model = $("#idea-model").value; if (!model) { toast("모델을 고른다"); return; }
+        b.disabled = true;
+        try { await api(`${base}/extras/${d.iexrun}/run`, { worker: $("#idea-worker").value, model }); toast("1분 안에 시작한다"); watchJobs(current.id); AT.render(); } finally { b.disabled = false; }
+      } else if (d.iexcopy) {
+        const x = (current.extras || []).find(y => String(y.n) === d.iexcopy); if (x) copy(x.prompt);
       } else if (d.iqcopy) {
         const [n, qid] = d.iqcopy.split(":"), r = (current.rounds || []).find(x => String(x.n) === n);
         const q = r && r.asked.find(x => x.qid === qid); if (q) copy(q.prompt);
@@ -265,13 +308,15 @@
       } catch (err) { toast("실패: " + err.message); }
       return;
     }
+    if (e.target.id === "idea-worker") { pick.set({ worker: e.target.value }); fillModels(e.target.value); return; }
+    if (e.target.id === "idea-model") { pick.set({ worker: $("#idea-worker").value, model: e.target.value }); return; }
     const sel = e.target.closest("select[data-iassign]"); if (!sel || !current || !sel.value) return;
     try {
       await api(`/api/ideas/${encodeURIComponent(current.id)}/results/${sel.dataset.iassign}/subtask`, { subtask_id: sel.value }, "PUT");
       toast("과제 " + sel.value + "로 정함"); AT.render();
     } catch (err) { toast("실패: " + err.message); }
   });
-  // 내 질문·나에게 묻는 것의 답: 저장 단추 없이 적는 대로 저장한다(잠깐 멈추면).
+  // 추가 조사 칸·나에게 묻는 것의 답: 저장 단추 없이 적는 대로 저장한다(잠깐 멈추면).
   const saving = {};
   const autosave = (key, path, text) => {
     clearTimeout(saving[key]);
@@ -285,10 +330,17 @@
     const ans = e.target.dataset.ianswer;
     if (ans) { const [n, qid] = ans.split(":"); autosave(ans, `${base}/rounds/${n}/answers/${qid}`, e.target.value); }
   });
-  view.addEventListener("focusout", e => {   // 기다리는 바퀴에 들어간 내 질문의 프롬프트를 보이게 다시 그린다
-    if (e.target.id !== "idea-asks" || !current) return;
-    const r = current.rounds || [], last = r[r.length - 1];
-    if (last && last.state === "붙여넣기 대기" && e.target.value !== (current.asks || "")) setTimeout(() => AT.render(), 900);
+  view.addEventListener("paste", e => {   // 자료봉 답은 붙이는 순간 들어간다. 쪼개기 답인지 결과인지는 서버가 가른다
+    if (e.target.id !== "idea-extra-paste" || !current) return;
+    const box = e.target;
+    setTimeout(async () => {
+      const text = box.value.trim(); if (!text) return;
+      try {
+        const r = await api(`/api/ideas/${encodeURIComponent(current.id)}/extras/paste`, { text });
+        toast(r.tasks.length ? `과제 ${r.tasks.join(", ")} 추가. 새 세션마다 돌리고 결과를 여기에 붙인다` : `결과 ${r.results.join(", ")} 넣음. 압축 뒤 종합에 들어간다`);
+        AT.render();
+      } catch (err) { toast("실패: " + err.message); }
+    });
   });
   view.addEventListener("submit", async e => {
     if (e.target.dataset.iroundPaste && current) {

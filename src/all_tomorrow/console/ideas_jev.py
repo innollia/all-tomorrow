@@ -35,6 +35,17 @@ def plan_tasks(plan: str) -> dict[str, dict[str, str]]:
     return dict(sorted(tasks.items(), key=lambda kv: int(kv[0][1:])))
 
 
+def task_prompt(plan: str, task: str) -> str:
+    """The self-contained sub-prompt of one task, whole: the outer code block of its section (the prompt quotes a block of its own)."""
+    heads = list(HEADING_TASK.finditer(plan))
+    for n, m in enumerate(heads):
+        if m.group(1).upper() == task:
+            section = plan[m.end():heads[n + 1].start() if n + 1 < len(heads) else len(plan)]
+            block = re.search(r"```\w*\n(.*)\n[ \t]*```", section, re.S)
+            return (block.group(1) if block else section).strip()
+    return ""
+
+
 def excerpt(body: str, head: int = 1500, tail: int = 500) -> str:
     body = body.strip()
     return body if len(body) <= head + tail else body[:head] + "\n…\n" + body[-tail:]
