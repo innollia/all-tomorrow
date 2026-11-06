@@ -102,3 +102,26 @@ select{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(
 .idea-h{font-size:15px}
 .pill-btn{min-height:32px;padding:4px 10px;font-size:12px;background:transparent}.pill-btn:hover{background:rgba(255,200,0,.08)}
 .memory-table{max-width:100%;overflow-x:auto;border:1px solid var(--line);border-radius:8px;margin:8px 0 4px}.memory-table table{min-width:640px}.memory-table td{vertical-align:top}.memory-table td.mono,.memory-table th{white-space:nowrap}.memory .bar{max-width:120px}.memory-note{margin-top:16px}
+/* Study: a month grid that keeps the day's theme readable; phones keep the date and marks, the theme shows below. */
+.study-month{gap:12px;margin-bottom:10px}.study-month .pill{min-height:32px;display:inline-flex;align-items:center;padding:1px 12px}
+.study-cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.study-head{color:var(--mute);font-size:12px;text-align:center;padding:2px 0}
+.study-cell{display:flex;flex-direction:column;gap:4px;min-height:104px;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);min-width:0}
+.study-cell .row{justify-content:space-between;flex-wrap:nowrap}
+.study-cell.blank{border:0;background:none}.study-cell.off{background:none;border-style:dashed}
+.study-cell.rest,.study-cell.buffer{background:none}
+a.study-cell:hover{border-color:var(--mute)}.study-cell.now{border-color:var(--accent)}.study-cell.on{outline:2px solid var(--accent);outline-offset:1px}
+.study-theme{font-size:12px;line-height:1.35;flex:1;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+.study-sts{display:flex;gap:6px}
+.study-st{font-size:12px;white-space:nowrap;color:var(--mute)}.study-st.done{color:var(--ok)}.study-st.min,.study-st.today{color:var(--warn)}.study-st.missed{color:var(--bad)}
+.study-legend{margin:8px 0 16px}
+.study-day dl{display:grid;grid-template-columns:72px 1fr;gap:8px 12px;margin:12px 0 0}.study-day dt{color:var(--mute);font-size:12px;padding-top:2px}.study-day dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.study-links{margin:0;padding-left:18px}.study-links li{margin-bottom:6px}.study-links a{text-decoration:underline}
+.study-who{display:grid;gap:8px}
+.study-table tr.now td{background:var(--panel)}.study-table td a:hover{text-decoration:underline}.study-table td.mono{white-space:nowrap}
+@media (max-width:767px){
+  .study-cal{gap:2px}.study-cell{min-height:64px;padding:4px}.study-theme{display:none}
+  .study-cell .row .mute{font-size:11px}.study-sts{flex-direction:column;gap:0;margin-top:auto}
+  .study-day dl{grid-template-columns:1fr;gap:2px}.study-day dd{margin-bottom:8px}
+  .study-opt{display:none}.study-table th,.study-table td{padding:6px}
+}
