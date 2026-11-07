@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import subprocess
 import threading
@@ -28,6 +29,7 @@ from all_tomorrow.console import ConsoleContext
 KST = timezone(timedelta(hours=9))
 MANUAL = "static/shop/supporters_manual.json"
 PUBLIC = "static/shop/supporters.json"
+CREDIT = re.compile(r"SD-[A-Z0-9]{6}")   # strudel 딸깍이 크레딧 구매 코드(같은 BMC 계정)
 
 
 class Payment(BaseModel):
@@ -77,10 +79,12 @@ class EveBmc:
         return r.json()
 
     def pending(self) -> list[dict[str, Any]]:
+        # strudel 크레딧 구매(메모에 SD-코드)는 후원이 아니라 확인 대기에 띄우지 않는다. 처리는 strudel 쪽 몫이라 ack도 안 한다
         return [{"id": f"eve:{x['id']}", "name": str(x.get("supporter_name") or "")[:40], "amount": x.get("amount"),
                  "currency": str(x.get("currency") or ""), "note": str(x.get("note") or "")[:80], "live": True,
                  "received_at": x.get("received_at") or x.get("supported_at") or ""}
-                for x in self.call("GET", "/internal/edge/bmc/pending").get("supports", [])]
+                for x in self.call("GET", "/internal/edge/bmc/pending").get("supports", [])
+                if not CREDIT.search(str(x.get("note") or ""))]
 
     def ack(self, ids: list[str]) -> None:
         self.call("POST", "/internal/edge/bmc/ack", json={"ids": ids})

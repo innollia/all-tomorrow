@@ -88,7 +88,10 @@ def test_bmc_pending_is_pulled_from_eve_and_acked_on_confirm_or_dismiss(tmp_path
     eve = {"supports": [{"id": "s1", "supporter_name": "콩", "amount": 5, "currency": "USD", "note": "화이팅",
                          "supported_at": "2026-10-29T00:00:00+00:00", "received_at": "2026-10-29T00:00:01+00:00"},
                         {"id": "s2", "supporter_name": "익명", "amount": 3, "currency": "USD", "note": "",
-                         "supported_at": "", "received_at": "2026-10-29T00:01:00+00:00"}]}
+                         "supported_at": "", "received_at": "2026-10-29T00:01:00+00:00"},
+                        # strudel 크레딧 구매: 후원 확인 대기에 안 뜨고 ack도 안 한다
+                        {"id": "s3", "supporter_name": "딸깍", "amount": 5, "currency": "USD", "note": "SD-AB12CD",
+                         "supported_at": "", "received_at": "2026-10-29T00:02:00+00:00"}]}
     acked = []
 
     def handle(req: httpx.Request) -> httpx.Response:
