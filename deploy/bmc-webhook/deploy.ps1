@@ -25,7 +25,9 @@ if (-not $?) {
 aws iam put-role-policy --role-name "$N-role" --policy-name ddb --policy-document "file://$here\ddb.json"
 
 Compress-Archive -Force "$here\lambda_function.py" "$here\fn.zip"
-@{ Variables = @{ TABLE = $N; PULL_TOKEN = $pull; BMC_WEBHOOK_SECRET = $sec } } | ConvertTo-Json -Compress | Set-Content -Encoding ascii "$here\env.json"
+$strudel = aws lambda get-function-url-config --function-name strudel-credits --region $R --query FunctionUrl --output text 2>$null   # SD- 코드 건을 넘길 곳. 없으면 넘기지 않는다
+if (-not $?) { $strudel = "" }
+@{ Variables = @{ TABLE = $N; PULL_TOKEN = $pull; BMC_WEBHOOK_SECRET = $sec; STRUDEL_CREDITS_URL = "$strudel" } } | ConvertTo-Json -Compress | Set-Content -Encoding ascii "$here\env.json"
 aws lambda get-function --function-name $N --region $R --query Configuration.State --output text 2>$null
 if (-not $?) {
   aws lambda create-function --function-name $N --region $R --runtime python3.12 --handler lambda_function.lambda_handler --role $roleArn --zip-file "fileb://$here\fn.zip" --timeout 10 --memory-size 128 --environment "file://$here\env.json" --query State --output text

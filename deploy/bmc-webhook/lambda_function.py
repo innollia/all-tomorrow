@@ -4,17 +4,36 @@
   GET  /internal/edge/bmc/pending 콘솔(Bearer PULL_TOKEN). ack 안 된 후원, 받은 순서.
   POST /internal/edge/bmc/ack     콘솔. {"ids":[...]} → 대기에서 지운다(다시 와도 안전).
 이메일·결제 정보는 저장하지 않는다. 환불 이벤트는 같은 id를 대기에서 지운다.
+strudel 딸깍이 크레딧 구매(메모 등에 SD-XXXXXX 코드)는 원문과 서명 그대로 STRUDEL_CREDITS_URL의 /webhooks/bmc로 넘긴다.
+넘기기가 실패하면 502를 돌려 BMC가 다시 보내게 한다. 대기 저장은 id로 덮어쓰므로 다시 와도 겹치지 않는다.
 """
 import base64
 import hashlib
 import hmac
 import json
 import os
+import re
 import time
+import urllib.error
+import urllib.request
 
 import boto3
 
 TABLE = boto3.resource("dynamodb").Table(os.environ["TABLE"])
+STRUDEL_CODE = re.compile(r"(?<![A-Za-z0-9])SD-[A-Za-z0-9]{6}(?![A-Za-z0-9])", re.IGNORECASE)
+
+
+def forward_to_strudel(body, sig):
+    url = os.environ.get("STRUDEL_CREDITS_URL", "").rstrip("/")
+    if not url:
+        return True
+    req = urllib.request.Request(url + "/webhooks/bmc", data=body, method="POST",
+                                 headers={"content-type": "application/json", "x-signature-sha256": sig})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            return r.status == 200
+    except (urllib.error.URLError, OSError):
+        return False
 
 
 def resp(code, body):
@@ -43,6 +62,8 @@ def webhook(event):
     except ValueError:
         return resp(422, {"error": "bad payload"})
     kind, data = str(ev.get("type", "")), ev.get("data") or {}
+    if STRUDEL_CODE.search(json.dumps(data, ensure_ascii=False)) and not forward_to_strudel(body, sig):
+        return resp(502, {"error": "strudel forward failed"})
     sid = str(data.get("id") or data.get("support_id") or "")
     if not sid:
         return resp(200, {"ok": True, "queued": False})
