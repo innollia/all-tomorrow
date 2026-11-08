@@ -21,7 +21,7 @@ if (-not $?) {
   aws iam attach-role-policy --role-name "$N-role" --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
   Start-Sleep 10
 }
-"{`"Version`":`"2012-10-17`",`"Statement`":[{`"Effect`":`"Allow`",`"Action`":[`"dynamodb:PutItem`",`"dynamodb:DeleteItem`",`"dynamodb:Scan`"],`"Resource`":`"$tableArn`"}]}" | Set-Content -Encoding ascii "$here\ddb.json"
+"{`"Version`":`"2012-10-17`",`"Statement`":[{`"Effect`":`"Allow`",`"Action`":[`"dynamodb:PutItem`",`"dynamodb:GetItem`",`"dynamodb:DeleteItem`",`"dynamodb:Scan`"],`"Resource`":`"$tableArn`"}]}" | Set-Content -Encoding ascii "$here\ddb.json"
 aws iam put-role-policy --role-name "$N-role" --policy-name ddb --policy-document "file://$here\ddb.json"
 
 Compress-Archive -Force "$here\lambda_function.py" "$here\fn.zip"
@@ -30,7 +30,7 @@ if (-not $?) { $strudel = "" }
 @{ Variables = @{ TABLE = $N; PULL_TOKEN = $pull; BMC_WEBHOOK_SECRET = $sec; STRUDEL_CREDITS_URL = "$strudel" } } | ConvertTo-Json -Compress | Set-Content -Encoding ascii "$here\env.json"
 aws lambda get-function --function-name $N --region $R --query Configuration.State --output text 2>$null
 if (-not $?) {
-  aws lambda create-function --function-name $N --region $R --runtime python3.12 --handler lambda_function.lambda_handler --role $roleArn --zip-file "fileb://$here\fn.zip" --timeout 10 --memory-size 128 --environment "file://$here\env.json" --query State --output text
+  aws lambda create-function --function-name $N --region $R --runtime python3.12 --handler lambda_function.lambda_handler --role $roleArn --zip-file "fileb://$here\fn.zip" --timeout 30 --memory-size 128 --environment "file://$here\env.json" --query State --output text
   aws lambda wait function-active --function-name $N --region $R
   aws lambda create-function-url-config --function-name $N --region $R --auth-type NONE --query FunctionUrl --output text
   aws lambda add-permission --function-name $N --region $R --statement-id url --action lambda:InvokeFunctionUrl --principal "*" --function-url-auth-type NONE --output text | Out-Null
@@ -38,9 +38,14 @@ if (-not $?) {
 } else {
   aws lambda update-function-code --function-name $N --region $R --zip-file "fileb://$here\fn.zip" --query LastUpdateStatus --output text
   aws lambda wait function-updated --function-name $N --region $R
-  aws lambda update-function-configuration --function-name $N --region $R --environment "file://$here\env.json" --query LastUpdateStatus --output text
+  aws lambda update-function-configuration --function-name $N --region $R --timeout 30 --environment "file://$here\env.json" --query LastUpdateStatus --output text
   aws lambda wait function-updated --function-name $N --region $R
 }
+# 장부에 못 넘긴 결제(fwd#...)를 10분마다 다시 넘기는 예약 호출
+$fnArn = aws lambda get-function --function-name $N --region $R --query Configuration.FunctionArn --output text
+$ruleArn = aws events put-rule --name "$N-retry" --region $R --schedule-expression "rate(10 minutes)" --query RuleArn --output text
+aws lambda add-permission --function-name $N --region $R --statement-id events-retry --action lambda:InvokeFunction --principal events.amazonaws.com --source-arn $ruleArn --output text 2>$null | Out-Null
+aws events put-targets --rule "$N-retry" --region $R --targets "Id=fn,Arn=$fnArn" --query FailedEntryCount --output text
 Start-Sleep 10   # 설정 갱신 직후 몇 초는 옛 환경 변수로 응답한다(2026-10-29 실측)
 Remove-Item "$here\env.json","$here\fn.zip", "$here\trust.json", "$here\ddb.json" -ErrorAction SilentlyContinue
 $url = aws lambda get-function-url-config --function-name $N --region $R --query FunctionUrl --output text
