@@ -4,7 +4,10 @@
   GET  /internal/edge/bmc/pending 콘솔(Bearer PULL_TOKEN). ack 안 된 후원, 받은 순서.
   POST /internal/edge/bmc/ack     콘솔. {"ids":[...]} → 대기에서 지운다(다시 와도 안전).
 이메일·결제 정보는 저장하지 않는다. 환불 이벤트는 같은 id를 대기에서 지운다.
-strudel 딸깍이 크레딧 구매(메모 등에 SD-XXXXXX 코드)는 원문과 서명 그대로 STRUDEL_CREDITS_URL의 /webhooks/bmc로 넘긴다.
+서명이 맞는 이벤트는 모두 원문과 서명 그대로 STRUDEL_CREDITS_URL(olmuse 크레딧 장부)의 /webhooks/bmc로 넘긴다.
+장부가 결제 코드(단어 코드 brave-otter-lamp, 예전 SD-XXXXXX; 공백·하이픈·대소문자 무시)를 찾으면 "credit": true 로
+답하고, 그런 결제는 크레딧 구매라 후원 대기·명단에 넣지 않는다(코드가 공개 명단에 나가지 않게). 코드가 없는 결제는
+장부가 결제 이메일 HMAC만 남겨 두고(olmuse "결제 찾기"용), 여기서는 평소처럼 후원으로 쌓는다.
 넘기기가 실패하면 502를 돌려 BMC가 다시 보내게 한다. 대기 저장은 id로 덮어쓰므로 다시 와도 겹치지 않는다.
 """
 import base64
@@ -12,7 +15,6 @@ import hashlib
 import hmac
 import json
 import os
-import re
 import time
 import urllib.error
 import urllib.request
@@ -20,20 +22,25 @@ import urllib.request
 import boto3
 
 TABLE = boto3.resource("dynamodb").Table(os.environ["TABLE"])
-STRUDEL_CODE = re.compile(r"(?<![A-Za-z0-9])SD-[A-Za-z0-9]{6}(?![A-Za-z0-9])", re.IGNORECASE)
 
 
 def forward_to_strudel(body, sig):
+    """(넘겼는지, 크레딧 구매인지)."""
     url = os.environ.get("STRUDEL_CREDITS_URL", "").rstrip("/")
     if not url:
-        return True
+        return True, False
     req = urllib.request.Request(url + "/webhooks/bmc", data=body, method="POST",
                                  headers={"content-type": "application/json", "x-signature-sha256": sig})
     try:
         with urllib.request.urlopen(req, timeout=8) as r:
-            return r.status == 200
+            if r.status != 200:
+                return False, False
+            try:
+                return True, bool(json.load(r).get("credit"))
+            except ValueError:
+                return True, False
     except (urllib.error.URLError, OSError):
-        return False
+        return False, False
 
 
 def resp(code, body):
@@ -62,7 +69,8 @@ def webhook(event):
     except ValueError:
         return resp(422, {"error": "bad payload"})
     kind, data = str(ev.get("type", "")), ev.get("data") or {}
-    if STRUDEL_CODE.search(json.dumps(data, ensure_ascii=False)) and not forward_to_strudel(body, sig):
+    sent, credit = forward_to_strudel(body, sig)
+    if not sent:
         return resp(502, {"error": "strudel forward failed"})
     sid = str(data.get("id") or data.get("support_id") or "")
     if not sid:
@@ -72,6 +80,8 @@ def webhook(event):
         return resp(200, {"ok": True, "removed": True})
     if not kind.startswith(("donation.", "coffee.", "support.")):
         return resp(200, {"ok": True, "queued": False})
+    if credit:  # olmuse 크레딧 구매는 후원이 아니다
+        return resp(200, {"ok": True, "queued": False, "credit": True})
     private = str(data.get("support_visibility", "1")) == "0" or bool(data.get("is_private"))
     name = str(data.get("supporter_name") or "").strip()
     TABLE.put_item(Item={
