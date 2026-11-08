@@ -22,7 +22,7 @@ INDEX = "static/shop/index.html"
 DIALOGUE = "static/shop/dialogue.js"
 GOODS = ("game", "web", "bot", "read", "song", "oracle", "research", "xpost", "dm", "ss0feat", "partner")
 FIXED = ("song", "research", "xpost", "dm")
-BLOCK = re.compile(r"window\.STOCK\s*=\s*(\{.*\})\s*;", re.S)
+BLOCK = re.compile(r"^window\.STOCK\s*=\s*(\{.*?\})\s*;\s*$", re.S | re.M)  # 줄 맨 앞만: 주석 속 "window.STOCK = { ... };" 글자는 건너뛴다
 VERSION = re.compile(r"stock\.js\?v=(\d+)")
 
 

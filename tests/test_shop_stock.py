@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from all_tomorrow.web import Auth, create_app
 from tests.test_shop_pay import git, shop_repo
 
-HEAD = "// 주석\n// 상품 id: game web\n"
+HEAD = "// 주석\n// 규칙: 아래 window.STOCK = { ... }; 안의 JSON만 바꾼다.\n// 상품 id: game web\n"  # 실제 stock.js처럼 주석에도 window.STOCK 글자가 있다
 STOCK = {"labor": 13000, "aiHour": 5000, "aiSale": 50, "aiItems": ["game", "web"], "soldOut": [],
          "price": {"song": 2000, "research": 10000, "xpost": 1000, "dm": 5000}}
 
@@ -32,7 +32,7 @@ def test_save_rewrites_stock_bumps_cache_and_commits_only_two_files(tmp_path, mo
     assert r["commit"]
     text = git(repo, "show", "origin/main:static/shop/stock.js")
     assert text.startswith(HEAD)
-    assert json.loads(text.split("window.STOCK = ", 1)[1].rstrip().rstrip(";")) == new
+    assert json.loads(text.split("\nwindow.STOCK = ", 1)[1].rstrip().rstrip(";")) == new
     assert "stock.js?v=4" in git(repo, "show", "origin/main:static/shop/index.html")
     assert sorted(git(repo, "show", "--name-only", "--format=", "HEAD").split()) == ["static/shop/index.html", "static/shop/stock.js"]
     assert "other.txt" in git(repo, "status", "--short")
