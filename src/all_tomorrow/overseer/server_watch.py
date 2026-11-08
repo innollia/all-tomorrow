@@ -122,8 +122,9 @@ def start(service) -> None:
         cwd = Path(spec.path).parent
         if not Path(spec.path).is_file():
             raise FileNotFoundError("프로그램 없음")
-    flags = (getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-             | getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    # DETACHED_PROCESS는 쓰지 않는다: 콘솔 없이 뜬 powershell.exe는 -File 스크립트를 실행하지 않고 바로 0으로 끝난다
+    # (2026-11-08 olmuse run_public.ps1 자동 시작 3번이 모두 이렇게 사라졌다). CREATE_NO_WINDOW는 숨은 콘솔을 준다.
+    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
     common = dict(cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
     try:
         # 예약 작업이 끝나도 같이 죽지 않게 작업 객체에서 떼어 낸다. 허용되지 않으면 그냥 띄운다.
