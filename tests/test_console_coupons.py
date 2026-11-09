@@ -1,51 +1,48 @@
 import json
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from fastapi.testclient import TestClient
 
 from all_tomorrow.web import Auth, create_app
 
-
-def ledger(seen: list) -> HTTPServer:
-    made: set[str] = set()
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_POST(self) -> None:
-            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            seen.append((self.path, self.headers["Authorization"], body))
-            code = body["code"].upper()
-            status, answer = (409, {"error": "exists"}) if code in made else (200, {"code": code})
-            made.add(code)
-            data = json.dumps(answer).encode()
-            self.send_response(status)
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-        def log_message(self, *args) -> None:
-            pass
-    server = HTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server
+# tools/coupon.py와 같은 출력: 성공은 stdout 한 줄, 실패는 "not made: <이유>"로 종료 코드 1
+TOOL = '''import json, pathlib, sys
+code, credits, uses = sys.argv[1].upper(), sys.argv[2], sys.argv[4]
+seen = pathlib.Path("seen.json")
+made = json.loads(seen.read_text()) if seen.exists() else []
+if code in made:
+    sys.exit("not made: exists")
+if len(code) < 6:
+    sys.exit("not made: code needs 6+ letters/digits")
+seen.write_text(json.dumps(made + [code]))
+print(f"coupon {code}: {credits} credits, {uses} use(s), LEDGER ledger")
+'''
 
 
-def test_makes_coupon_on_the_ledger_and_shows_409_for_an_existing_code(tmp_path, monkeypatch) -> None:
-    seen: list = []
-    server = ledger(seen)
-    monkeypatch.setenv("STRUDEL_CREDITS_URL", f"http://127.0.0.1:{server.server_port}")
-    monkeypatch.setenv("STRUDEL_CREDITS_TOKEN", "t" * 20)
+def client(tmp_path, monkeypatch, ledger="remote") -> TestClient:
+    (tmp_path / "olmuse/tools").mkdir(parents=True)
+    (tmp_path / "olmuse/tools/coupon.py").write_text(TOOL.replace("LEDGER", ledger), encoding="utf-8")
+    monkeypatch.setenv("ALL_TOMORROW_OLMUSE_REPO", str(tmp_path / "olmuse"))
     c = TestClient(create_app(auth=Auth("owner", "correct horse", "s" * 32), console_data_dir=str(tmp_path / "console")), base_url="https://testserver")
     c.__enter__()
+    return c
+
+
+def test_runs_the_coupon_tool_and_shows_409_for_an_existing_code(tmp_path, monkeypatch) -> None:
+    c = client(tmp_path, monkeypatch)
     coupon = {"code": "olmuse10k", "credits": 10000, "uses": 1}
     assert c.post("/api/coupons", json=coupon).status_code == 401
     c.post("/api/login", json={"username": "owner", "password": "correct horse"})
     first = c.post("/api/coupons", json=coupon)
-    assert first.status_code == 200 and first.json()["code"] == "OLMUSE10K"
-    again = c.post("/api/coupons", json=coupon)
-    assert again.status_code == 409 and "t" * 20 not in again.text
-    path, auth, body = seen[0]
-    assert path == "/api/coupon_make" and auth == "Bearer " + "t" * 20
-    assert body["credits"] == 10000 and body["uses"] == 1
-    assert c.post("/api/coupons", json={"code": "x", "credits": 0}).status_code == 422
-    server.shutdown()
+    assert first.status_code == 200 and first.json() == {"code": "OLMUSE10K"}
+    assert c.post("/api/coupons", json=coupon).status_code == 409
+    assert c.post("/api/coupons", json={"code": "short", "credits": 5}).status_code == 400
+    assert c.post("/api/coupons", json={"code": "--uses", "credits": 5}).status_code == 422
+    assert c.post("/api/coupons", json={"code": "a b", "credits": 5}).status_code == 422
+    assert json.loads((tmp_path / "olmuse/seen.json").read_text()) == ["OLMUSE10K"]
+
+
+def test_a_coupon_made_on_the_local_ledger_is_not_success(tmp_path, monkeypatch) -> None:
+    c = client(tmp_path, monkeypatch, ledger="local")
+    c.post("/api/login", json={"username": "owner", "password": "correct horse"})
+    r = c.post("/api/coupons", json={"code": "olmuse10k", "credits": 10000})
+    assert r.status_code == 503 and "local" in r.json()["error"]
