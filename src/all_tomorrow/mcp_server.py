@@ -214,7 +214,7 @@ def _spawn_detached(run_dir: Path) -> tuple[int, str]:
 
 @mcp.tool
 def dispatch_task(project_id: str, worker: str, task: str) -> dict[str, Any]:
-    """Start a worker CLI (codex/opencode/kiro/antigravity) on a task inside a project.
+    """Start a worker CLI (codex/opencode/kiro/antigravity/claude/freebuff) on a task inside a project.
 
     Returns immediately with a run_id; poll get_run for the result. Runs keep going
     after this Claude session ends.

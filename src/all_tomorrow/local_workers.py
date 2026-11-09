@@ -16,19 +16,24 @@ from uuid import uuid4
 from all_tomorrow.adapters.workers import (
     AntigravityWorker, ClaudeWorker, CodexWorker, KiroWorker, OpenCodeWorker, _worker_environment,
 )
+from all_tomorrow.adapters.freebuff import FreebuffWorker, default_executable as freebuff_executable
 from all_tomorrow.contracts import Worker, WorkerRequest, WorkerStatus
 from all_tomorrow.registry import WorkerService
 
 
 ADAPTERS = {"antigravity": AntigravityWorker, "opencode": OpenCodeWorker,
-            "codex": CodexWorker, "kiro": KiroWorker, "claude": ClaudeWorker}
-EXECUTABLES = {"antigravity": "agy", "opencode": "opencode", "codex": "codex", "kiro": "kiro-cli", "claude": "claude"}
+            "codex": CodexWorker, "kiro": KiroWorker, "claude": ClaudeWorker,
+            "freebuff": FreebuffWorker}
+EXECUTABLES = {"antigravity": "agy", "opencode": "opencode", "codex": "codex", "kiro": "kiro-cli", "claude": "claude",
+               "freebuff": "freebuff"}
 
 
 def discover_executable(worker_id: str) -> str | None:
     executable = shutil.which(EXECUTABLES[worker_id])
     if executable:
         return executable
+    if worker_id == "freebuff":   # npx freebuff downloads its binary here
+        return freebuff_executable()
     if os.name != "nt" or not os.environ.get("LOCALAPPDATA"):
         return None
     local = Path(os.environ["LOCALAPPDATA"])
