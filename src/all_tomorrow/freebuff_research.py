@@ -66,7 +66,7 @@ def run_one(task: Path, stamp: str) -> dict[str, str]:
     prompt.write_text(task.read_text(encoding="utf-8") + NOTE, encoding="utf-8")
     started = time.time()
     worker, result = "freebuff", call("freebuff", work, prompt, session)
-    if "session has ended" in str(result.get("error")):   # 무료 세션이 끝나면 다시 보내야 새 세션이 열린다
+    if "session has ended" in str(result.get("error")) or "session ended" in str(result.get("error")):   # 무료 세션이 끝나면(응답 도중 포함) 다시 보내야 새 세션이 열린다
         result = call("freebuff", work, prompt, session)
     first_error = "" if result.get("status") == "SUCCESS" else f"freebuff: {result.get('error') or result.get('status')}"[:200]
     if first_error:   # 사용량을 다 썼거나 로그인이 풀렸으면 Antigravity가 잇는다
