@@ -39,6 +39,20 @@ Shell commands are blocked in this run and fail. Do not create or edit files. Te
 List the source URLs you used. Answer in Korean."""
 
 
+# 조사는 값싼 모델로 한다. freebuff는 무료판 모델 하나뿐이고, agy는 기본값(비싼 모델) 대신 Flash Low를 쓴다.
+RESEARCH_MODELS = {"antigravity": {"model": "gemini-3.8-flash-low", "effort": "low"}}
+
+
+def research_config() -> Path:
+    config = json.loads((REPO / "config" / "workers.local.json").read_text(encoding="utf-8"))
+    for worker, options in RESEARCH_MODELS.items():
+        config.setdefault("workers", {}).setdefault(worker, {}).setdefault("options", {}).update(options)
+    path = WORK / "research-workers.json"
+    WORK.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
 def call(worker: str, work: Path, prompt: Path, session: str) -> dict:
     env = {**os.environ, "AGENT_BROWSER_SESSION": session}
     if worker == "freebuff":
@@ -46,7 +60,7 @@ def call(worker: str, work: Path, prompt: Path, session: str) -> dict:
             return {"status": "FAILED", "error": f"no shell guard at {NO_SHELL}"}
         env["CODEBUFF_GIT_BASH_PATH"] = str(NO_SHELL)
     try:
-        done = subprocess.run([sys.executable, "-m", "all_tomorrow.local_workers", "--config", str(REPO / "config" / "workers.local.json"),
+        done = subprocess.run([sys.executable, "-m", "all_tomorrow.local_workers", "--config", str(research_config()),
                                "run", worker, "--cwd", str(work), "--task-file", str(prompt)],
                               capture_output=True, encoding="utf-8", errors="replace", cwd=REPO, stdin=subprocess.DEVNULL,
                               timeout=2000, env=env)
