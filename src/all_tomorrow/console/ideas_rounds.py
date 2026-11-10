@@ -330,7 +330,7 @@ def open_extra(store: Any, idea_id: str, text: str) -> dict[str, Any]:
 
 def run_extra(store: Any, idea_id: str, n: int, worker: str, model: str) -> dict[str, Any]:
     """Queue what an 추가 조사 still needs for overseer.direct_research: its decomposition, or every task without a result."""
-    from all_tomorrow.overseer.direct_research import WORKERS, task_worker
+    from all_tomorrow.overseer.direct_research import WORKERS
     if worker not in WORKERS:
         raise ValueError("CLI는 " + ", ".join(WORKERS))
     idea = store.get(idea_id)
@@ -346,7 +346,7 @@ def run_extra(store: Any, idea_id: str, n: int, worker: str, model: str) -> dict
     with store.db() as db:
         for task in tasks:
             db.execute("INSERT INTO extra_jobs (idea_id, n, task, worker, model, status, created_at) VALUES (?,?,?,?,?,'WAIT',?)",
-                       (idea_id, n, task, task_worker(worker, task), model, now))
+                       (idea_id, n, task, worker, model, now))
     return {"n": n, "tasks": tasks}
 
 

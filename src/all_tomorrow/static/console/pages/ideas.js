@@ -35,7 +35,7 @@
     }
     watching = "";
   }
-  const jobName = j => j.worker === "freebuff" ? "freebuff" : `${j.worker} · ${j.model}`;
+  const jobName = j => `${j.worker} · ${j.model}`;
   // Unsaved text survives a failed save, a reload or leaving the page (per browser, best effort).
   const draftKey = id => "at-ideas-draft:" + id;
   const draft = {

@@ -4,7 +4,6 @@
 - 쪼개기가 끝나면 답을 계획에 잇고 과제마다 일을 넣는다. 과제가 끝나면 결과를 처음 조사와 같은 결과로 넣어, 압축·종합이 평소대로 잇는다.
 - 사용자가 누른 일이라 PC 사용 여부·하루 횟수·사용량 상한을 보지 않는다. research.paused가 있으면 새로 시작하지 않는다.
 - 작업자는 저장소가 아니라 일마다 만든 빈 폴더에서 돈다. 웹에서 읽은 글이 저장소를 고치게 두지 않는다.
-- Claude를 고르면 Claude는 쪼개기만 하고 과제는 무료 freebuff가 동시에 조사한다. freebuff가 실패한 과제는 고른 Claude 모델로 한 번 다시 돈다.
 """
 from __future__ import annotations
 
@@ -32,14 +31,6 @@ WORKERS = {"claude": "Claude", "codex": "Codex", "antigravity": "Antigravity", "
 CLAUDE_MODELS = [("claude-sonnet-5-5", "Sonnet 5.5"), ("claude-opus-5-5", "Opus 5.5"),
                  ("claude-haiku-5-5", "Haiku 5.5"), ("claude-fable-5-1", "Fable 5.1")]
 _models: dict[str, Any] = {"at": 0.0, "list": []}
-FREEBUFF_NOTE = ("\n\nSearch the web and read the pages to answer. List the source URLs you used inside the result block. "
-                 "Answer in Korean.")
-TASK_WORKER = {"claude": "freebuff"}   # 쪼갠 과제를 대신 맡는 작업자. model 칸에는 고른 모델을 남겨 실패할 때 쓴다
-
-
-def task_worker(worker: str, task: str) -> str:
-    """이 일을 실제로 돌릴 작업자. 쪼개기("")는 고른 작업자, 과제는 TASK_WORKER가 있으면 그쪽."""
-    return TASK_WORKER.get(worker, worker) if task else worker
 
 
 def _cli_lines(worker: str, *args: str) -> list[str]:
@@ -86,8 +77,6 @@ def launch(worker: str, model: str, pages: Path) -> tuple[dict[str, Any], list[s
     if worker == "codex":
         return ({"model": model, "skip_git_repo_check": True},
                 ["-c", 'web_search="live"', *chrome_pages.codex_args(pages), *chrome_pages.research_mcp_args()], chrome_pages.PROMPT_NOTE)
-    if worker == "freebuff":
-        return {}, [], FREEBUFF_NOTE   # 모델을 고를 수 없다. 웹 검색은 켤 옵션이 없고 영어로 시키면 출처까지 붙인다
     if worker == "antigravity":
         return {"model": model, "effort": ""}, [], ""   # 모델 이름에 추론 단계가 들어 있어 --effort를 주면 충돌한다
     return {"model": model, "auto": True}, [], ""
@@ -128,21 +117,11 @@ def _file(store: Any, job: dict[str, Any], output: str) -> None:
         with store.db() as db:
             for sid in tasks:
                 db.execute("""INSERT INTO extra_jobs (idea_id, n, task, worker, model, status, created_at) VALUES (?,?,?,?,?,'WAIT',?)""",
-                           (job["idea_id"], job["n"], sid, task_worker(job["worker"], sid), job["model"], job["created_at"]))
+                           (job["idea_id"], job["n"], sid, job["worker"], job["model"], job["created_at"]))
         return
     store.add_slots(job["idea_id"], [output if BLOCK.search(normalize(output)) else _framed(job, output)])
     if not any(r["subtask_id"] == job["task"] for r in store.get(job["idea_id"])["results"]):
         raise ValueError(f"답의 결과 블록이 {job['task']} 것이 아니다")
-
-
-def _fail(store: Any, job: dict[str, Any], error: str, done: float) -> None:
-    """freebuff가 맡은 과제는 고른 Claude 모델로 다시 기다리게 하고, 나머지는 실패로 남긴다."""
-    if job["worker"] in TASK_WORKER.values() and job["model"]:
-        back = next(w for w, t in TASK_WORKER.items() if t == job["worker"])
-        _update(store, job, worker=back, status="WAIT", error=f"{job['worker']} 실패, {back}로 다시: {error}"[:300], run_id="")
-        log.info("바로 조사 %s %s: %s 실패, %s로 다시", job["idea_id"], job["task"], job["worker"], back)
-        return
-    _update(store, job, status="FAILED", error=error[:300], finished=done)
 
 
 def _finish(store: Any, folder: Path, job: dict[str, Any], info: dict[str, Any]) -> None:
@@ -152,12 +131,12 @@ def _finish(store: Any, folder: Path, job: dict[str, Any], info: dict[str, Any])
     done = time.time()
     if not output.strip() or output.lstrip().startswith("[수집 실패]"):
         error = output.strip()[:300] or result.get("error") or info.get("stderr_tail") or info.get("status")
-        _fail(store, job, str(error), done)
+        _update(store, job, status="FAILED", error=str(error)[:300], finished=done)
         return
     try:
         _file(store, job, output)
     except ValueError as error:
-        _fail(store, job, str(error), done)
+        _update(store, job, status="FAILED", error=str(error)[:300], finished=done)
         return
     _update(store, job, status="DONE", finished=done)
     idle_research._file_pages(folder, {"id": f"DR-{job['id']}", "idea_id": job["idea_id"]})
@@ -169,7 +148,7 @@ def _start(store: Any, folder: Path, job: dict[str, Any], start: Callable[..., d
     if not prompt:
         _update(store, job, status="FAILED", error="과제의 하위 프롬프트를 찾지 못했다", finished=time.time())
         return
-    work = folder / "direct-work" / f"DR-{job['id']}"   # freebuff는 채팅 기록을 폴더 이름으로 나눈다. 다른 곳과 겹치지 않게
+    work = folder / "direct-work" / str(job["id"])
     work.mkdir(parents=True, exist_ok=True)
     options, suffix, note = launch(job["worker"], job["model"], folder / idle_research.PAGES / f"DR-{job['id']}")
     try:
