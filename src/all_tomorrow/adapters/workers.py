@@ -639,7 +639,11 @@ class AntigravityWorker:
                 if payload.get("status") == "SUCCESS" and (
                     not isinstance(payload.get("response"), str) or not payload["response"].strip()
                 ):
-                    raise ValueError("Antigravity completed without a response")
+                    # 헤드리스 agy는 권한을 물을 수 없어 허용 안 된 도구를 자동 거부하고 빈 답으로 끝난다
+                    denied = ", ".join(sorted({str(a.get("display_name") or a.get("action")) for a in payload.get("denied_actions") or []
+                                               if isinstance(a, dict)}))
+                    raise ValueError("Antigravity completed without a response"
+                                     + (f" (headless mode auto-denied: {denied})" if denied else ""))
             except (json.JSONDecodeError, ValueError) as e:
                 return WorkerResult(
                     request_id=request.request_id,
