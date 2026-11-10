@@ -105,7 +105,8 @@ def test_answer_without_block_lines_keeps_its_status(env) -> None:
     tick()
     [r] = store.get(iid)["results"]
     assert (r["subtask_id"], r["status"], r["body"]) == ("S1", "완료", "## 결론\n된다")
-    assert ideas_rounds.extras(store, store.get(iid))[0]["tasks"][1]["job"]["status"] == "FAILED"
+    job = ideas_rounds.extras(store, store.get(iid))[0]["tasks"][1]["job"]
+    assert (job["worker"], job["status"]) == ("claude", "RUNNING") and "수집 실패" in job["error"]   # freebuff's failure goes back to Claude
 
 
 def test_failed_task_shows_why_and_runs_again_with_another_model(env) -> None:
@@ -121,9 +122,32 @@ def test_failed_task_shows_why_and_runs_again_with_another_model(env) -> None:
     assert x["state"] == "결과 대기" and x["tasks"][1]["job"]["error"] == "한도"
     assert ideas_rounds.run_extra(store, iid, 1, "claude", "claude-haiku-5-5")["tasks"] == ["S2"]   # S1 has its result
     tick()
+    assert fake.started[-1]["worker"] == "freebuff" and fake.started[-1]["options"] == {"timeout_seconds": fake.started[-1]["options"]["timeout_seconds"]}
+    fake.status[fake.started[-1]["id"]] = {"status": "FAILED", "result": {"error": "not logged in"}}
+    tick()   # freebuff failed: the chosen Claude model runs it instead
     assert fake.started[-1]["worker"] == "claude" and "claude-haiku-5-5" in fake.started[-1]["suffix"]
+    assert "freebuff 실패" in ideas_rounds.extras(store, store.get(iid))[0]["tasks"][1]["job"]["error"]
     with pytest.raises(ValueError, match="돌릴 과제가 없다"):
         ideas_rounds.run_extra(store, iid, 1, "claude", "claude-haiku-5-5")
+
+
+def test_claude_splits_and_freebuff_researches_tasks_in_parallel(env) -> None:
+    store, iid, fake, tick, _ = env
+    ideas_rounds.run_new(store, iid, "일본", "claude", "claude-sonnet-5-5")
+    tick()
+    assert fake.started[0]["worker"] == "claude"          # Claude splits
+    fake.answer(0, SPLIT)
+    tick()
+    assert [s["worker"] for s in fake.started[1:]] == ["freebuff", "freebuff"]   # tasks run together on freebuff
+    assert all(s["cwd"].parent.name == "direct-work" for s in fake.started[1:])
+    fake.answer(1, BLOCK.format(iid=iid, sid="S1", body="일본도 된다"), "response")
+    fake.answer(2, "")   # empty answer: back to Claude, not a failure
+    tick()
+    assert [r["subtask_id"] for r in store.get(iid)["results"]] == ["S1"]
+    assert fake.started[-1]["worker"] == "claude" and "claude-sonnet-5-5" in fake.started[-1]["suffix"]
+    fake.status[fake.started[-1]["id"]] = {"status": "FAILED", "result": {"error": "한도"}}
+    tick()   # Claude failing too is final
+    assert ideas_rounds.extras(store, store.get(iid))[0]["tasks"][1]["job"]["status"] == "FAILED"
 
 
 def test_split_without_tasks_fails_and_files_nothing(env) -> None:
