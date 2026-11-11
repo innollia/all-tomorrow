@@ -24,5 +24,14 @@
     "model": "claude-opus-5-5",
     "effort": "medium",
     "channel_id": "1565343757333958757"
+  },
+  "beat-games": {
+    "cwd": "C:\\projects\\beat-games",
+    "procedure": "C:\\projects\\beat-games\\CLAUDE.md",
+    "mode": "worker",
+    "executor": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "medium",
+    "channel_id": "1570009884391505991"
   }
 }
