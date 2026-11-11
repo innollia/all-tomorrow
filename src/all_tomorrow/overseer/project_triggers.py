@@ -90,7 +90,8 @@ class ProjectTriggers:
             argv=["claude", *(["--model", d["model"]] if d.get("model") else []),
                   *(["--effort", d["effort"]] if d.get("effort") else [])],
             allowed_roots=(d["cwd"],), timeout_seconds=1800,
-            on_event_line=DiscordProgress(d["channel_id"]).feed))
+            # Only self-contained worker projects narrate progress into their thread.
+            on_event_line=DiscordProgress(d["channel_id"]).feed if d.get("mode") == "worker" else None))
         self.clock = clock
         self.lock = asyncio.Lock()
         self.tasks = {}

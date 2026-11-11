@@ -223,7 +223,9 @@ async def test_claude_stream_worker_returns_result_and_feeds_lines(tmp_path):
 
 def test_project_trigger_factory_streams_and_plain_worker_does_not(tmp_path):
     registry, definition = setup(tmp_path)
-    worker = ProjectTriggers(InMemoryGoalWorkRunStore(), registry_path=registry, base=tmp_path).worker_factory(definition)
+    triggers = ProjectTriggers(InMemoryGoalWorkRunStore(), registry_path=registry, base=tmp_path)
+    assert "stream-json" not in triggers.worker_factory(definition).build_argv("-")   # manager mode never posts
+    worker = triggers.worker_factory({**definition, "mode": "worker"})
     assert "stream-json" in worker.build_argv("-")
     assert "stream-json" not in ClaudeWorker(allowed_roots=(str(tmp_path),)).build_argv("-")
     with pytest.raises(ValueError):
