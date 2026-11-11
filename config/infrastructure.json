@@ -483,6 +483,39 @@
       }
     },
     {
+      "id": "olmuse-asset-api",
+      "name": "olmuse 에셋 생성 API",
+      "host_id": "dp7",
+      "description": "https://olmuse.app/api/asset/*. run_public.ps1 -ApiOnly가 API(8502)만 띄운다. cloudflared olmuse.yml 맨 앞 규칙 ^/api/asset/ -> 8502. health는 200이어도 본문 ok로 판정. 차감된 작업이 돌 수 있어 반복 재시작은 MAX_STARTS로 멈춘다.",
+      "project": "olmuse",
+      "execution": "startup",
+      "ports": [
+        8502
+      ],
+      "scope": "public",
+      "health": {
+        "kind": "http",
+        "target": "http://127.0.0.1:8502/api/asset/health",
+        "json_ok": true
+      },
+      "placement": "must_local",
+      "placement_reason": "DP7의 작업 폴더와 키 풀을 쓰기 때문에",
+      "autostart": "logon",
+      "start": {
+        "kind": "command",
+        "command": [
+          "powershell.exe",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "C:\\projects\\rainbowloadsilsep\\run_public.ps1",
+          "-ApiOnly"
+        ],
+        "cwd": "C:\\projects\\rainbowloadsilsep"
+      }
+    },
+    {
       "id": "tailscale",
       "name": "Tailscale",
       "host_id": "dp7",

@@ -71,13 +71,23 @@ def observe(service) -> tuple[str, str]:
     if health.kind == "http":
         try:
             with httpx.Client(timeout=3, trust_env=False, follow_redirects=False) as client:
-                code = client.get(health.target).status_code
+                response = client.get(health.target)
+                code = response.status_code
         except httpx.TimeoutException:
             # 늦은 응답은 죽은 것이 아니다(11/4 0시 페이징 중 멀쩡한 8765를 다시 켜려 했다). 계속되면 anomaly_watch가 본다.
             return "unknown", "HTTP 응답 지연"
         except httpx.HTTPError:
             return "failed", "HTTP 응답 없음"
-        return ("ok", f"HTTP {code}") if 200 <= code < 300 else ("failed", f"HTTP {code}")
+        if not 200 <= code < 300:
+            return "failed", f"HTTP {code}"
+        if getattr(health, "json_ok", False):
+            try:
+                body_ok = response.json().get("ok") is True
+            except (ValueError, AttributeError):
+                body_ok = False
+            if not body_ok:
+                return "failed", f"HTTP {code}, ok가 true 아님"
+        return "ok", f"HTTP {code}"
     if health.kind == "tcp":
         try:
             with socket.create_connection((health.target, service.ports[0]), 1.5):

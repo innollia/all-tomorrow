@@ -18,7 +18,7 @@ def registry():
 
 def test_registry_initial_inventory():
     r = registry()
-    assert len(r.hosts) == 4 and len(r.services) == 24
+    assert len(r.hosts) == 4 and len(r.services) == 26
     # Both former movable candidates were moved to AWS on 2026-10-24.
     assert {s.id for s in r.services if s.placement == 'aws'} >= {'litellm', 'study-post'}
 
@@ -93,11 +93,11 @@ async def test_cache_coalesces_and_expires(monkeypatch):
     monkeypatch.setattr(servers, 'probe', fake_probe)
     d = servers.Dashboard(registry())
     a,b = await asyncio.gather(d.get(),d.get())
-    assert a is b and count == 24
+    assert a is b and count == 26
     assert all(h['status'] == 'unknown' for h in a['hosts'])
     now[0] = 131
     await d.get()
-    assert count == 48
+    assert count == 52
 
 
 def test_route_protected_and_shell_mount(tmp_path, monkeypatch):

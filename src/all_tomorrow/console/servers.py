@@ -36,6 +36,8 @@ class Health(Record):
     # tailscale: `tailscale status` BackendState == Running. docker: the engine answers `docker info`.
     kind: Literal['http', 'tcp', 'windows_task', 'process', 'tailscale', 'docker', 'none']
     target: str | None = None
+    # http only: 200이어도 본문 JSON의 "ok"가 true여야 산 것으로 본다.
+    json_ok: bool = False
 
     @model_validator(mode='after')
     def validate_target(self):
