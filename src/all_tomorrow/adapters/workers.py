@@ -78,8 +78,21 @@ def _attach_windows_job(proc) -> None:
         raise OSError("Windows 작업 프로세스 격리 실패") from error
 
 
-async def _read_bounded(proc: asyncio.subprocess.Process, limit: int, diagnostics=None) -> tuple[bytes, bytes]:
+async def _read_bounded(proc: asyncio.subprocess.Process, limit: int, diagnostics=None,
+                        on_stdout_line=None) -> tuple[bytes, bytes]:
     size = 0
+    pending = b""
+
+    def lines(chunk: bytes) -> None:
+        # Complete stdout lines go to the observer as they arrive; it must never break the run.
+        nonlocal pending
+        pending += chunk
+        *done, pending = pending.split(b"\n")
+        for line in done:
+            try:
+                on_stdout_line(line.decode("utf-8", errors="replace"))
+            except Exception:
+                pass
 
     async def read(stream: asyncio.StreamReader) -> bytes:
         nonlocal size
@@ -91,6 +104,10 @@ async def _read_bounded(proc: asyncio.subprocess.Process, limit: int, diagnostic
             if size > limit:
                 raise OutputLimitError(f"Output exceeds {limit} bytes")
             chunks.append(chunk)
+            if on_stdout_line is not None and stream is proc.stdout:
+                lines(chunk)
+        if on_stdout_line is not None and stream is proc.stdout and pending:
+            lines(b"\n")
         return b"".join(chunks)
 
     tasks = [asyncio.create_task(read(proc.stdout)), asyncio.create_task(read(proc.stderr)),
@@ -233,6 +250,7 @@ async def _run_process_safe(
     worker_name: str,
     start_time: float,
     stdin_data: bytes | None = None,
+    on_stdout_line=None,
 ) -> tuple[str, int] | WorkerResult:
     """
     Execute a subprocess with timeout, combined output limit, process reap, and error redaction.
@@ -284,7 +302,7 @@ async def _run_process_safe(
                 pass
 
         _, (stdout, stderr) = await asyncio.wait_for(
-            asyncio.gather(feed(), _read_bounded(proc, output_limit_bytes, diagnostics)),
+            asyncio.gather(feed(), _read_bounded(proc, output_limit_bytes, diagnostics, on_stdout_line)),
             timeout=timeout_seconds,
         )
     except asyncio.TimeoutError:
@@ -459,7 +477,8 @@ class CodexWorker:
             cmd=self.build_argv("-" if on_stdin else prompt), cwd=cwd, env=self._env,
             timeout_seconds=self._timeout_seconds, output_limit_bytes=self._output_limit_bytes,
             request=request, worker_name=self.worker_id, start_time=start,
-            stdin_data=prompt.encode("utf-8") if on_stdin else None)
+            stdin_data=prompt.encode("utf-8") if on_stdin else None,
+            on_stdout_line=getattr(self, "_on_event_line", None))
         if isinstance(result, WorkerResult):
             return result
         output, duration = result
@@ -475,22 +494,38 @@ class CodexWorker:
                             payload=payload, duration_ms=duration)
 
 
+def _is_result_event(line: str) -> bool:
+    try:
+        event = json.loads(line)
+    except ValueError:
+        return False
+    return isinstance(event, dict) and event.get("type") == "result"
+
+
 class ClaudeWorker(CodexWorker):
     """Headless Claude Code with the user's settings, MCP servers and all tools; only CLAUDE_DENY is blocked."""
 
-    def __init__(self, *, argv: list[str] | None = None, **kwargs: Any) -> None:
+    def __init__(self, *, argv: list[str] | None = None, on_event_line=None, **kwargs: Any) -> None:
         super().__init__(argv=argv or ["claude"], **kwargs)
+        # With an observer the CLI streams events (stream-json); the final `result` event is parsed as before.
+        self._on_event_line = on_event_line
 
     @property
     def worker_id(self) -> str:
         return "claude"
 
     def build_argv(self, prompt: str) -> list[str]:
-        cmd = [*self._argv, "-p", "--output-format", "json", "--permission-mode", "bypassPermissions",
+        output = ["stream-json", "--verbose"] if self._on_event_line else ["json"]
+        cmd = [*self._argv, "-p", "--output-format", *output, "--permission-mode", "bypassPermissions",
                "--disallowedTools", ",".join(CLAUDE_DENY)]
         return cmd if prompt == "-" else [*cmd, "--", prompt]
 
     def parse_output(self, output: str) -> dict[str, Any]:
+        if self._on_event_line:
+            results = [line for line in output.splitlines() if '"result"' in line and _is_result_event(line)]
+            if not results:
+                raise ValueError("Claude stream has no result event")
+            output = results[-1]
         result = json.loads(output)
         if result.get("type") != "result" or result.get("is_error") \
                 or result.get("subtype") != "success" or result.get("permission_denials"):

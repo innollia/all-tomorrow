@@ -22,6 +22,7 @@ from all_tomorrow.executor import ExecutorLoop
 from all_tomorrow.registry import WorkerService
 from all_tomorrow.storage.semantic_store import SemanticEvent
 from all_tomorrow.overseer import reports
+from all_tomorrow.overseer.discord_progress import DiscordProgress
 from all_tomorrow.overseer.store import default_dir
 
 
@@ -88,7 +89,8 @@ class ProjectTriggers:
         self.worker_factory = worker_factory or (lambda d: ClaudeWorker(
             argv=["claude", *(["--model", d["model"]] if d.get("model") else []),
                   *(["--effort", d["effort"]] if d.get("effort") else [])],
-            allowed_roots=(d["cwd"],), timeout_seconds=1800))
+            allowed_roots=(d["cwd"],), timeout_seconds=1800,
+            on_event_line=DiscordProgress(d["channel_id"]).feed))
         self.clock = clock
         self.lock = asyncio.Lock()
         self.tasks = {}

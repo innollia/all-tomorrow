@@ -169,3 +169,62 @@ def test_worker_mode_prompt_uses_project_instructions(tmp_path):
             return {"project": "pai-games", "message_id": "9"}
     text = prompt_for("pai-games", {"procedure": str(proc), "mode": "worker", "channel_id": "1"}, [Call()])
     assert "게임 지침" in text and "discord_thread.py" not in text
+
+
+def _stream(*events):
+    return "\n".join(json.dumps(e, ensure_ascii=False) for e in events) + "\n"
+
+
+def _assistant(*blocks):
+    return {"type": "assistant", "message": {"content": list(blocks)}}
+
+
+FAKE_STREAM = [
+    {"type": "system", "subtype": "init"},
+    _assistant({"type": "thinking", "thinking": "hidden"}),
+    _assistant({"type": "text", "text": "Eve 설정을 찾았어요."}),
+    _assistant({"type": "tool_use", "name": "Bash", "input": {}}),
+    {"type": "user", "message": {"content": [{"type": "tool_result", "content": "ok"}]}},
+    _assistant({"type": "text", "text": "   "}, {"type": "tool_use", "name": "Read", "input": {}}),
+    _assistant({"type": "text", "text": "너무 빠른 두 번째"}, {"type": "tool_use", "name": "Edit", "input": {}}),
+    _assistant({"type": "text", "text": "x" * 3000}, {"type": "tool_use", "name": "Edit", "input": {}}),
+    _assistant({"type": "text", "text": "최종 답장"}),
+    {"type": "result", "subtype": "success", "result": "최종 답장", "session_id": "s1"},
+]
+
+
+def test_discord_progress_posts_narration_but_not_final_and_throttles():
+    from all_tomorrow.overseer.discord_progress import DiscordProgress
+    posts, now = [], [0.0]
+    progress = DiscordProgress("123", post=lambda c, t: posts.append((c, t)), clock=lambda: now[0])
+    for i, event in enumerate(FAKE_STREAM):
+        now[0] = {7: 10.0}.get(i, now[0] + (0.5 if i == 6 else 0))
+        progress.feed(json.dumps(event, ensure_ascii=False))
+    progress.feed("not json")
+    assert posts == [("123", "Eve 설정을 찾았어요."), ("123", "x" * 1900)]
+
+
+async def test_claude_stream_worker_returns_result_and_feeds_lines(tmp_path):
+    import sys
+    from all_tomorrow.contracts import WorkerRequest
+    script = tmp_path / "fake_claude.py"
+    script.write_text("import sys\nsys.stdin.read()\nsys.stdout.buffer.write(" + repr(_stream(*FAKE_STREAM).encode()) + ")\n",
+                      encoding="utf-8")
+    lines = []
+    worker = ClaudeWorker(argv=[sys.executable, str(script)], allowed_roots=(str(tmp_path),),
+                          on_event_line=lines.append)
+    argv = worker.build_argv("-")
+    assert argv[argv.index("--output-format") + 1:argv.index("--output-format") + 3] == ["stream-json", "--verbose"]
+    result = await worker.execute(WorkerRequest(request_id="r", trace_id="t", project_id=None, capabilities=frozenset(),
+                                                payload={"cwd": str(tmp_path), "prompt": "hi"}))
+    assert result.status == WorkerStatus.SUCCESS and result.payload["output"] == "최종 답장"
+    assert len(lines) == len(FAKE_STREAM) and json.loads(lines[-1])["type"] == "result"
+
+
+def test_project_trigger_factory_streams_and_plain_worker_does_not(tmp_path):
+    registry, definition = setup(tmp_path)
+    worker = ProjectTriggers(InMemoryGoalWorkRunStore(), registry_path=registry, base=tmp_path).worker_factory(definition)
+    assert "stream-json" in worker.build_argv("-")
+    assert "stream-json" not in ClaudeWorker(allowed_roots=(str(tmp_path),)).build_argv("-")
+    with pytest.raises(ValueError):
+        worker.parse_output(_stream({"type": "assistant", "message": {"content": []}}))
