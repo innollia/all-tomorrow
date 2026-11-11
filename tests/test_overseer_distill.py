@@ -104,6 +104,23 @@ def test_quota_errors_close_the_gateway_for_the_day_and_use_the_cli(tmp_path) ->
     assert len(calls) == len(distill.MODEL_GROUPS)
 
 
+def test_empty_replies_cool_the_group_down(tmp_path) -> None:
+    calls = []
+    first = distill.MODEL_GROUPS[0]
+
+    def chat(group, system, user):
+        calls.append(group)
+        if group == first:
+            raise distill.LLMError("empty reply from dep")
+        return [{"problem": "p"}], "dep"
+
+    assert distill._call(chat, "x", distill.Budget(tmp_path / "b.json"), None)[1] == f"{distill.MODEL_GROUPS[1]}:dep"
+    again = distill.Budget(tmp_path / "b.json")
+    assert again.cooling(first)
+    distill._call(chat, "x", again, None)
+    assert calls.count(first) == 1
+
+
 def test_daily_cap_stops_gateway_calls(tmp_path) -> None:
     budget = distill.Budget(tmp_path / "b.json", daily=1)
     ok = lambda g, s, u: ([{"problem": "p"}], "dep")

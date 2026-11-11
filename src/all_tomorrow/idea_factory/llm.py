@@ -56,6 +56,8 @@ def chat_json(model_group: str, system: str, user: str, **kwargs: Any) -> tuple[
     last: Exception | None = None
     for _ in range(2):
         content, served = chat(model_group, system + "\n\n반드시 JSON만 출력한다. 설명 문장은 쓰지 않는다.", user, **kwargs)
+        if not content.strip():  # reasoning-only reply: the deployment is broken, retrying wastes a call
+            raise LLMError(f"empty reply from {served}")
         try:
             return parse_json(content), served
         except LLMError as error:

@@ -31,6 +31,7 @@ MODEL_GROUPS = ("g-nemotron-ultra", "g-gpt-oss-120b", "g-gemma")
 PROMPT_VERSION = "1"
 # 2026-11-03: a 400-session backlog run spent the paid groq credit and every free per-day quota in one go,
 # so the gateway gets a daily call cap and quota errors switch the rest of the day to the subscription CLI.
+EMPTY_COOLDOWN_SECONDS = 3600  # a group answering with empty content is skipped this long
 GATEWAY_DAILY_CALLS = int(os.environ.get("ALL_TOMORROW_DISTILL_GATEWAY_DAILY", "300"))
 CLI_MAX_PERCENT = float(os.environ.get("ALL_TOMORROW_DISTILL_CLI_MAX_PERCENT", "70"))
 CLI_MODEL = os.environ.get("ALL_TOMORROW_DISTILL_CLI_MODEL", "haiku")
@@ -138,16 +139,24 @@ class Budget:
         same = state.get("day") == self.day
         self.calls = int(state.get("calls", 0)) if same else 0
         self.spent = bool(state.get("spent")) if same else False
+        self.cooldown = {g: float(t) for g, t in state.get("cooldown", {}).items() if float(t) > time.time()}
 
     def gateway_open(self) -> bool:
         return not self.spent and self.calls < self.daily
+
+    def cooling(self, group: str) -> bool:
+        return self.cooldown.get(group, 0) > time.time()
+
+    def cool(self, group: str, seconds: float = EMPTY_COOLDOWN_SECONDS) -> None:
+        self.cooldown[group] = time.time() + seconds
+        self.note()
 
     def note(self, *, call: bool = False, spent: bool = False) -> None:
         self.calls += call
         self.spent = self.spent or spent
         if self.path:
-            self.path.write_text(json.dumps({"day": self.day, "calls": self.calls, "spent": self.spent}),
-                                 encoding="utf-8")
+            self.path.write_text(json.dumps({"day": self.day, "calls": self.calls, "spent": self.spent,
+                                             "cooldown": self.cooldown}), encoding="utf-8")
 
 
 def _cards(data) -> list:
@@ -188,6 +197,8 @@ def _call(chat: Chat, user: str, budget: Budget | None = None,
     budget = budget or Budget(None)
     quota_hits = 0
     for group in MODEL_GROUPS if budget.gateway_open() else ():
+        if budget.cooling(group):
+            continue
         try:
             budget.note(call=True)
             data, served = chat(group, SYSTEM, user)
@@ -195,6 +206,9 @@ def _call(chat: Chat, user: str, budget: Budget | None = None,
         except LLMError as error:
             last = error
             log.warning("distill via %s failed: %s", group, str(error)[:200])
+            if "empty reply" in str(error):
+                budget.cool(group)
+                continue
             if not any(m in str(error).lower() for m in QUOTA_MARKS):
                 continue
             quota_hits += 1
