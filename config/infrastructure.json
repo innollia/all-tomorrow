@@ -92,7 +92,7 @@
       },
       "placement": "must_local",
       "placement_reason": "?? Codex/Claude CLI????",
-      "autostart": "boot",
+      "autostart": "logon",
       "start": {
         "kind": "task",
         "task": "AllTomorrow-DP7-executor"
@@ -113,7 +113,7 @@
       },
       "placement": "must_local",
       "placement_reason": "?? ???CLI",
-      "autostart": "boot",
+      "autostart": "logon",
       "start": {
         "kind": "task",
         "task": "AllTomorrow-DP7-overseer"

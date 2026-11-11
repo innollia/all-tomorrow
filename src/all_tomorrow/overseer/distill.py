@@ -95,6 +95,10 @@ class SecretLeak(RuntimeError):
     pass
 
 
+# cli_chat이 남긴 정리 세션 자체는 정리하지 않는다(옛 기록이 남아 있다).
+SELF_SESSION_LIKE = "[U] " + SYSTEM.splitlines()[0] + "%"
+
+
 def ensure_schema(con) -> None:
     con.executescript(_SCHEMA)
 
@@ -166,8 +170,10 @@ def cli_chat(system: str, user: str, timeout: float = 600) -> tuple[list, str]:
         raise LLMError("claude cli not found")
     prompt = system + "\n\n반드시 JSON만 출력한다. 설명 문장은 쓰지 않는다.\n\n" + user
     try:
-        done = subprocess.run([exe, "-p", "--model", CLI_MODEL, "--output-format", "text"], input=prompt,
-                              capture_output=True, text=True, encoding="utf-8", timeout=timeout,
+        # 2026-11-04: 도구도 기록도 쓰지 않는다. 호출마다 MCP 묶음(~1GB)이 떴고, 남은 기록이 다시 정리 대상이 됐다.
+        done = subprocess.run([exe, "-p", "--model", CLI_MODEL, "--output-format", "text", "--tools", "",
+                               "--strict-mcp-config", "--no-session-persistence", "--disable-slash-commands"],
+                              input=prompt, capture_output=True, text=True, encoding="utf-8", timeout=timeout,
                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except (OSError, subprocess.SubprocessError) as error:
         raise LLMError(f"claude cli: {type(error).__name__}") from error
@@ -229,9 +235,10 @@ def pending_sessions(con, limit: int, quiet_minutes: int = 30) -> list[tuple[str
         "and s.source in ('claude', 'codex') "  # 사용자 결정 2026-11-04: Antigravity는 봇 세션뿐, Kiro는 시행착오가 적다
         "and s.n_user >= 1 and length(s.text) >= 1500 "
         "and coalesce(s.title, '') not like 'You are a memory%' "
+        "and s.text not like ? "
         "and coalesce(s.updated_at, '') < strftime('%Y-%m-%dT%H:%M:%S', 'now', ?) "
         "order by s.updated_at desc limit ?",
-        (f"-{quiet_minutes} minutes", limit)).fetchall()
+        (SELF_SESSION_LIKE, f"-{quiet_minutes} minutes", limit)).fetchall()
 
 
 def distill_session(con, source: str, session_id: str, *, redact: Redactor, secrets: frozenset[str],

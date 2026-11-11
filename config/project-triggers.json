@@ -31,7 +31,7 @@
     "mode": "worker",
     "executor": "claude",
     "model": "claude-opus-5-5",
-    "effort": "medium",
+    "effort": "high",
     "channel_id": "1570009884391505991"
   }
 }

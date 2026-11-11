@@ -1,4 +1,5 @@
 import json
+import subprocess
 
 import pytest
 
@@ -108,3 +109,23 @@ def test_daily_cap_stops_gateway_calls(tmp_path) -> None:
     ok = lambda g, s, u: ([{"problem": "p"}], "dep")
     assert distill._call(ok, "x", budget, None)[1].endswith(":dep")
     assert not budget.gateway_open()
+
+
+def test_own_cli_sessions_are_never_pending(tmp_path) -> None:
+    store = _store(tmp_path, "[U] " + distill.SYSTEM + "\n" + "[A] 로그 " * 400)
+    store.con.execute("update sessions set updated_at = '2026-01-01T00:00:00', n_user = 1")
+    assert distill.pending_sessions(store.con, 10) == []
+
+
+def test_cli_chat_runs_without_tools_or_transcript(monkeypatch) -> None:
+    seen = {}
+
+    def run(cmd, **_):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, '{"cards": []}', "")
+
+    monkeypatch.setattr(distill.subprocess, "run", run)
+    monkeypatch.setattr(distill.shutil, "which", lambda _: "claude")
+    monkeypatch.setattr("all_tomorrow.overseer.idle_research.quota_ok", lambda *_: (True, ""))
+    assert distill.cli_chat("s", "u")[0] == []
+    assert {"--strict-mcp-config", "--no-session-persistence"} <= set(seen["cmd"])
