@@ -35,6 +35,7 @@
 | Lambda `bmc-webhook` + DynamoDB `bmc-webhook` | 봉봉봉 상점 입금 웹후크 | 유지 |
 | 로그 그룹 `/aws/lambda/bmc-webhook` | 위 Lambda 로그 | 보존 기간 없음 → 90일로 설정 |
 | S3 `all-tomorrow-backups-761558630442` (버저닝, 약 4.8MB) | Postgres 일일 덤프, `deploy/snowday.tgz` | 수명 규칙 추가: 이전 버전 30일 후 삭제, 미완료 업로드 7일, `all_tomorrow-*.dump` 180일 후 만료 |
+| Lambda `megajam-patch-proxy` (python3.12, 128MB, Function URL 인증 없음·CORS *, 역할 `megajam-patch-proxy-role`) + S3 `megajam-code-761558630442`(코드 zip, 팀장이 고른 레퍼런스 `picks/`) | MegaJam 레퍼런스 찾기 페이지의 patch.gg 검색 중계와 고른 묶음 저장. 코드 `epic-ai-megajam/tools/patch_proxy/` | 잼 동안 유지, 잼 뒤 삭제 가능 |
 | ECR `all-tomorrow` (이미지 18개, 약 1.1GB, 수명 정책 없음) | node 컨테이너 이미지(`docs/deploy/aws-single-node.md`) | 유지. 태그 없는 항목은 다중 아키텍처 매니페스트의 일부일 수 있어 지우지 않았다(월 약 $0.1) |
 
 없음: 스냅샷·AMI·분리된 볼륨·미연결 EIP·NAT·로드밸런서·RDS·Lightsail·Secrets Manager·Route53·CloudFront·IAM 사용자(액세스 키 없음).
