@@ -222,3 +222,44 @@ def test_hourly_no_metacog_refreshes_brief(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_metacog_due", lambda *a: pytest.fail("metacog called"))
     assert cli.main(["--dir", str(tmp_path), "run", "--no-metacog"]) == 0
     assert called == [tmp_path]
+
+
+def test_kill_gateways_matches_only_gateway_trees(monkeypatch):
+    from all_tomorrow.overseer import __main__ as cli
+    procs = [
+        (11, r'"C:\py\python.exe" -m all_tomorrow.idea_factory gateway --litellm C:\x\gateway-venv\Scripts\litellm.exe'),
+        (12, r'"C:\Users\u\AppData\Local\all-tomorrow\gateway-venv\Scripts\litellm.exe" --config c.yaml --port 4000'),
+        (13, r'"C:\Users\u\AppData\Local\all-tomorrow\gateway-venv\Scripts\python.exe" -m litellm --port 4000'),
+        (14, r'bash -c "grep -n gateway-venv docs"'),
+        (15, r'"C:\py\python.exe" -m all_tomorrow.overseer run'),
+        (16, ""),
+    ]
+    killed = []
+    assert cli._kill_gateways(listing=lambda: procs, kill=killed.append) == [11, 12, 13]
+    assert killed == [11, 12, 13]
+    assert cli._kill_gateways(listing=lambda: (_ for _ in ()).throw(OSError()), kill=killed.append) == []
+
+
+def test_ensure_gateway_clears_old_and_kills_unhealthy_start(tmp_path, monkeypatch):
+    import subprocess
+    from all_tomorrow.overseer import __main__ as cli
+    litellm = tmp_path / "litellm.exe"
+    litellm.write_text("")
+    monkeypatch.setattr(cli, "GATEWAY_LITELLM_CANDIDATES", (litellm,))
+    monkeypatch.setattr(cli, "default_dir", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_gateway_alive", lambda: False)
+    events = []
+    monkeypatch.setattr(cli, "_kill_gateways", lambda: events.append("clear"))
+    monkeypatch.setattr(cli, "_kill_tree", lambda pid: events.append(("kill", pid)))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: events.append("start") or SimpleNamespace(pid=4242))
+    clock = iter(range(0, 10_000, 5))
+    monkeypatch.setattr(cli.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    assert cli._ensure_gateway() is False
+    assert events == ["clear", "start", ("kill", 4242), "clear"]
+
+    events.clear()
+    alive = iter([False, False, True])
+    monkeypatch.setattr(cli, "_gateway_alive", lambda: next(alive))
+    assert cli._ensure_gateway() is True
+    assert events == ["clear", "start"]

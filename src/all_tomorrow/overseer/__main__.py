@@ -56,6 +56,58 @@ DISTILL_BUDGET_SECONDS = 35 * 60   # leave room for the metacognition wake insid
 # The hourly task wakes metacognition at most this often: each wake spends Codex subscription usage (user, 2026-10-20).
 
 
+GATEWAY_START_SECONDS = 180
+
+
+def _list_processes() -> list[tuple[int, str]]:
+    """(pid, command line) of every process, from Windows CIM (no psutil in the runtimes)."""
+    import json
+    import subprocess
+    out = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+         "Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout.strip()
+    rows = json.loads(out) if out else []
+    rows = [rows] if isinstance(rows, dict) else rows
+    return [(int(r["ProcessId"]), r.get("CommandLine") or "") for r in rows]
+
+
+def _is_gateway_process(cmd: str) -> bool:
+    low = cmd.lower().replace("\\", "/")
+    # Executables run from the venv (litellm.exe and its python), or the idea_factory launcher itself;
+    # not shells that merely mention the folder name.
+    return "gateway-venv/scripts/" in low or "-m all_tomorrow.idea_factory gateway" in low
+
+
+def _kill_tree(pid: int) -> None:
+    import subprocess
+    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True,
+                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+def _kill_gateways(listing=None, kill=None) -> list[int]:
+    """Kill every idea_factory gateway / gateway-venv litellm process tree, hung or orphaned.
+
+    A hung gateway keeps port 4000 without answering the health check; a new one then cannot bind
+    and never exits, so without this each hourly run stacked another one (11-10~11-14: 10 sets, ~2.8GB).
+    Every match is killed by its own pid because orphans whose parent already exited are not reached by /T.
+    """
+    listing = listing or _list_processes
+    kill = kill or _kill_tree
+    try:
+        processes = listing()
+    except Exception:  # listing failure must not block the start; the timeout kill still bounds the leak
+        log.exception("could not list processes to clear old gateways")
+        return []
+    pids = [pid for pid, cmd in processes if pid != os.getpid() and _is_gateway_process(cmd)]
+    for pid in pids:
+        kill(pid)
+    if pids:
+        log.warning("killed %d stale gateway processes: %s", len(pids), pids)
+    return pids
+
+
 def _ensure_gateway() -> bool:
     """Start the local model gateway if it is down (it does not start on boot)."""
     import subprocess
@@ -65,18 +117,23 @@ def _ensure_gateway() -> bool:
     if litellm is None:
         log.warning("no gateway venv found; distillation skipped")
         return False
+    _kill_gateways()
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) \
         | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    logfile = open(default_dir() / "gateway.log", "ab")
-    subprocess.Popen([sys.executable.replace("pythonw.exe", "python.exe"), "-m", "all_tomorrow.idea_factory",
-                      "gateway", "--litellm", str(litellm)], cwd=str(Path(__file__).resolve().parents[3]),
-                     stdout=logfile, stderr=logfile, stdin=subprocess.DEVNULL, creationflags=flags)
-    for _ in range(36):
+    with open(default_dir() / "gateway.log", "ab") as logfile:
+        proc = subprocess.Popen([sys.executable.replace("pythonw.exe", "python.exe"), "-m",
+                                 "all_tomorrow.idea_factory", "gateway", "--litellm", str(litellm)],
+                                cwd=str(Path(__file__).resolve().parents[3]),
+                                stdout=logfile, stderr=logfile, stdin=subprocess.DEVNULL, creationflags=flags)
+    deadline = time.monotonic() + GATEWAY_START_SECONDS
+    while time.monotonic() < deadline:
         time.sleep(5)
         if _gateway_alive():
             log.info("started model gateway (%s)", litellm)
             return True
-    log.warning("model gateway did not come up; distillation skipped")
+    _kill_tree(proc.pid)
+    _kill_gateways()  # litellm children may have been re-parented away from proc's tree
+    log.warning("model gateway did not come up in %ds; killed it, distillation skipped", GATEWAY_START_SECONDS)
     return False
 
 
